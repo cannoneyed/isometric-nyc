@@ -61,8 +61,8 @@ def main():
     address=args.address,
     bin=footprint_data.get("bin") if footprint_data else None,
     footprint_geometry=footprint_data.get("the_geom") if footprint_data else None,
-    roof_height=float(footprint_data.get("heightroof", 0))
-    if footprint_data and "heightroof" in footprint_data
+    roof_height=float(footprint_data.get("height_roof", 0))
+    if footprint_data and "height_roof" in footprint_data
     else None,
     satellite_image_url=sat_url,
     street_view_image_url=sv_url,

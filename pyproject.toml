@@ -13,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 isometric-nyc = "isometric_nyc.main:main"
+isometric-inspect = "isometric_nyc.inspect_db:main"
 
 [tool.ruff]
 line-length = 88
