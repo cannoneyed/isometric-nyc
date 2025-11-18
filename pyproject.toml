@@ -4,7 +4,12 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "googlemaps>=4.10.0",
+    "pydantic>=2.12.4",
+    "python-dotenv>=1.2.1",
+    "sodapy>=2.2.0",
+]
 
 [project.scripts]
 isometric-nyc = "isometric_nyc.main:main"
@@ -24,3 +29,7 @@ ignore = []
 dev = [
     "ruff>=0.14.5",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

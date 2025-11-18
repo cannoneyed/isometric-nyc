@@ -1,2 +1,7 @@
 .venv
 .ruff_cache
+
+# Secrets
+.env
+
+__pycache__
