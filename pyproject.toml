@@ -1,0 +1,26 @@
+[project]
+name = "isometric-nyc"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+isometric-nyc = "isometric_nyc.main:main"
+
+[tool.ruff]
+line-length = 88
+indent-width = 2
+
+[tool.ruff.format]
+indent-style = "space"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = []
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.5",
+]
