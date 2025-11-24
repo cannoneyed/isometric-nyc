@@ -22,3 +22,4 @@ uv sync
 ```bash
 uv run isometric-nyc "350 5th Ave, New York, NY"
 ```
+
