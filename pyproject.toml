@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "googlemaps>=4.10.0",
+    "marimo>=0.18.0",
     "pydantic>=2.12.4",
     "python-dotenv>=1.2.1",
     "sodapy>=2.2.0",
