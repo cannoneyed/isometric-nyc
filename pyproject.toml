@@ -8,6 +8,7 @@ dependencies = [
     "google-genai>=1.52.0",
     "googlemaps>=4.10.0",
     "marimo>=0.18.0",
+    "pillow>=12.0.0",
     "pydantic>=2.12.4",
     "python-dotenv>=1.2.1",
     "sodapy>=2.2.0",
