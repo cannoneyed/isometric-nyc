@@ -1,7 +1,6 @@
 # General
 .DS_Store
 .idea/
-.vscode/
 *.log
 
 # Python
@@ -146,3 +145,11 @@ cython_debug/
 # Local Database
 *.db
 buildings.db
+
+# Downloaded data
+map_data/**/*.3dm
+map_data/**/*.gml
+map_data/**/*.obj
+map_data/**/*.rhl
+map_data/**/*.mtl
+map_data/**/*.zip
