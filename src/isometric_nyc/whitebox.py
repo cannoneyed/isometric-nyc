@@ -1,6 +1,7 @@
 import io
 import os
 
+import cv2
 import numpy as np
 import psycopg2
 import pyvista as pv
@@ -19,9 +20,25 @@ SIZE_METERS = 300
 ORIENTATION_DEG = 29
 
 # Satellite alignment tweaks (adjust if needed)
-SATELLITE_ZOOM = 19  # Google Maps zoom level
-SATELLITE_SIZE = "2048x2048"  # Image resolution
-GROUND_Z = -0.5  # Height of ground plane (adjust if not aligned)
+SATELLITE_ZOOM = 18  # Google Maps zoom level (lower=more overhead, higher=more detail but potentially angled)
+SATELLITE_TILE_SIZE = (
+  "640x640"  # Size per tile (max 640x640 for free, 2048x2048 for premium)
+)
+SATELLITE_GRID = 3  # Fetch NxN grid of tiles (e.g., 3x3 = 9 tiles)
+GROUND_Z = 10  # Height of ground plane (adjust if not aligned)
+BUILDING_OPACITY = 0.5  # Opacity for buildings (1.0=solid, 0.0=transparent)
+
+# Perspective correction for satellite imagery
+# Set to True to enable perspective correction (requires manual calibration)
+USE_PERSPECTIVE_CORRECTION = True
+# Perspective transform matrix (can be calibrated by matching control points)
+# Note: scale_x and scale_y are now auto-calculated, but can be fine-tuned here
+PERSPECTIVE_TRANSFORM = {
+  "scale_x": 1.0,  # Will be overridden by calculated scale
+  "scale_y": 1.0,  # Will be overridden by calculated scale
+  "shear_x": 0.0,  # Horizontal shear (perspective effect)
+  "shear_y": 0.0,  # Vertical shear (perspective effect)
+}
 
 # NAD83 / New York Long Island (Meters)
 FORCE_SRID = 2908
@@ -57,6 +74,165 @@ def fetch_satellite_image(lat, lon, zoom=19, size="2048x2048"):
   response.raise_for_status()
   image = Image.open(io.BytesIO(response.content))
   return image
+
+
+def fetch_satellite_tiles(center_lat, center_lon, zoom, tile_size, grid_size):
+  """
+  Fetch a grid of satellite tiles and stitch them together.
+
+  Args:
+    center_lat, center_lon: Center coordinates
+    zoom: Google Maps zoom level
+    tile_size: Size of each tile (e.g., "640x640")
+    grid_size: NxN grid (e.g., 3 for 3x3 = 9 tiles)
+
+  Returns:
+    Tuple of (stitched PIL Image, actual coverage in meters)
+  """
+  import math
+
+  tile_px = int(tile_size.split("x")[0])
+
+  # Calculate the offset in degrees for each tile
+  # At zoom level z, the number of pixels per degree of longitude at equator is:
+  # pixels_per_degree = (256 * 2^z) / 360
+  # We need to adjust for latitude using Mercator projection
+  meters_per_pixel = (156543.03392 * math.cos(math.radians(center_lat))) / (2**zoom)
+
+  # Calculate degree offset per tile
+  # 1 degree latitude ≈ 111,111 meters
+  # 1 degree longitude at this lat ≈ 111,111 * cos(lat) meters
+  meters_per_tile = tile_px * meters_per_pixel
+  lat_offset_per_tile = meters_per_tile / 111111.0
+  lon_offset_per_tile = meters_per_tile / (
+    111111.0 * math.cos(math.radians(center_lat))
+  )
+
+  print(
+    f"   📐 Fetching {grid_size}x{grid_size} tiles, "
+    f"offset: {lat_offset_per_tile:.5f}°, {lon_offset_per_tile:.5f}°"
+  )
+  print(f"   📐 Each tile covers {meters_per_tile:.1f}m")
+
+  # Create canvas for stitching
+  canvas_size = tile_px * grid_size
+  canvas = Image.new("RGB", (canvas_size, canvas_size))
+
+  # Calculate starting position (top-left corner)
+  half_grid = (grid_size - 1) / 2
+
+  # Fetch tiles in grid
+  for row in range(grid_size):
+    for col in range(grid_size):
+      # Calculate offset from center
+      lat_off = (half_grid - row) * lat_offset_per_tile
+      lon_off = (col - half_grid) * lon_offset_per_tile
+
+      tile_lat = center_lat + lat_off
+      tile_lon = center_lon + lon_off
+
+      print(f"   📥 Tile [{row},{col}]: {tile_lat:.5f}, {tile_lon:.5f}")
+
+      # Fetch tile
+      tile_image = fetch_satellite_image(tile_lat, tile_lon, zoom, tile_size)
+
+      # Paste into canvas
+      x = col * tile_px
+      y = row * tile_px
+      canvas.paste(tile_image, (x, y))
+
+  # Calculate actual coverage in meters
+  total_coverage_meters = meters_per_tile * grid_size
+
+  print(
+    f"   ✅ Stitched {grid_size}x{grid_size} tiles into {canvas_size}x{canvas_size} image"
+  )
+  print(
+    f"   ✅ Total coverage: {total_coverage_meters:.1f}m x {total_coverage_meters:.1f}m"
+  )
+
+  return canvas, total_coverage_meters
+
+
+def calculate_satellite_scale(lat, zoom, image_size_px, ground_size_meters):
+  """
+  Calculate the scale factor needed to match satellite imagery to ground plane.
+
+  Google Maps uses Web Mercator projection (EPSG:3857).
+  At zoom level z and latitude lat, the resolution in meters/pixel is:
+  resolution = (156543.03392 * cos(lat)) / (2^zoom)
+
+  Args:
+    lat: Latitude in degrees
+    zoom: Google Maps zoom level
+    image_size_px: Size of the satellite image in pixels
+    ground_size_meters: Physical size of the ground plane in meters
+
+  Returns:
+    Scale factor to apply to satellite image
+  """
+  import math
+
+  # Calculate meters per pixel at this zoom and latitude
+  meters_per_pixel = (156543.03392 * math.cos(math.radians(lat))) / (2**zoom)
+
+  # Calculate the physical area the satellite image covers
+  image_coverage_meters = image_size_px * meters_per_pixel
+
+  # Calculate scale factor
+  scale = ground_size_meters / image_coverage_meters
+
+  print(
+    f"   📐 Satellite calc: {meters_per_pixel:.2f} m/px, "
+    f"covers {image_coverage_meters:.0f}m, "
+    f"ground is {ground_size_meters:.0f}m, "
+    f"scale={scale:.3f}"
+  )
+
+  return scale
+
+
+def apply_perspective_correction(image_array, transform_params):
+  """
+  Apply perspective correction to satellite imagery.
+
+  Args:
+    image_array: numpy array of the image
+    transform_params: dict with scale_x, scale_y, shear_x, shear_y
+
+  Returns:
+    Corrected image as numpy array
+  """
+  h, w = image_array.shape[:2]
+  center_x, center_y = w / 2, h / 2
+
+  # Build affine transformation matrix
+  # This applies scaling and shearing around the center point
+  sx = transform_params.get("scale_x", 1.0)
+  sy = transform_params.get("scale_y", 1.0)
+  shx = transform_params.get("shear_x", 0.0)
+  shy = transform_params.get("shear_y", 0.0)
+
+  # Affine matrix: [sx, shx, tx]
+  #                [shy, sy, ty]
+  # First translate to origin, apply transform, translate back
+  M = np.float32(
+    [
+      [sx, shx, center_x * (1 - sx) - center_y * shx],
+      [shy, sy, center_y * (1 - sy) - center_x * shy],
+    ]
+  )
+
+  corrected = cv2.warpAffine(
+    image_array,
+    M,
+    (w, h),
+    flags=cv2.INTER_LINEAR,
+    borderMode=cv2.BORDER_CONSTANT,
+    borderValue=(0, 0, 0),
+  )
+
+  return corrected
 
 
 def fetch_geometry_v5(conn, minx, miny, maxx, maxy):
@@ -127,15 +303,62 @@ def render_tile(lat, lon, size_meters=300, orientation_deg=29, use_satellite=Tru
   if use_satellite:
     print("🛰️  Fetching satellite imagery...")
     try:
-      # Get high-res satellite image
-      # Fetch a larger image to cover the expanded bounding box (1.5x size)
-      satellite_image = fetch_satellite_image(
-        lat, lon, zoom=SATELLITE_ZOOM, size=SATELLITE_SIZE
+      # Get high-res satellite image by stitching tiles
+      satellite_image, actual_coverage_meters = fetch_satellite_tiles(
+        lat, lon, SATELLITE_ZOOM, SATELLITE_TILE_SIZE, SATELLITE_GRID
       )
 
       # Ensure image is in RGB mode (not grayscale or RGBA)
       if satellite_image.mode != "RGB":
         satellite_image = satellite_image.convert("RGB")
+
+      # Calculate how much of the satellite image we need to use
+      ground_size = size_meters * 1.5
+
+      # Calculate crop area: we want to extract the center portion that matches our ground size
+      # The satellite covers actual_coverage_meters, we want ground_size
+      coverage_ratio = ground_size / actual_coverage_meters
+
+      # Get the center crop
+      img_width, img_height = satellite_image.size
+      crop_size = int(img_width * coverage_ratio)
+
+      left = (img_width - crop_size) // 2
+      top = (img_height - crop_size) // 2
+      right = left + crop_size
+      bottom = top + crop_size
+
+      print(
+        f"   📐 Ground plane: {ground_size:.1f}m, "
+        f"Satellite covers: {actual_coverage_meters:.1f}m"
+      )
+      print(
+        f"   ✂️  Cropping center {crop_size}x{crop_size} from {img_width}x{img_height}"
+      )
+
+      # Crop to the area we need
+      satellite_image = satellite_image.crop((left, top, right, bottom))
+
+      # Apply any additional perspective correction (shear) if needed
+      if (
+        PERSPECTIVE_TRANSFORM.get("shear_x", 0) != 0
+        or PERSPECTIVE_TRANSFORM.get("shear_y", 0) != 0
+      ):
+        print("   🔧 Applying perspective shear correction...")
+        satellite_array = np.array(satellite_image)
+        transform_shear_only = {
+          "scale_x": 1.0,
+          "scale_y": 1.0,
+          "shear_x": PERSPECTIVE_TRANSFORM.get("shear_x", 0),
+          "shear_y": PERSPECTIVE_TRANSFORM.get("shear_y", 0),
+        }
+        satellite_array = apply_perspective_correction(
+          satellite_array, transform_shear_only
+        )
+        satellite_image = Image.fromarray(satellite_array)
+
+      # Flip the image vertically (North-South axis) - uncomment if needed
+      # satellite_image = satellite_image.transpose(Image.FLIP_TOP_BOTTOM)
 
       # Rotate the satellite image to match our orientation
       # Negative because we're rotating the texture, not the geometry
@@ -164,6 +387,12 @@ def render_tile(lat, lon, size_meters=300, orientation_deg=29, use_satellite=Tru
     710: {"vertices": [], "faces": []},  # Ground
     "other": {"vertices": [], "faces": []},
   }
+
+  # Container for building footprints (for debug outlines)
+  footprint_lines = []
+
+  # Track ground elevation
+  ground_z_values = []
 
   # Precompute rotation matrix for faster transformation
   angle_rad = np.radians(-orientation_deg)
@@ -204,6 +433,20 @@ def render_tile(lat, lon, size_meters=300, orientation_deg=29, use_satellite=Tru
         ]
       )
 
+      # Collect footprints for ground surfaces (710) or buildings (901)
+      # These will be rendered as white outlines for debugging
+      if obj_class in [710, 901]:
+        # Get the minimum Z value (ground level)
+        if pts_transformed.shape[1] > 2:
+          min_z = np.min(pts_transformed[:, 2])
+          ground_z_values.append(min_z)
+        else:
+          min_z = 0
+        # Create line segments at ground level
+        footprint_pts = pts_transformed.copy()
+        footprint_pts[:, 2] = min_z + 0.5  # Slightly above ground
+        footprint_lines.append(footprint_pts)
+
       # Track vertex offset for face indices (count total vertices added so far)
       vertex_offset = sum(len(v) for v in batch["vertices"])
       batch["vertices"].append(pts_transformed)
@@ -219,8 +462,21 @@ def render_tile(lat, lon, size_meters=300, orientation_deg=29, use_satellite=Tru
     if data["vertices"]:
       all_vertices = np.vstack(data["vertices"])
       batches[class_id] = pv.PolyData(all_vertices, data["faces"])
+      print(
+        f"   Created batch for class {class_id}: {batches[class_id].n_points} points"
+      )
     else:
       batches[class_id] = None
+
+  # Calculate actual ground elevation from the data
+  if ground_z_values:
+    calculated_ground_z = np.median(ground_z_values)
+    print(
+      f"   📏 Detected ground elevation: {calculated_ground_z:.2f}m (median of {len(ground_z_values)} values)"
+    )
+  else:
+    calculated_ground_z = GROUND_Z  # Fallback to constant
+    print(f"   ⚠️  No ground surfaces found, using default GROUND_Z={GROUND_Z}")
 
   # 6. Add to Scene (Draw Order Matters!)
   # Draw Ground first, then Walls, then Roofs on top
@@ -228,62 +484,148 @@ def render_tile(lat, lon, size_meters=300, orientation_deg=29, use_satellite=Tru
 
   # 6.1. Add satellite image as ground plane texture
   if use_satellite and satellite_texture is not None:
-    # Create a ground plane mesh that matches our view area
-    # The satellite image from Google Maps is centered on our lat/lon
-    # and rotated to align with the orientation
+    # Strategy: Create a base textured plane, then add actual ground surfaces on top
+    print("   🎨 Creating satellite-textured base plane...")
 
-    # Create a simple quad for the ground plane
-    # Coordinates in our transformed space (centered at 0,0)
-    # Position at GROUND_Z to be just below ground surfaces but visible
+    # Calculate ground plane parameters
     ground_size = size_meters * 1.5
     half_size = ground_size / 2
+    ground_z = calculated_ground_z - 1.0  # Below everything
 
-    # Define the four corners of the ground plane
-    ground_points = np.array(
+    # Create base plane
+    base_ground_points = np.array(
       [
-        [-half_size, -half_size, GROUND_Z],  # Bottom-left
-        [half_size, -half_size, GROUND_Z],  # Bottom-right
-        [half_size, half_size, GROUND_Z],  # Top-right
-        [-half_size, half_size, GROUND_Z],  # Top-left
+        [-half_size, -half_size, ground_z],
+        [half_size, -half_size, ground_z],
+        [half_size, half_size, ground_z],
+        [-half_size, half_size, ground_z],
       ]
     )
 
-    # Define the face (a quad with 4 vertices)
-    ground_faces = [4, 0, 1, 2, 3]
+    base_ground_faces = [4, 0, 1, 2, 3]
+    base_ground_mesh = pv.PolyData(base_ground_points, base_ground_faces)
 
-    # Create the mesh
-    ground_mesh = pv.PolyData(ground_points, ground_faces)
-
-    # Add texture coordinates (UV mapping) using texture_map_to_plane
-    # This automatically generates texture coordinates for a planar surface
-    ground_mesh = ground_mesh.texture_map_to_plane(
-      origin=(-half_size, -half_size, GROUND_Z),
-      point_u=(half_size, -half_size, GROUND_Z),
-      point_v=(-half_size, half_size, GROUND_Z),
+    base_ground_mesh = base_ground_mesh.texture_map_to_plane(
+      origin=(-half_size, -half_size, ground_z),
+      point_u=(half_size, -half_size, ground_z),
+      point_v=(-half_size, half_size, ground_z),
     )
 
-    # Convert RGB to texture format PyVista expects
     texture = pv.Texture(satellite_texture)
+    plotter.add_mesh(base_ground_mesh, texture=texture, show_edges=False)
+    print("   ✅ Base satellite plane added")
 
-    plotter.add_mesh(ground_mesh, texture=texture, show_edges=False)
-    print("   ✅ Satellite ground plane added")
+    # Now also texture any actual ground surfaces for proper elevation
+    ground_meshes_to_texture = []
 
-  if batches.get(710):  # GroundSurface (original geometry)
-    # Only render if not using satellite, to avoid overlap
-    if not use_satellite:
-      plotter.add_mesh(batches[710], color=COLORS[710], show_edges=False)
+    if batches.get(710):
+      print(f"   Found ground surfaces (710): {batches[710].n_points} points")
+      ground_meshes_to_texture.append(("ground", batches[710]))
 
-  if batches.get("other"):  # Roads / Misc
+    if batches.get("other"):
+      print(f"   Found roads/other: {batches['other'].n_points} points")
+      ground_meshes_to_texture.append(("roads", batches["other"]))
+
+    if ground_meshes_to_texture:
+      print("   🎨 Applying satellite texture to actual ground geometry...")
+
+      for mesh_name, ground_mesh in ground_meshes_to_texture:
+        # Get vertices and calculate UV coordinates
+        points = ground_mesh.points
+
+        # Map X,Y from [-half_size, half_size] to [0, 1] for texture coords
+        u = (points[:, 0] + half_size) / (2 * half_size)
+        v = (points[:, 1] + half_size) / (2 * half_size)
+
+        # Clamp to [0, 1] range
+        u = np.clip(u, 0, 1)
+        v = np.clip(v, 0, 1)
+
+        # Create texture coordinates array
+        texture_coords = np.column_stack([u, v])
+
+        # Set texture coordinates using VTK naming convention
+        ground_mesh.point_data.set_array(texture_coords, "TCoords")
+        ground_mesh.point_data.SetActiveTCoords("TCoords")
+
+        # Add the textured ground mesh (slightly above base plane)
+        plotter.add_mesh(ground_mesh, texture=texture, show_edges=False)
+        print(f"   ✅ Satellite texture applied to {mesh_name}")
+    else:
+      # Fallback: create a flat plane if no ground surfaces exist
+      print("   ⚠️  No ground surfaces found, using base plane only")
+
+      ground_size = size_meters * 1.5
+      half_size = ground_size / 2
+      ground_z = calculated_ground_z - 0.5
+
+      ground_points = np.array(
+        [
+          [-half_size, -half_size, ground_z],
+          [half_size, -half_size, ground_z],
+          [half_size, half_size, ground_z],
+          [-half_size, half_size, ground_z],
+        ]
+      )
+
+      ground_faces = [4, 0, 1, 2, 3]
+      ground_mesh = pv.PolyData(ground_points, ground_faces)
+
+      ground_mesh = ground_mesh.texture_map_to_plane(
+        origin=(-half_size, -half_size, ground_z),
+        point_u=(half_size, -half_size, ground_z),
+        point_v=(-half_size, half_size, ground_z),
+      )
+
+      texture = pv.Texture(satellite_texture)
+      plotter.add_mesh(ground_mesh, texture=texture, show_edges=False)
+      print("   ✅ Satellite ground plane added")
+
+  # Only render ground surfaces without satellite if not using satellite mode
+  elif batches.get(710):
+    plotter.add_mesh(
+      batches[710], color=COLORS[710], show_edges=False, opacity=BUILDING_OPACITY
+    )
+
+  # Roads/other - only render if not using satellite (already textured above)
+  if batches.get("other") and not use_satellite:
     batches["other"].translate((0, 0, 0.1), inplace=True)
-    plotter.add_mesh(batches["other"], color=COLORS["road"], show_edges=False)
+    plotter.add_mesh(
+      batches["other"], color=COLORS["road"], show_edges=False, opacity=BUILDING_OPACITY
+    )
 
   if batches.get(709):  # Walls
     batches[709].translate((0, 0, 0.2), inplace=True)
-    plotter.add_mesh(batches[709], color=COLORS[709], show_edges=False)
+    plotter.add_mesh(
+      batches[709], color=COLORS[709], show_edges=False, opacity=BUILDING_OPACITY
+    )
 
   if batches.get(712):  # Roofs
     batches[712].translate((0, 0, 0.3), inplace=True)
-    plotter.add_mesh(batches[712], color=COLORS[712], show_edges=False)
+    plotter.add_mesh(
+      batches[712], color=COLORS[712], show_edges=False, opacity=BUILDING_OPACITY
+    )
+
+  # 6.2. Add footprint outlines for debugging
+  if footprint_lines:
+    print(f"   ✅ Adding {len(footprint_lines)} footprint outlines")
+    for footprint_pts in footprint_lines:
+      # Create line segments connecting the points
+      n_points = len(footprint_pts)
+      if n_points > 1:
+        # Create lines connecting each point to the next
+        lines = []
+        for i in range(n_points - 1):
+          lines.append([2, i, i + 1])
+
+        # Flatten the lines array
+        lines_flat = np.hstack(lines)
+
+        # Create a PolyData with lines
+        line_mesh = pv.PolyData(footprint_pts, lines=lines_flat)
+        plotter.add_mesh(
+          line_mesh, color="white", line_width=2, render_lines_as_tubes=False
+        )
 
   # 7. SimCity 3000 Camera Setup
   plotter.camera.enable_parallel_projection()

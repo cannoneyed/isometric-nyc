@@ -9,6 +9,7 @@ dependencies = [
     "googlemaps>=4.10.0",
     "marimo>=0.18.0",
     "numpy>=2.3.5",
+    "opencv-python>=4.11.0.86",
     "pillow>=12.0.0",
     "psycopg2-binary>=2.9.11",
     "pydantic>=2.12.4",
