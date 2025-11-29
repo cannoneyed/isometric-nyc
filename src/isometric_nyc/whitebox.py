@@ -47,7 +47,10 @@ def fetch_geometry_v5(conn, minx, miny, maxx, maxy):
     JOIN citydb.feature f ON g.feature_id = f.id
     WHERE 
         -- Dynamically grab SRID to match DB
-        g.geometry && ST_MakeEnvelope({minx}, {miny}, {maxx}, {maxy}, (SELECT ST_SRID(geometry) FROM citydb.geometry_data LIMIT 1))
+        g.geometry && ST_MakeEnvelope(
+            {minx}, {miny}, {maxx}, {maxy}, 
+            (SELECT ST_SRID(geometry) FROM citydb.geometry_data LIMIT 1)
+        )
         AND g.geometry IS NOT NULL
         AND f.objectclass_id IN ({target_ids})
     """
@@ -93,18 +96,22 @@ def render_tile(lat, lon, size_meters=300, orientation_deg=29):
     return
 
   # 5. Build Scene
-  plotter = pv.Plotter()
+  plotter = pv.Plotter(window_size=(1280, 720))
   plotter.set_background(COLORS["background"])
 
-  print(f"🏗️  Building {len(rows)} meshes...")
+  print(f"🏗️  Building meshes from {len(rows)} surfaces...")
 
-  # Container for batching meshes by color (faster rendering)
-  batches = {
-    712: pv.MultiBlock(),  # Roofs
-    709: pv.MultiBlock(),  # Walls
-    710: pv.MultiBlock(),  # Ground
-    "other": pv.MultiBlock(),
+  # Container for collecting vertices/faces by class (much faster than creating individual meshes)
+  geom_data = {
+    712: {"vertices": [], "faces": []},  # Roofs
+    709: {"vertices": [], "faces": []},  # Walls
+    710: {"vertices": [], "faces": []},  # Ground
+    "other": {"vertices": [], "faces": []},
   }
+
+  # Precompute rotation matrix for faster transformation
+  angle_rad = np.radians(-orientation_deg)
+  cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
 
   for obj_class, wkb_data in rows:
     try:
@@ -120,49 +127,68 @@ def render_tile(lat, lon, size_meters=300, orientation_deg=29):
     else:
       continue
 
+    # Determine which batch this belongs to
+    if obj_class in geom_data:
+      batch = geom_data[obj_class]
+    elif obj_class == 901:
+      batch = geom_data["other"]
+    else:
+      batch = geom_data["other"]
+
     for poly in polys:
-      pts = list(poly.exterior.coords)
-      face = [len(pts)] + list(range(len(pts)))
-      mesh = pv.PolyData(pts, face)
+      pts = np.array(poly.exterior.coords)
 
-      # ROTATE & CENTER
-      # Rotate around the center point to align grid
-      mesh.rotate_z(-orientation_deg, point=(center_x, center_y, 0), inplace=True)
-      # Move to (0,0,0)
-      mesh.translate((-center_x, -center_y, 0), inplace=True)
+      # Fast rotation and translation using numpy
+      x, y = pts[:, 0] - center_x, pts[:, 1] - center_y
+      pts_transformed = np.column_stack(
+        [
+          x * cos_a - y * sin_a,
+          x * sin_a + y * cos_a,
+          pts[:, 2] if pts.shape[1] > 2 else np.zeros(len(pts)),
+        ]
+      )
 
-      if obj_class in batches:
-        batches[obj_class].append(mesh)
-      elif obj_class == 901:
-        # If we have walls/roofs, we often want to ignore the parent 'Building' container
-        # to avoid Z-fighting, unless it's a fallback LOD1 block.
-        # For now, let's add it to 'other' just in case.
-        batches["other"].append(mesh)
-      else:
-        batches["other"].append(mesh)
+      # Track vertex offset for face indices (count total vertices added so far)
+      vertex_offset = sum(len(v) for v in batch["vertices"])
+      batch["vertices"].append(pts_transformed)
+
+      # Create face with offset indices
+      n_pts = len(pts_transformed)
+      face = [n_pts] + list(range(vertex_offset, vertex_offset + n_pts))
+      batch["faces"].extend(face)
+
+  # Now create one mesh per class (much faster than 5000+ individual meshes)
+  batches = {}
+  for class_id, data in geom_data.items():
+    if data["vertices"]:
+      all_vertices = np.vstack(data["vertices"])
+      batches[class_id] = pv.PolyData(all_vertices, data["faces"])
+    else:
+      batches[class_id] = None
 
   # 6. Add to Scene (Draw Order Matters!)
   # Draw Ground first, then Walls, then Roofs on top
+  print("🎨 Adding meshes to scene...")
 
-  if batches[710]:  # GroundSurface
+  if batches.get(710):  # GroundSurface
     plotter.add_mesh(batches[710], color=COLORS[710], show_edges=False)
 
-  if batches["other"]:  # Roads / Misc
+  if batches.get("other"):  # Roads / Misc
     batches["other"].translate((0, 0, 0.1), inplace=True)
     plotter.add_mesh(batches["other"], color=COLORS["road"], show_edges=False)
 
-  if batches[709]:  # Walls
+  if batches.get(709):  # Walls
     batches[709].translate((0, 0, 0.2), inplace=True)
     plotter.add_mesh(batches[709], color=COLORS[709], show_edges=False)
 
-  if batches[712]:  # Roofs
+  if batches.get(712):  # Roofs
     batches[712].translate((0, 0, 0.3), inplace=True)
     plotter.add_mesh(batches[712], color=COLORS[712], show_edges=False)
 
   # 7. SimCity 3000 Camera Setup
   plotter.camera.enable_parallel_projection()
-  alpha = np.arctan(0.5)
-  beta = np.radians(45)
+  alpha = np.arctan(0.7)
+  beta = np.radians(30)
   dist = 2000
 
   cx = dist * np.cos(alpha) * np.sin(beta)
@@ -171,11 +197,21 @@ def render_tile(lat, lon, size_meters=300, orientation_deg=29):
 
   plotter.camera.position = (cx, cy, cz)
   plotter.camera.focal_point = (0, 0, 0)
+
+  # Default values
   plotter.camera.up = (0, 0, 1)
-  plotter.camera.parallel_scale = size_meters / 2
+  plotter.camera.parallel_scale = size_meters / 4
 
   print("📸 Displaying Isometric Render...")
   plotter.show()
+
+  # Log final camera settings after user interaction
+  print("\n🎥 FINAL CAMERA SETTINGS:")
+  print(f"   Position: {plotter.camera.position}")
+  print(f"   Focal Point: {plotter.camera.focal_point}")
+  print(f"   Up Vector: {plotter.camera.up}")
+  print(f"   Parallel Scale (zoom): {plotter.camera.parallel_scale}")
+  print(f"   View Angle: {plotter.camera.view_angle}")
 
 
 def main():

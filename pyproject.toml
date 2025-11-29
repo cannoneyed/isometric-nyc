@@ -27,7 +27,7 @@ check-db = "isometric_nyc.check_db:main"
 isometric-nyc = "isometric_nyc.main:main"
 inspect-db = "isometric_nyc.inspect_db:main"
 inspect-columns = "isometric_nyc.inspect_columns:main"
-isometric-whitebox = "isometric_nyc.whitebox:main"
+whitebox = "isometric_nyc.whitebox:main"
 
 [tool.ruff]
 line-length = 88
