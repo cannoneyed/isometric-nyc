@@ -153,3 +153,6 @@ map_data/**/*.obj
 map_data/**/*.rhl
 map_data/**/*.mtl
 map_data/**/*.zip
+
+# Satellite tile cache
+.satellite_cache/

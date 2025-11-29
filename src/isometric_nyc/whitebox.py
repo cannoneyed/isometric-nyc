@@ -1,5 +1,7 @@
+import hashlib
 import io
 import os
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -12,6 +14,9 @@ from shapely.wkb import loads as load_wkb
 
 from isometric_nyc.data.google_maps import GoogleMapsClient
 from isometric_nyc.db import get_db_config
+
+# Cache directory for satellite tiles
+CACHE_DIR = Path(__file__).parent.parent.parent.parent / ".satellite_cache"
 
 # Constants (Times Square)
 LAT = 40.7580
@@ -26,7 +31,7 @@ SATELLITE_TILE_SIZE = (
 )
 SATELLITE_GRID = 3  # Fetch NxN grid of tiles (e.g., 3x3 = 9 tiles)
 GROUND_Z = 10  # Height of ground plane (adjust if not aligned)
-BUILDING_OPACITY = 0.5  # Opacity for buildings (1.0=solid, 0.0=transparent)
+BUILDING_OPACITY = 1  # Opacity for buildings (1.0=solid, 0.0=transparent)
 
 # Perspective correction for satellite imagery
 # Set to True to enable perspective correction (requires manual calibration)
@@ -60,8 +65,43 @@ def get_db_connection():
   return psycopg2.connect(**get_db_config())
 
 
+def get_cache_key(lat: float, lon: float, zoom: int, size: str) -> str:
+  """Generate a cache key for a satellite tile."""
+  # Round coordinates to 5 decimal places for consistency
+  key_string = f"{lat:.5f}_{lon:.5f}_z{zoom}_{size}"
+  # Create a short hash for the filename
+  hash_suffix = hashlib.md5(key_string.encode()).hexdigest()[:8]
+  return f"tile_{lat:.5f}_{lon:.5f}_z{zoom}_{size}_{hash_suffix}.png"
+
+
+def get_cached_tile(cache_key: str) -> Image.Image | None:
+  """Try to load a tile from cache."""
+  cache_path = CACHE_DIR / cache_key
+  if cache_path.exists():
+    try:
+      return Image.open(cache_path)
+    except Exception:
+      # Corrupted cache file, delete it
+      cache_path.unlink(missing_ok=True)
+  return None
+
+
+def save_tile_to_cache(cache_key: str, image: Image.Image) -> None:
+  """Save a tile to the cache."""
+  CACHE_DIR.mkdir(parents=True, exist_ok=True)
+  cache_path = CACHE_DIR / cache_key
+  image.save(cache_path, "PNG")
+
+
 def fetch_satellite_image(lat, lon, zoom=19, size="2048x2048"):
-  """Fetch satellite imagery from Google Maps Static API."""
+  """Fetch satellite imagery from Google Maps Static API with caching."""
+  # Check cache first
+  cache_key = get_cache_key(lat, lon, zoom, size)
+  cached_image = get_cached_tile(cache_key)
+  if cached_image is not None:
+    return cached_image
+
+  # Not in cache, fetch from API
   api_key = os.getenv("GOOGLE_MAPS_API_KEY")
   if not api_key:
     raise ValueError("GOOGLE_MAPS_API_KEY not found in environment variables.")
@@ -73,6 +113,10 @@ def fetch_satellite_image(lat, lon, zoom=19, size="2048x2048"):
   response = requests.get(sat_url)
   response.raise_for_status()
   image = Image.open(io.BytesIO(response.content))
+
+  # Save to cache
+  save_tile_to_cache(cache_key, image)
+
   return image
 
 
@@ -131,9 +175,13 @@ def fetch_satellite_tiles(center_lat, center_lon, zoom, tile_size, grid_size):
       tile_lat = center_lat + lat_off
       tile_lon = center_lon + lon_off
 
-      print(f"   📥 Tile [{row},{col}]: {tile_lat:.5f}, {tile_lon:.5f}")
+      # Check if cached
+      cache_key = get_cache_key(tile_lat, tile_lon, zoom, tile_size)
+      is_cached = (CACHE_DIR / cache_key).exists()
+      cache_status = "📦" if is_cached else "🌐"
+      print(f"   {cache_status} Tile [{row},{col}]: {tile_lat:.5f}, {tile_lon:.5f}")
 
-      # Fetch tile
+      # Fetch tile (will use cache if available)
       tile_image = fetch_satellite_image(tile_lat, tile_lon, zoom, tile_size)
 
       # Paste into canvas
@@ -629,8 +677,10 @@ def render_tile(lat, lon, size_meters=300, orientation_deg=29, use_satellite=Tru
 
   # 7. SimCity 3000 Camera Setup
   plotter.camera.enable_parallel_projection()
-  alpha = np.arctan(0.7)
-  beta = np.radians(30)
+  alpha = np.arctan(0.7)  # Elevation angle
+  beta = np.radians(
+    30 + 180
+  )  # Azimuth angle (+180 to look from south instead of north)
   dist = 2000
 
   cx = dist * np.cos(alpha) * np.sin(beta)
