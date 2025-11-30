@@ -19,20 +19,22 @@ import {
 } from "three";
 import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 
+import view from "../view.json";
+
 // --- CONFIGURATION ---
 const API_KEY = import.meta.env.VITE_GOOGLE_TILES_API_KEY;
 console.log("API Key loaded:", API_KEY ? "Yes" : "No");
 
 // Madison Square Garden coordinates
-const LAT = 40.7505;
-const LON = -73.9934;
-const HEIGHT = 300; // meters above ground
+const LAT = view.lat;
+const LON = view.lon;
+const HEIGHT = view.camera_height_meters; // meters above ground
 
 // Camera angles (SimCity isometric style)
 // Azimuth: direction camera is FACING (30° = NE-ish, like whitebox.py)
 // Elevation: negative = looking down at ground
-const CAMERA_AZIMUTH = 30; // North/south
-const CAMERA_ELEVATION = -90; // Straight down
+const CAMERA_AZIMUTH = view.camera_azimuth_degrees; // Square on the avenues
+const CAMERA_ELEVATION = view.camera_elevation_degrees; // Straight down
 
 let scene, renderer, controls, tiles, transition;
 let isOrthographic = true; // Start in orthographic (isometric) mode

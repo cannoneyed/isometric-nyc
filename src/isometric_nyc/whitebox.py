@@ -1,5 +1,6 @@
 import hashlib
 import io
+import json
 import os
 from pathlib import Path
 
@@ -17,12 +18,17 @@ from isometric_nyc.db import get_db_config
 
 # Cache directory for satellite tiles
 CACHE_DIR = Path(__file__).parent.parent.parent.parent / ".satellite_cache"
+VIEW_JSON_PATH = Path(__file__).parent.parent / "view.json"
 
-# Constants (Times Square)
-LAT = 40.7580
-LON = -73.9855
-SIZE_METERS = 300
-ORIENTATION_DEG = 29
+with open(VIEW_JSON_PATH, "r") as f:
+  view_json = json.loads(f.read())
+
+# Constants (Madison Square Garden)
+LAT = view_json["lat"]
+LON = view_json["lon"]
+SIZE_METERS = view_json["height"]
+ORIENTATION_DEG = view_json["azimuth"]
+ELEVATION_DEG = view_json["elevation"]
 
 # Viewport settings
 VIEWPORT_WIDTH = 2560
@@ -30,9 +36,7 @@ VIEWPORT_HEIGHT = 1440
 
 # Camera settings
 CAMERA_ZOOM = 100  # Parallel scale - lower = more zoomed in, higher = more zoomed out
-CAMERA_AZIMUTH = (
-  30 + 180
-)  # Horizontal angle (degrees) - 0=North, 90=East, 180=South, 270=West
+CAMERA_AZIMUTH = view_json["azimuth"]
 CAMERA_ELEVATION = 0.7  # Vertical angle factor - higher = more top-down view
 
 # Satellite alignment tweaks (adjust if needed)
