@@ -23,21 +23,22 @@ VIEW_JSON_PATH = Path(__file__).parent.parent / "view.json"
 with open(VIEW_JSON_PATH, "r") as f:
   view_json = json.loads(f.read())
 
-# Constants (Madison Square Garden)
+# Constants from view.json
 LAT = view_json["lat"]
 LON = view_json["lon"]
-SIZE_METERS = view_json["height"]
-ORIENTATION_DEG = view_json["azimuth"]
-ELEVATION_DEG = view_json["elevation"]
+SIZE_METERS = view_json.get("size_meters", 300)  # Default 300m if not specified
 
 # Viewport settings
 VIEWPORT_WIDTH = 2560
 VIEWPORT_HEIGHT = 1440
 
-# Camera settings
+# Camera settings from view.json
 CAMERA_ZOOM = 100  # Parallel scale - lower = more zoomed in, higher = more zoomed out
-CAMERA_AZIMUTH = view_json["azimuth"]
-CAMERA_ELEVATION = 0.7  # Vertical angle factor - higher = more top-down view
+CAMERA_AZIMUTH = view_json["camera_azimuth_degrees"]  # Horizontal angle in degrees
+CAMERA_ELEVATION_DEG = view_json[
+  "camera_elevation_degrees"
+]  # Vertical angle in degrees (-90 = overhead)
+ORIENTATION_DEG = CAMERA_AZIMUTH  # Use azimuth for geometry rotation too
 
 # Satellite alignment tweaks (adjust if needed)
 SATELLITE_ZOOM = 18  # Google Maps zoom level (lower=more overhead, higher=more detail)
@@ -483,9 +484,9 @@ def render_tile(
       # satellite_image = satellite_image.transpose(Image.FLIP_TOP_BOTTOM)
 
       # Rotate the satellite image to match our orientation
-      # Negative because we're rotating the texture, not the geometry
+      # Positive to align azimuth direction with top of view
       satellite_image = satellite_image.rotate(
-        -orientation_deg, expand=False, fillcolor=(0, 0, 0)
+        orientation_deg, expand=False, fillcolor=(0, 0, 0)
       )
 
       # Convert PIL Image to numpy array for PyVista
@@ -517,7 +518,8 @@ def render_tile(
   ground_z_values = []
 
   # Precompute rotation matrix for faster transformation
-  angle_rad = np.radians(-orientation_deg)
+  # Positive to align azimuth direction with +Y (top of view)
+  angle_rad = np.radians(orientation_deg)
   cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
 
   for obj_class, wkb_data in rows:
@@ -749,22 +751,38 @@ def render_tile(
           line_mesh, color="white", line_width=2, render_lines_as_tubes=False
         )
 
-  # 7. SimCity 3000 Camera Setup
+  # 7. Camera Setup (supports both isometric and overhead views)
   plotter.camera.enable_parallel_projection()
-  alpha = np.arctan(CAMERA_ELEVATION)  # Elevation angle
-  beta = np.radians(CAMERA_AZIMUTH)  # Azimuth angle
+
+  # Convert degrees to radians
+  # Elevation: -90 = looking straight down, 0 = horizontal, 90 = looking up
+  # Note: Geometry is already rotated by -ORIENTATION_DEG to align with azimuth
+  # So camera positioning doesn't need azimuth rotation for overhead view
+  elevation_rad = np.radians(CAMERA_ELEVATION_DEG)
   dist = 2000
 
-  cx = dist * np.cos(alpha) * np.sin(beta)
-  cy = dist * np.cos(alpha) * np.cos(beta)
-  cz = dist * np.sin(alpha)
+  if abs(CAMERA_ELEVATION_DEG) > 80:  # Near-overhead view
+    # Camera directly above, looking down
+    # Geometry rotated by +azimuth aligns azimuth direction with +Y
+    plotter.camera.position = (0, 0, dist)
+    plotter.camera.focal_point = (0, 0, 0)
+    # Top of view is +Y (where azimuth direction now points)
+    plotter.camera.up = (0, 1, 0)
+  else:
+    # Standard isometric view - use azimuth for camera positioning
+    azimuth_rad = np.radians(CAMERA_AZIMUTH)
+    cx = dist * np.cos(elevation_rad) * np.sin(azimuth_rad)
+    cy = dist * np.cos(elevation_rad) * np.cos(azimuth_rad)
+    cz = -dist * np.sin(elevation_rad)
 
-  plotter.camera.position = (cx, cy, cz)
-  plotter.camera.focal_point = (0, 0, 0)
+    plotter.camera.position = (cx, cy, cz)
+    plotter.camera.focal_point = (0, 0, 0)
+    plotter.camera.up = (0, 0, 1)
 
-  # Camera orientation and zoom
-  plotter.camera.up = (0, 0, 1)
   plotter.camera.parallel_scale = CAMERA_ZOOM
+
+  print(f"📷 Camera: Az={CAMERA_AZIMUTH}° El={CAMERA_ELEVATION_DEG}°")
+  print(f"   Position: {plotter.camera.position}")
 
   print("📸 Displaying Isometric Render...")
   plotter.show()
