@@ -381,7 +381,19 @@ def render_tile(
   use_satellite=True,
   viewport_width=None,
   viewport_height=None,
+  output_path=None,
 ):
+  """
+  Render a 3D tile of NYC buildings.
+
+  Args:
+    lat, lon: Center coordinates
+    size_meters: Size of the area to render
+    orientation_deg: Rotation angle in degrees
+    use_satellite: Whether to use satellite imagery
+    viewport_width, viewport_height: Render resolution
+    output_path: If provided, save screenshot to this path instead of showing interactive viewer
+  """
   # Use defaults from constants if not specified
   viewport_width = viewport_width or VIEWPORT_WIDTH
   viewport_height = viewport_height or VIEWPORT_HEIGHT
@@ -497,7 +509,11 @@ def render_tile(
       use_satellite = False
 
   # 5. Build Scene
-  plotter = pv.Plotter(window_size=(viewport_width, viewport_height))
+  # Use off-screen rendering if output_path is specified
+  off_screen = output_path is not None
+  plotter = pv.Plotter(
+    window_size=(viewport_width, viewport_height), off_screen=off_screen
+  )
   plotter.set_background(COLORS["background"])
 
   print(f"🏗️  Building meshes from {len(rows)} surfaces...")
@@ -784,16 +800,25 @@ def render_tile(
   print(f"📷 Camera: Az={CAMERA_AZIMUTH}° El={CAMERA_ELEVATION_DEG}°")
   print(f"   Position: {plotter.camera.position}")
 
-  print("📸 Displaying Isometric Render...")
-  plotter.show()
+  if output_path:
+    # Non-interactive mode: save screenshot and exit
+    print(f"📸 Saving render to {output_path}...")
+    plotter.screenshot(output_path)
+    plotter.close()
+    print(f"✅ Saved to {output_path}")
+    return output_path
+  else:
+    # Interactive mode: show viewer
+    print("📸 Displaying Isometric Render...")
+    plotter.show()
 
-  # Log final camera settings after user interaction
-  print("\n🎥 FINAL CAMERA SETTINGS:")
-  print(f"   Position: {plotter.camera.position}")
-  print(f"   Focal Point: {plotter.camera.focal_point}")
-  print(f"   Up Vector: {plotter.camera.up}")
-  print(f"   Parallel Scale (zoom): {plotter.camera.parallel_scale}")
-  print(f"   View Angle: {plotter.camera.view_angle}")
+    # Log final camera settings after user interaction
+    print("\n🎥 FINAL CAMERA SETTINGS:")
+    print(f"   Position: {plotter.camera.position}")
+    print(f"   Focal Point: {plotter.camera.focal_point}")
+    print(f"   Up Vector: {plotter.camera.up}")
+    print(f"   Parallel Scale (zoom): {plotter.camera.parallel_scale}")
+    print(f"   View Angle: {plotter.camera.view_angle}")
 
 
 def main():

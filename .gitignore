@@ -156,3 +156,6 @@ map_data/**/*.zip
 
 # Satellite tile cache
 .satellite_cache/
+
+# Exported view images
+exports/

@@ -25,6 +25,25 @@ import view from "../view.json";
 const API_KEY = import.meta.env.VITE_GOOGLE_TILES_API_KEY;
 console.log("API Key loaded:", API_KEY ? "Yes" : "No");
 
+// Check if we're in export mode (for screenshot capture)
+const urlParams = new URLSearchParams(window.location.search);
+const EXPORT_MODE = urlParams.get("export") === "true";
+
+// In export mode, use explicit viewport dimensions from URL params
+const EXPORT_WIDTH = parseInt(urlParams.get("width")) || 2560;
+const EXPORT_HEIGHT = parseInt(urlParams.get("height")) || 1440;
+
+if (EXPORT_MODE) {
+  console.log("🎬 Export mode enabled - will signal when ready for screenshot");
+  console.log(`📐 Export viewport: ${EXPORT_WIDTH}x${EXPORT_HEIGHT}`);
+  console.log(`📐 Window viewport: ${window.innerWidth}x${window.innerHeight}`);
+  window.__EXPORT_READY = false;
+  window.__TILES_LOADED = false;
+  window.__CAMERA_POSITIONED = false;
+}
+
+const EXPORT_DELAY_MS = 2000; // 2 seconds should be enough for tiles to render
+
 // Madison Square Garden coordinates
 const LAT = view.lat;
 const LON = view.lon;
@@ -47,11 +66,20 @@ init();
 animate();
 
 function init() {
+  // Use export dimensions in export mode, otherwise use window dimensions
+  const viewportWidth = EXPORT_MODE ? EXPORT_WIDTH : window.innerWidth;
+  const viewportHeight = EXPORT_MODE ? EXPORT_HEIGHT : window.innerHeight;
+  const aspect = viewportWidth / viewportHeight;
+
+  if (EXPORT_MODE) {
+    console.log(`🖥️ Using viewport: ${viewportWidth}x${viewportHeight}, aspect: ${aspect.toFixed(3)}`);
+  }
+
   // Renderer
   renderer = new WebGLRenderer({ antialias: true });
   renderer.setClearColor(0x87ceeb); // Sky blue
-  renderer.setPixelRatio(window.devicePixelRatio);
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(EXPORT_MODE ? 1 : window.devicePixelRatio); // Use 1:1 for export
+  renderer.setSize(viewportWidth, viewportHeight);
   document.body.appendChild(renderer.domElement);
 
   // Scene
@@ -59,12 +87,7 @@ function init() {
 
   // Camera transition manager (handles both perspective and orthographic)
   transition = new CameraTransitionManager(
-    new PerspectiveCamera(
-      60,
-      window.innerWidth / window.innerHeight,
-      1,
-      160000000
-    ),
+    new PerspectiveCamera(60, aspect, 1, 160000000),
     new OrthographicCamera(-1, 1, 1, -1, 1, 160000000)
   );
   transition.autoSync = false;
@@ -104,9 +127,15 @@ function init() {
 
   // Connect controls to the tiles ellipsoid and position camera
   tiles.addEventListener("load-tile-set", () => {
-    console.log("Tileset loaded!");
     controls.setEllipsoid(tiles.ellipsoid, tiles.group);
     positionCamera();
+
+    // Signal tileset is loaded for export mode
+    if (EXPORT_MODE) {
+      window.__TILES_LOADED = true;
+      console.log("🗺️ Tileset loaded");
+      checkExportReady();
+    }
   });
 
   tiles.setCamera(transition.camera);
@@ -161,6 +190,46 @@ function positionCamera() {
   console.log(`Camera positioned above Times Square at ${HEIGHT}m`);
   console.log(`Azimuth: ${CAMERA_AZIMUTH}°, Elevation: ${CAMERA_ELEVATION}°`);
   console.log(`Mode: ${transition.mode}`);
+
+  // Signal camera is positioned for export mode
+  if (EXPORT_MODE) {
+    const ortho = transition.orthographicCamera;
+    console.log(
+      `📷 Ortho camera bounds: L=${ortho.left.toFixed(0)} R=${ortho.right.toFixed(0)} ` +
+        `T=${ortho.top.toFixed(0)} B=${ortho.bottom.toFixed(0)}`
+    );
+    console.log(`📷 Ortho camera position: ${ortho.position.toArray().map((v) => v.toFixed(0))}`);
+    window.__CAMERA_POSITIONED = true;
+    console.log("📷 Camera positioned - waiting for tiles to load...");
+    checkExportReady();
+  }
+}
+
+// Check if ready for export screenshot (called after tiles loaded and camera positioned)
+let exportReadyTimeout = null;
+function checkExportReady() {
+  if (!EXPORT_MODE) return;
+
+  // Need both conditions to be true
+  if (!window.__TILES_LOADED || !window.__CAMERA_POSITIONED) {
+    return;
+  }
+
+  // Clear any existing timeout
+  if (exportReadyTimeout) {
+    clearTimeout(exportReadyTimeout);
+  }
+
+  // Wait for tiles to finish loading and rendering
+  // The tileset loads progressively, so we need to give it time
+  console.log(
+    `⏳ Waiting ${EXPORT_DELAY_MS / 1000}s for tiles to finish rendering...`
+  );
+
+  exportReadyTimeout = setTimeout(() => {
+    window.__EXPORT_READY = true;
+    console.log("✅ Export ready - screenshot can be taken now");
+  }, EXPORT_DELAY_MS);
 }
 
 function toggleOrthographic() {
@@ -190,6 +259,9 @@ function onKeyDown(event) {
 }
 
 function addUI() {
+  // Don't add UI in export mode (we want a clean screenshot)
+  if (EXPORT_MODE) return;
+
   const info = document.createElement("div");
   info.style.cssText = `
     position: fixed;
@@ -216,6 +288,9 @@ function addUI() {
 }
 
 function onWindowResize() {
+  // In export mode, ignore resize events - use fixed dimensions
+  if (EXPORT_MODE) return;
+
   const { perspectiveCamera, orthographicCamera } = transition;
   const aspect = window.innerWidth / window.innerHeight;
 
@@ -259,6 +334,9 @@ function getCameraInfo() {
 
 // Debounced logging of camera state
 function logCameraState() {
+  // Skip logging in export mode to reduce noise
+  if (EXPORT_MODE) return;
+
   const info = getCameraInfo();
   if (!info) return;
 
