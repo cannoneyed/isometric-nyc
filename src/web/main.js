@@ -11,6 +11,7 @@ import {
   TileCompressionPlugin,
 } from "3d-tiles-renderer/plugins";
 import {
+  Matrix4,
   Scene,
   WebGLRenderer,
   PerspectiveCamera,
@@ -54,6 +55,63 @@ let lastCameraState = { az: 0, el: 0, height: 0, zoom: 1 };
 // Tile loading tracking
 let tilesStableStartTime = 0;
 window.TILES_LOADED = false;
+let cameraInitialized = false;
+
+// Also, whitebox.py calculates positions relative to Z=0.
+// However, buildings have height, and we probably want to look at the ground (Z=0).
+// But wait! whitebox.py detected ground elevation:
+// "Detected ground elevation: 10.00m" (typically around 10-15m for NYC)
+// And then it textures the ground at calculated_ground_z.
+// But the camera focal point is (0,0,0).
+// The geometry in whitebox.py is shifted:
+// x, y = pts[:, 0] - center_x, pts[:, 1] - center_y
+// But Z values are preserved from the DB.
+// So if the DB has ground at Z=10, the camera looking at Z=0 is looking 10m BELOW ground.
+
+// In 3D Tiles (Google), the tiles are positioned on the WGS84 ellipsoid.
+// When we ask for a frame at height=0, we get the ellipsoid surface.
+// NYC ground level is indeed around 10-30m above the ellipsoid in some places,
+// but Google 3D tiles usually match the ellipsoid roughly or have their own geoid.
+
+// If whitebox.py is rendering geometry where Z=0 is "arbitrary zero", but actual geometry is at Z=10,
+// and camera looks at Z=0, then the view is centered 10m below the buildings.
+
+// In the web view, we are centering on the ellipsoid surface (height=0).
+// If the visible Google 3D tiles are at height=10, then we are also looking 10m below the buildings.
+
+// It seems they match in intent (looking at Z=0/Ellipsoid), but we might need to tweak the
+// center point height to match exactly if there is a shift.
+
+// For now, let's keep it at 0. If there is a vertical offset, we can adjust here.
+// Example: Look at 15m elevation to center on "street level" if streets are elevated.
+
+// Whitebox.py finds median ground Z around 10-15m for MSG.
+// It then constructs the scene around that.
+// Since its camera looks at (0,0,0), it is looking at Z=0 relative to the *PostGIS* coordinates.
+// If PostGIS coordinates have ground at Z=10, then the camera is looking 10m below ground.
+// We are doing the same here (looking at Z=0 on ellipsoid).
+
+// HOWEVER, if we want them to align PIXEL-PERFECTLY:
+// We need to account for any difference in how the "center" is defined.
+// Whitebox centers on the *projected* coordinates of (LAT, LON).
+// 3D Tiles Renderer centers on the *cartesian* coordinates of (LAT, LON, 0).
+
+// There might be a small shift due to projection.
+// But more likely, it's the Z-height of the "center of rotation".
+// Let's try bumping the target height to match the ground elevation ~10m.
+// Or, if the whitebox image is "higher" (building lower in frame), we need to look *lower* (smaller Z).
+
+// Observation: The web view shows the building slightly "higher" in the frame than whitebox.
+// This means the camera is looking *below* the point that whitebox is looking at.
+// Or whitebox is looking *above* the point we are looking at.
+
+// Whitebox look-at: (0,0,0). Ground is at Z~10. So it looks 10m below ground.
+// Web look-at: Ellipsoid surface (Z=0).
+
+// Let's try adjusting the target height to see if it aligns better.
+// If we look at 15m, the camera moves up, and the scene moves DOWN in the frame.
+// If the web view is too high, we need to look HIGHER (larger Z).
+const TARGET_HEIGHT = -31.3; // Geoid height for NYC (approx -31.3m)
 
 init();
 animate();
@@ -116,6 +174,8 @@ function init() {
     null
   );
   controls.enableDamping = true;
+  controls.minZoom = 0.1; // Allow zooming out
+  controls.maxZoom = 20.0; // Allow zooming in
 
   // Connect controls to the tiles ellipsoid and position camera
   tiles.addEventListener("load-tile-set", () => {
@@ -125,7 +185,10 @@ function init() {
     // This fixes the "zoomed out on first load" issue
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        positionCamera();
+        if (!cameraInitialized) {
+          positionCamera();
+          cameraInitialized = true;
+        }
       });
     });
   });
@@ -152,13 +215,18 @@ function positionCamera() {
   WGS84_ELLIPSOID.getObjectFrame(
     LAT * MathUtils.DEG2RAD,
     LON * MathUtils.DEG2RAD,
-    HEIGHT,
+    TARGET_HEIGHT, // CENTER AT TARGET HEIGHT
     CAMERA_AZIMUTH * MathUtils.DEG2RAD,
     CAMERA_ELEVATION * MathUtils.DEG2RAD,
     0, // roll
     camera.matrixWorld,
     CAMERA_FRAME
   );
+
+  // Move camera back 2000m along its own Z axis (viewing direction)
+  // This matches whitebox.py's "dist = 2000" logic
+
+  camera.matrixWorld.multiply(new Matrix4().makeTranslation(0, 0, 2000));
 
   // Apply tiles group transform
   camera.matrixWorld.premultiply(tiles.group.matrixWorld);
@@ -188,6 +256,12 @@ function positionCamera() {
 
   // Match whitebox.py visually
   // view.view_height_meters determines the vertical extent of the view in world units (meters)
+  // NOTE: whitebox.py uses parallel_scale = VIEW_HEIGHT_METERS / 2
+  // This means the total height of the view is VIEW_HEIGHT_METERS.
+  // However, the camera is positioned at a significant height.
+  // In whitebox.py, the camera is positioned so the focal point (0,0,0) is in the CENTER of the screen.
+  // (0,0,0) corresponds to the lat/lon in view.json.
+
   const frustumHeight = view.view_height_meters || 200;
   const halfHeight = frustumHeight / 2;
   const halfWidth = halfHeight * aspect;
@@ -203,6 +277,12 @@ function positionCamera() {
   // Reset zoom to 1.0 to ensure strict 1:1 scale with world units
   ortho.zoom = 1.0;
   ortho.updateProjectionMatrix();
+
+  // Shift the camera to center the target point
+  // In 3d-tiles-renderer, the camera looks at the target point.
+  // But if we are using getObjectFrame, the camera is positioned relative to the target point.
+  // We want the target point to be in the center of the screen.
+  // That is already what getObjectFrame does (looks at the origin of the frame).
 
   console.log(`Camera positioned above Times Square at ${HEIGHT}m`);
   console.log(`Azimuth: ${CAMERA_AZIMUTH}°, Elevation: ${CAMERA_ELEVATION}°`);

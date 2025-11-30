@@ -789,10 +789,38 @@ def render_tile(
     plotter.camera.up = (0, 1, 0)
   else:
     # Standard isometric view - use azimuth for camera positioning
-    azimuth_rad = np.radians(CAMERA_AZIMUTH)
-    cx = dist * np.cos(elevation_rad) * np.sin(azimuth_rad)
-    cy = dist * np.cos(elevation_rad) * np.cos(azimuth_rad)
-    cz = -dist * np.sin(elevation_rad)
+    # Geometry is ALREADY rotated by ORIENTATION_DEG to align azimuth with +Y
+    # So we just need to look from -Y direction (front) to see it correctly
+    # Or more simply: position camera at (0, -dist, dist) relative to rotation?
+
+    # Actually: The geometry is rotated around Z axis.
+    # If we want to see the "front" of the rotated geometry, we should look from a fixed direction.
+    # But current code calculates camera position based on azimuth AGAIN.
+    # Let's simplify:
+    # 1. Geometry is rotated so "North" (or azimuth dir) points to +Y
+    # 2. We want to look at it from the "South" (or opposite azimuth)
+
+    # Fixed camera position relative to the ROTATED geometry
+    # Looking from "South" (-Y) towards "North" (+Y)
+    # Elevation determines height (Z) and distance (Y)
+
+    # Convert elevation to radians (0=horizontal, -90=down)
+    elev_rad = np.radians(CAMERA_ELEVATION_DEG)
+
+    # Calculate Y and Z components based on elevation
+    # Z is height: sin(elevation)
+    # Y is distance back: cos(elevation)
+
+    # Since elevation is negative (e.g. -45), sin is negative.
+    # We want camera ABOVE ground (+Z), so negate sin(elev) * dist
+    cz = -dist * np.sin(elev_rad)
+
+    # We want camera "BACK" from the object.
+    # If geometry is aligned to Y axis, we look from -Y.
+    cy = -dist * np.cos(elev_rad)
+
+    # X is 0 (centered)
+    cx = 0
 
     plotter.camera.position = (cx, cy, cz)
     plotter.camera.focal_point = (0, 0, 0)
