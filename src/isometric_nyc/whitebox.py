@@ -24,12 +24,23 @@ LON = -73.9855
 SIZE_METERS = 300
 ORIENTATION_DEG = 29
 
+# Viewport settings
+VIEWPORT_WIDTH = 2560
+VIEWPORT_HEIGHT = 1440
+
+# Camera settings
+CAMERA_ZOOM = 100  # Parallel scale - lower = more zoomed in, higher = more zoomed out
+CAMERA_AZIMUTH = (
+  30 + 180
+)  # Horizontal angle (degrees) - 0=North, 90=East, 180=South, 270=West
+CAMERA_ELEVATION = 0.7  # Vertical angle factor - higher = more top-down view
+
 # Satellite alignment tweaks (adjust if needed)
-SATELLITE_ZOOM = 18  # Google Maps zoom level (lower=more overhead, higher=more detail but potentially angled)
+SATELLITE_ZOOM = 18  # Google Maps zoom level (lower=more overhead, higher=more detail)
 SATELLITE_TILE_SIZE = (
-  "640x640"  # Size per tile (max 640x640 for free, 2048x2048 for premium)
+  640  # Size per tile in pixels (max 640 for free, 2048 for premium)
 )
-SATELLITE_GRID = 3  # Fetch NxN grid of tiles (e.g., 3x3 = 9 tiles)
+# SATELLITE_GRID is now calculated automatically based on coverage needs
 GROUND_Z = 10  # Height of ground plane (adjust if not aligned)
 BUILDING_OPACITY = 1  # Opacity for buildings (1.0=solid, 0.0=transparent)
 
@@ -93,6 +104,43 @@ def save_tile_to_cache(cache_key: str, image: Image.Image) -> None:
   image.save(cache_path, "PNG")
 
 
+def calculate_required_grid_size(
+  lat: float, zoom: int, tile_size_px: int, ground_size_meters: float
+) -> int:
+  """
+  Calculate the minimum grid size needed to cover the ground area.
+
+  Args:
+    lat: Latitude in degrees
+    zoom: Google Maps zoom level
+    tile_size_px: Size of each tile in pixels
+    ground_size_meters: Physical size of the ground plane in meters
+
+  Returns:
+    Grid size (NxN) needed to cover the area
+  """
+  import math
+
+  # Calculate meters per pixel at this zoom and latitude
+  meters_per_pixel = (156543.03392 * math.cos(math.radians(lat))) / (2**zoom)
+
+  # Calculate meters per tile
+  meters_per_tile = tile_size_px * meters_per_pixel
+
+  # Calculate how many tiles needed to cover the ground
+  # Add extra coverage for rotation (diagonal = sqrt(2) * side)
+  # and some padding for safety
+  diagonal_coverage = ground_size_meters * 1.42  # sqrt(2) ≈ 1.414
+  tiles_needed = math.ceil(diagonal_coverage / meters_per_tile)
+
+  # Ensure odd number for symmetric centering
+  if tiles_needed % 2 == 0:
+    tiles_needed += 1
+
+  # Minimum of 3x3
+  return max(3, tiles_needed)
+
+
 def fetch_satellite_image(lat, lon, zoom=19, size="2048x2048"):
   """Fetch satellite imagery from Google Maps Static API with caching."""
   # Check cache first
@@ -120,46 +168,52 @@ def fetch_satellite_image(lat, lon, zoom=19, size="2048x2048"):
   return image
 
 
-def fetch_satellite_tiles(center_lat, center_lon, zoom, tile_size, grid_size):
+def fetch_satellite_tiles(
+  center_lat: float,
+  center_lon: float,
+  zoom: int,
+  tile_size_px: int,
+  ground_size_meters: float,
+):
   """
   Fetch a grid of satellite tiles and stitch them together.
+  Automatically calculates how many tiles are needed for coverage.
 
   Args:
     center_lat, center_lon: Center coordinates
     zoom: Google Maps zoom level
-    tile_size: Size of each tile (e.g., "640x640")
-    grid_size: NxN grid (e.g., 3 for 3x3 = 9 tiles)
+    tile_size_px: Size of each tile in pixels
+    ground_size_meters: Physical size of ground to cover in meters
 
   Returns:
     Tuple of (stitched PIL Image, actual coverage in meters)
   """
   import math
 
-  tile_px = int(tile_size.split("x")[0])
+  # Calculate required grid size
+  grid_size = calculate_required_grid_size(
+    center_lat, zoom, tile_size_px, ground_size_meters
+  )
+
+  tile_size = f"{tile_size_px}x{tile_size_px}"
 
   # Calculate the offset in degrees for each tile
-  # At zoom level z, the number of pixels per degree of longitude at equator is:
-  # pixels_per_degree = (256 * 2^z) / 360
-  # We need to adjust for latitude using Mercator projection
   meters_per_pixel = (156543.03392 * math.cos(math.radians(center_lat))) / (2**zoom)
 
   # Calculate degree offset per tile
-  # 1 degree latitude ≈ 111,111 meters
-  # 1 degree longitude at this lat ≈ 111,111 * cos(lat) meters
-  meters_per_tile = tile_px * meters_per_pixel
+  meters_per_tile = tile_size_px * meters_per_pixel
   lat_offset_per_tile = meters_per_tile / 111111.0
   lon_offset_per_tile = meters_per_tile / (
     111111.0 * math.cos(math.radians(center_lat))
   )
 
   print(
-    f"   📐 Fetching {grid_size}x{grid_size} tiles, "
-    f"offset: {lat_offset_per_tile:.5f}°, {lon_offset_per_tile:.5f}°"
+    f"   📐 Auto-calculated grid: {grid_size}x{grid_size} tiles needed for {ground_size_meters:.0f}m coverage"
   )
-  print(f"   📐 Each tile covers {meters_per_tile:.1f}m")
+  print(f"   📐 Each tile covers {meters_per_tile:.1f}m at zoom {zoom}")
 
   # Create canvas for stitching
-  canvas_size = tile_px * grid_size
+  canvas_size = tile_size_px * grid_size
   canvas = Image.new("RGB", (canvas_size, canvas_size))
 
   # Calculate starting position (top-left corner)
@@ -185,8 +239,8 @@ def fetch_satellite_tiles(center_lat, center_lon, zoom, tile_size, grid_size):
       tile_image = fetch_satellite_image(tile_lat, tile_lon, zoom, tile_size)
 
       # Paste into canvas
-      x = col * tile_px
-      y = row * tile_px
+      x = col * tile_size_px
+      y = row * tile_size_px
       canvas.paste(tile_image, (x, y))
 
   # Calculate actual coverage in meters
@@ -314,7 +368,19 @@ def fetch_geometry_v5(conn, minx, miny, maxx, maxy):
     return rows
 
 
-def render_tile(lat, lon, size_meters=300, orientation_deg=29, use_satellite=True):
+def render_tile(
+  lat,
+  lon,
+  size_meters=300,
+  orientation_deg=29,
+  use_satellite=True,
+  viewport_width=None,
+  viewport_height=None,
+):
+  # Use defaults from constants if not specified
+  viewport_width = viewport_width or VIEWPORT_WIDTH
+  viewport_height = viewport_height or VIEWPORT_HEIGHT
+
   conn = get_db_connection()
 
   # 1. Coordinate Transform: GPS -> NYC State Plane (FEET)
@@ -351,9 +417,13 @@ def render_tile(lat, lon, size_meters=300, orientation_deg=29, use_satellite=Tru
   if use_satellite:
     print("🛰️  Fetching satellite imagery...")
     try:
+      # Calculate ground size for satellite coverage
+      ground_size = size_meters * 1.5
+
       # Get high-res satellite image by stitching tiles
+      # Grid size is automatically calculated based on coverage needs
       satellite_image, actual_coverage_meters = fetch_satellite_tiles(
-        lat, lon, SATELLITE_ZOOM, SATELLITE_TILE_SIZE, SATELLITE_GRID
+        lat, lon, SATELLITE_ZOOM, SATELLITE_TILE_SIZE, ground_size
       )
 
       # Ensure image is in RGB mode (not grayscale or RGBA)
@@ -361,7 +431,7 @@ def render_tile(lat, lon, size_meters=300, orientation_deg=29, use_satellite=Tru
         satellite_image = satellite_image.convert("RGB")
 
       # Calculate how much of the satellite image we need to use
-      ground_size = size_meters * 1.5
+      # ground_size already calculated above
 
       # Calculate crop area: we want to extract the center portion that matches our ground size
       # The satellite covers actual_coverage_meters, we want ground_size
@@ -422,7 +492,7 @@ def render_tile(lat, lon, size_meters=300, orientation_deg=29, use_satellite=Tru
       use_satellite = False
 
   # 5. Build Scene
-  plotter = pv.Plotter(window_size=(1280, 720))
+  plotter = pv.Plotter(window_size=(viewport_width, viewport_height))
   plotter.set_background(COLORS["background"])
 
   print(f"🏗️  Building meshes from {len(rows)} surfaces...")
@@ -677,10 +747,8 @@ def render_tile(lat, lon, size_meters=300, orientation_deg=29, use_satellite=Tru
 
   # 7. SimCity 3000 Camera Setup
   plotter.camera.enable_parallel_projection()
-  alpha = np.arctan(0.7)  # Elevation angle
-  beta = np.radians(
-    30 + 180
-  )  # Azimuth angle (+180 to look from south instead of north)
+  alpha = np.arctan(CAMERA_ELEVATION)  # Elevation angle
+  beta = np.radians(CAMERA_AZIMUTH)  # Azimuth angle
   dist = 2000
 
   cx = dist * np.cos(alpha) * np.sin(beta)
@@ -690,9 +758,9 @@ def render_tile(lat, lon, size_meters=300, orientation_deg=29, use_satellite=Tru
   plotter.camera.position = (cx, cy, cz)
   plotter.camera.focal_point = (0, 0, 0)
 
-  # Default values
+  # Camera orientation and zoom
   plotter.camera.up = (0, 0, 1)
-  plotter.camera.parallel_scale = size_meters / 4
+  plotter.camera.parallel_scale = CAMERA_ZOOM
 
   print("📸 Displaying Isometric Render...")
   plotter.show()
@@ -713,6 +781,8 @@ def main():
     size_meters=SIZE_METERS,
     orientation_deg=ORIENTATION_DEG,
     use_satellite=True,
+    viewport_width=VIEWPORT_WIDTH,
+    viewport_height=VIEWPORT_HEIGHT,
   )
 
 
