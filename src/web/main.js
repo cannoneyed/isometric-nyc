@@ -26,21 +26,12 @@ const API_KEY = import.meta.env.VITE_GOOGLE_TILES_API_KEY;
 console.log("API Key loaded:", API_KEY ? "Yes" : "No");
 
 // Fixed canvas size (consistent rendering regardless of window size)
-const CANVAS_WIDTH = 1280;
-const CANVAS_HEIGHT = 720;
+const CANVAS_WIDTH = view.width_px;
+const CANVAS_HEIGHT = view.height_px;
 
-// Check if we're in export mode (for screenshot capture)
+// Check for export mode (hides UI for clean screenshots)
 const urlParams = new URLSearchParams(window.location.search);
 const EXPORT_MODE = urlParams.get("export") === "true";
-
-if (EXPORT_MODE) {
-  console.log("🎬 Export mode enabled - will signal when ready for screenshot");
-  window.__EXPORT_READY = false;
-  window.__TILES_LOADED = false;
-  window.__CAMERA_POSITIONED = false;
-}
-
-const EXPORT_DELAY_MS = 2000; // 2 seconds should be enough for tiles to render
 
 // Madison Square Garden coordinates
 const LAT = view.lat;
@@ -125,14 +116,14 @@ function init() {
   // Connect controls to the tiles ellipsoid and position camera
   tiles.addEventListener("load-tile-set", () => {
     controls.setEllipsoid(tiles.ellipsoid, tiles.group);
-    positionCamera();
 
-    // Signal tileset is loaded for export mode
-    if (EXPORT_MODE) {
-      window.__TILES_LOADED = true;
-      console.log("🗺️ Tileset loaded");
-      checkExportReady();
-    }
+    // Delay camera positioning to ensure controls/transition are fully initialized
+    // This fixes the "zoomed out on first load" issue
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        positionCamera();
+      });
+    });
   });
 
   tiles.setCamera(transition.camera);
@@ -178,25 +169,40 @@ function positionCamera() {
   controls.adjustCamera(transition.perspectiveCamera);
   controls.adjustCamera(transition.orthographicCamera);
 
-  // Fix orthographic camera aspect ratio to avoid distortion
-  // GlobeControls sets the frustum, but we need to adjust for our canvas aspect
-  const ortho = transition.orthographicCamera;
-  const aspect = CANVAS_WIDTH / CANVAS_HEIGHT;
-  const frustumHeight = ortho.top - ortho.bottom; // Get current vertical size
-  const halfHeight = frustumHeight / 2;
-  const halfWidth = halfHeight * aspect;
-
-  // Recalculate frustum with correct aspect ratio
-  ortho.left = -halfWidth;
-  ortho.right = halfWidth;
-  // Keep top/bottom as GlobeControls set them
-  ortho.updateProjectionMatrix();
-
   // Switch to orthographic mode by default
+  // IMPORTANT: Do this BEFORE setting frustum, as toggle() may reset camera values
   if (isOrthographic && transition.mode === "perspective") {
     controls.getPivotPoint(transition.fixedPoint);
     transition.toggle();
   }
+
+  // Calculate orthographic frustum ourselves (don't rely on GlobeControls values)
+  // This ensures consistent zoom in both normal and headless browser modes
+  // IMPORTANT: Set this AFTER toggle() to prevent it from being overwritten
+  const ortho = transition.orthographicCamera;
+  const aspect = CANVAS_WIDTH / CANVAS_HEIGHT;
+
+  // Use camera HEIGHT to calculate view size
+  // At 300m height with ~60° FOV equivalent, we see about 350m vertically
+  // Using tan(30°) * HEIGHT * 2 for the vertical view size
+  const fovEquivalent = 60; // degrees - equivalent FOV for orthographic
+  const halfAngle = (fovEquivalent / 2) * MathUtils.DEG2RAD;
+  const frustumHeight = HEIGHT * Math.tan(halfAngle) * 2;
+  const halfHeight = frustumHeight / 2;
+  const halfWidth = halfHeight * aspect;
+
+  console.log(
+    `📐 Calculated frustum: height=${frustumHeight.toFixed(
+      0
+    )}m from camera HEIGHT=${HEIGHT}m`
+  );
+
+  // Set frustum with calculated values
+  ortho.top = halfHeight;
+  ortho.bottom = -halfHeight;
+  ortho.left = -halfWidth;
+  ortho.right = halfWidth;
+  ortho.updateProjectionMatrix();
 
   console.log(`Camera positioned above Times Square at ${HEIGHT}m`);
   console.log(`Azimuth: ${CAMERA_AZIMUTH}°, Elevation: ${CAMERA_ELEVATION}°`);
@@ -211,40 +217,6 @@ function positionCamera() {
         0
       )} (aspect=${aspect.toFixed(2)})`
   );
-
-  // Signal camera is positioned for export mode
-  if (EXPORT_MODE) {
-    window.__CAMERA_POSITIONED = true;
-    console.log("📷 Camera positioned - waiting for tiles to load...");
-    checkExportReady();
-  }
-}
-
-// Check if ready for export screenshot (called after tiles loaded and camera positioned)
-let exportReadyTimeout = null;
-function checkExportReady() {
-  if (!EXPORT_MODE) return;
-
-  // Need both conditions to be true
-  if (!window.__TILES_LOADED || !window.__CAMERA_POSITIONED) {
-    return;
-  }
-
-  // Clear any existing timeout
-  if (exportReadyTimeout) {
-    clearTimeout(exportReadyTimeout);
-  }
-
-  // Wait for tiles to finish loading and rendering
-  // The tileset loads progressively, so we need to give it time
-  console.log(
-    `⏳ Waiting ${EXPORT_DELAY_MS / 1000}s for tiles to finish rendering...`
-  );
-
-  exportReadyTimeout = setTimeout(() => {
-    window.__EXPORT_READY = true;
-    console.log("✅ Export ready - screenshot can be taken now");
-  }, EXPORT_DELAY_MS);
 }
 
 function toggleOrthographic() {
@@ -274,7 +246,7 @@ function onKeyDown(event) {
 }
 
 function addUI() {
-  // Don't add UI in export mode (we want a clean screenshot)
+  // Hide UI in export mode for clean screenshots
   if (EXPORT_MODE) return;
 
   const info = document.createElement("div");
@@ -337,9 +309,6 @@ function getCameraInfo() {
 
 // Debounced logging of camera state
 function logCameraState() {
-  // Skip logging in export mode to reduce noise
-  if (EXPORT_MODE) return;
-
   const info = getCameraInfo();
   if (!info) return;
 

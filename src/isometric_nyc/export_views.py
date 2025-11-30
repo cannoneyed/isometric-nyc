@@ -110,18 +110,17 @@ def export_web_view(output_dir: Path, port: int) -> Path:
   print(f"🌐 Capturing web view from {url}...")
 
   with sync_playwright() as p:
-    # Launch browser with GPU support for WebGL
+    # Launch browser in non-headless mode for proper WebGL rendering
     browser = p.chromium.launch(
-      headless=True,
+      headless=False,
       args=[
         "--enable-webgl",
         "--use-gl=angle",
-        "--enable-features=Vulkan",
         "--ignore-gpu-blocklist",
       ],
     )
     context = browser.new_context(
-      viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT},
+      viewport={"width": 1280, "height": 720},
       device_scale_factor=1,
     )
     page = context.new_page()
@@ -133,19 +132,14 @@ def export_web_view(output_dir: Path, port: int) -> Path:
     print("   ⏳ Loading page...")
     page.goto(url, wait_until="networkidle")
 
-    # Wait for the export ready signal (up to 90 seconds)
-    print("   ⏳ Waiting for tiles to load...")
-    try:
-      page.wait_for_function("window.__EXPORT_READY === true", timeout=90000)
-    except Exception as e:
-      # Debug: check what state we're in
-      tiles_loaded = page.evaluate("window.__TILES_LOADED")
-      camera_positioned = page.evaluate("window.__CAMERA_POSITIONED")
-      print(
-        f"   ⚠️  Timeout! TILES_LOADED={tiles_loaded}, "
-        f"CAMERA_POSITIONED={camera_positioned}"
-      )
-      raise e
+    # Reload page - Playwright has initialization issues on first load
+    print("   🔄 Reloading page...")
+    page.wait_for_timeout(2000)
+    page.reload(wait_until="networkidle")
+
+    # Wait for tiles to load
+    print("   ⏳ Waiting 10 seconds for tiles to load...")
+    page.wait_for_timeout(10000)
 
     # Take screenshot
     print("   📸 Taking screenshot...")
