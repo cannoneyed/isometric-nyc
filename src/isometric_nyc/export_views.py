@@ -29,7 +29,7 @@ from isometric_nyc.whitebox import (
 )
 
 # Default output directory
-DEFAULT_OUTPUT_DIR = Path(__file__).parent.parent.parent.parent / "exports"
+DEFAULT_OUTPUT_DIR = Path(__file__).parent.parent.parent / "exports"
 
 # Web server configuration
 WEB_DIR = Path(__file__).parent.parent / "web"
@@ -105,7 +105,7 @@ def export_web_view(output_dir: Path, port: int) -> Path:
   timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
   output_path = output_dir / f"web_{timestamp}.png"
 
-  url = f"http://localhost:{port}/?export=true&width={VIEWPORT_WIDTH}&height={VIEWPORT_HEIGHT}"
+  url = f"http://localhost:{port}/?export=true"
 
   print(f"🌐 Capturing web view from {url}...")
 

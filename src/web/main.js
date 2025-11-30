@@ -25,18 +25,16 @@ import view from "../view.json";
 const API_KEY = import.meta.env.VITE_GOOGLE_TILES_API_KEY;
 console.log("API Key loaded:", API_KEY ? "Yes" : "No");
 
+// Fixed canvas size (consistent rendering regardless of window size)
+const CANVAS_WIDTH = 1280;
+const CANVAS_HEIGHT = 720;
+
 // Check if we're in export mode (for screenshot capture)
 const urlParams = new URLSearchParams(window.location.search);
 const EXPORT_MODE = urlParams.get("export") === "true";
 
-// In export mode, use explicit viewport dimensions from URL params
-const EXPORT_WIDTH = parseInt(urlParams.get("width")) || 2560;
-const EXPORT_HEIGHT = parseInt(urlParams.get("height")) || 1440;
-
 if (EXPORT_MODE) {
   console.log("🎬 Export mode enabled - will signal when ready for screenshot");
-  console.log(`📐 Export viewport: ${EXPORT_WIDTH}x${EXPORT_HEIGHT}`);
-  console.log(`📐 Window viewport: ${window.innerWidth}x${window.innerHeight}`);
   window.__EXPORT_READY = false;
   window.__TILES_LOADED = false;
   window.__CAMERA_POSITIONED = false;
@@ -66,20 +64,19 @@ init();
 animate();
 
 function init() {
-  // Use export dimensions in export mode, otherwise use window dimensions
-  const viewportWidth = EXPORT_MODE ? EXPORT_WIDTH : window.innerWidth;
-  const viewportHeight = EXPORT_MODE ? EXPORT_HEIGHT : window.innerHeight;
-  const aspect = viewportWidth / viewportHeight;
+  // Use fixed canvas dimensions for consistent rendering
+  const aspect = CANVAS_WIDTH / CANVAS_HEIGHT;
+  console.log(
+    `🖥️ Fixed canvas: ${CANVAS_WIDTH}x${CANVAS_HEIGHT}, aspect: ${aspect.toFixed(
+      3
+    )}`
+  );
 
-  if (EXPORT_MODE) {
-    console.log(`🖥️ Using viewport: ${viewportWidth}x${viewportHeight}, aspect: ${aspect.toFixed(3)}`);
-  }
-
-  // Renderer
+  // Renderer - fixed size, no devicePixelRatio scaling for consistency
   renderer = new WebGLRenderer({ antialias: true });
   renderer.setClearColor(0x87ceeb); // Sky blue
-  renderer.setPixelRatio(EXPORT_MODE ? 1 : window.devicePixelRatio); // Use 1:1 for export
-  renderer.setSize(viewportWidth, viewportHeight);
+  renderer.setPixelRatio(1); // Fixed 1:1 pixel ratio for consistent rendering
+  renderer.setSize(CANVAS_WIDTH, CANVAS_HEIGHT);
   document.body.appendChild(renderer.domElement);
 
   // Scene
@@ -181,6 +178,20 @@ function positionCamera() {
   controls.adjustCamera(transition.perspectiveCamera);
   controls.adjustCamera(transition.orthographicCamera);
 
+  // Fix orthographic camera aspect ratio to avoid distortion
+  // GlobeControls sets the frustum, but we need to adjust for our canvas aspect
+  const ortho = transition.orthographicCamera;
+  const aspect = CANVAS_WIDTH / CANVAS_HEIGHT;
+  const frustumHeight = ortho.top - ortho.bottom; // Get current vertical size
+  const halfHeight = frustumHeight / 2;
+  const halfWidth = halfHeight * aspect;
+
+  // Recalculate frustum with correct aspect ratio
+  ortho.left = -halfWidth;
+  ortho.right = halfWidth;
+  // Keep top/bottom as GlobeControls set them
+  ortho.updateProjectionMatrix();
+
   // Switch to orthographic mode by default
   if (isOrthographic && transition.mode === "perspective") {
     controls.getPivotPoint(transition.fixedPoint);
@@ -191,14 +202,18 @@ function positionCamera() {
   console.log(`Azimuth: ${CAMERA_AZIMUTH}°, Elevation: ${CAMERA_ELEVATION}°`);
   console.log(`Mode: ${transition.mode}`);
 
+  // Log camera info
+  console.log(
+    `📷 Ortho frustum: L=${ortho.left.toFixed(0)} R=${ortho.right.toFixed(
+      0
+    )} ` +
+      `T=${ortho.top.toFixed(0)} B=${ortho.bottom.toFixed(
+        0
+      )} (aspect=${aspect.toFixed(2)})`
+  );
+
   // Signal camera is positioned for export mode
   if (EXPORT_MODE) {
-    const ortho = transition.orthographicCamera;
-    console.log(
-      `📷 Ortho camera bounds: L=${ortho.left.toFixed(0)} R=${ortho.right.toFixed(0)} ` +
-        `T=${ortho.top.toFixed(0)} B=${ortho.bottom.toFixed(0)}`
-    );
-    console.log(`📷 Ortho camera position: ${ortho.position.toArray().map((v) => v.toFixed(0))}`);
     window.__CAMERA_POSITIONED = true;
     console.log("📷 Camera positioned - waiting for tiles to load...");
     checkExportReady();
@@ -288,20 +303,8 @@ function addUI() {
 }
 
 function onWindowResize() {
-  // In export mode, ignore resize events - use fixed dimensions
-  if (EXPORT_MODE) return;
-
-  const { perspectiveCamera, orthographicCamera } = transition;
-  const aspect = window.innerWidth / window.innerHeight;
-
-  perspectiveCamera.aspect = aspect;
-  perspectiveCamera.updateProjectionMatrix();
-
-  orthographicCamera.left = -orthographicCamera.top * aspect;
-  orthographicCamera.right = -orthographicCamera.left;
-  orthographicCamera.updateProjectionMatrix();
-
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  // Canvas is fixed size - don't resize on window changes
+  // This ensures consistent rendering regardless of window size
 }
 
 // Extract current camera azimuth, elevation, height from its world matrix
