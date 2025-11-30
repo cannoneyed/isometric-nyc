@@ -49,7 +49,11 @@ let isOrthographic = true; // Start in orthographic (isometric) mode
 
 // Debounced camera info logging
 let logTimeout = null;
-let lastCameraState = { az: 0, el: 0, height: 0 };
+let lastCameraState = { az: 0, el: 0, height: 0, zoom: 1 };
+
+// Tile loading tracking
+let tilesStableStartTime = 0;
+window.TILES_LOADED = false;
 
 init();
 animate();
@@ -176,32 +180,28 @@ function positionCamera() {
     transition.toggle();
   }
 
-  // Calculate orthographic frustum ourselves (don't rely on GlobeControls values)
-  // This ensures consistent zoom in both normal and headless browser modes
-  // IMPORTANT: Set this AFTER toggle() to prevent it from being overwritten
+  // Calculate orthographic frustum to match whitebox.py's CAMERA_ZOOM
+  // In VTK, parallel_scale = half the view height in world units
+  // whitebox.py uses CAMERA_ZOOM = 100, so view height = 200m
   const ortho = transition.orthographicCamera;
   const aspect = CANVAS_WIDTH / CANVAS_HEIGHT;
 
-  // Use camera HEIGHT to calculate view size
-  // At 300m height with ~60° FOV equivalent, we see about 350m vertically
-  // Using tan(30°) * HEIGHT * 2 for the vertical view size
-  const fovEquivalent = 60; // degrees - equivalent FOV for orthographic
-  const halfAngle = (fovEquivalent / 2) * MathUtils.DEG2RAD;
-  const frustumHeight = HEIGHT * Math.tan(halfAngle) * 2;
+  // Match whitebox.py visually
+  // view.view_height_meters determines the vertical extent of the view in world units (meters)
+  const frustumHeight = view.view_height_meters || 200;
   const halfHeight = frustumHeight / 2;
   const halfWidth = halfHeight * aspect;
 
-  console.log(
-    `📐 Calculated frustum: height=${frustumHeight.toFixed(
-      0
-    )}m from camera HEIGHT=${HEIGHT}m`
-  );
+  console.log(`📐 Frustum: height=${frustumHeight}m`);
 
   // Set frustum with calculated values
   ortho.top = halfHeight;
   ortho.bottom = -halfHeight;
   ortho.left = -halfWidth;
   ortho.right = halfWidth;
+
+  // Reset zoom to 1.0 to ensure strict 1:1 scale with world units
+  ortho.zoom = 1.0;
   ortho.updateProjectionMatrix();
 
   console.log(`Camera positioned above Times Square at ${HEIGHT}m`);
@@ -304,6 +304,7 @@ function getCameraInfo() {
     azimuth: cartographicResult.azimuth * MathUtils.RAD2DEG,
     elevation: cartographicResult.elevation * MathUtils.RAD2DEG,
     roll: cartographicResult.roll * MathUtils.RAD2DEG,
+    zoom: camera.zoom,
   };
 }
 
@@ -316,13 +317,15 @@ function logCameraState() {
   const changed =
     Math.abs(info.azimuth - lastCameraState.az) > 0.5 ||
     Math.abs(info.elevation - lastCameraState.el) > 0.5 ||
-    Math.abs(info.height - lastCameraState.height) > 1;
+    Math.abs(info.height - lastCameraState.height) > 1 ||
+    Math.abs(info.zoom - lastCameraState.zoom) > 0.01;
 
   if (changed) {
     lastCameraState = {
       az: info.azimuth,
       el: info.elevation,
       height: info.height,
+      zoom: info.zoom,
     };
 
     // Clear existing timeout
@@ -334,9 +337,9 @@ function logCameraState() {
         `📷 Camera: Az=${info.azimuth.toFixed(1)}° El=${info.elevation.toFixed(
           1
         )}° ` +
-          `Height=${info.height.toFixed(0)}m | Lat=${info.lat.toFixed(
-            4
-          )}° Lon=${info.lon.toFixed(4)}°`
+          `Height=${info.height.toFixed(0)}m Zoom=${info.zoom.toFixed(
+            2
+          )} | Lat=${info.lat.toFixed(4)}° Lon=${info.lon.toFixed(4)}°`
       );
     }, 200);
   }
@@ -355,6 +358,22 @@ function animate() {
   tiles.setCamera(camera);
   tiles.setResolutionFromRenderer(camera, renderer);
   tiles.update();
+
+  // Check for tile loading stability
+  // We consider tiles loaded if downloading and parsing count is 0 for at least 1 second
+  if (tiles.stats.downloading === 0 && tiles.stats.parsing === 0) {
+    if (tilesStableStartTime === 0) {
+      tilesStableStartTime = performance.now();
+    } else if (performance.now() - tilesStableStartTime > 1000) {
+      if (!window.TILES_LOADED) {
+        window.TILES_LOADED = true;
+        console.log("✅ Tiles fully loaded and stable");
+      }
+    }
+  } else {
+    tilesStableStartTime = 0;
+    window.TILES_LOADED = false;
+  }
 
   // Log camera state (debounced)
   logCameraState();

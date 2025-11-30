@@ -7,5 +7,6 @@
   "camera_azimuth_degrees": 29.5,
   "camera_elevation_degrees": -90,
   "width_px": 1280,
-  "height_px": 720
+  "height_px": 720,
+  "view_height_meters": 200
 }

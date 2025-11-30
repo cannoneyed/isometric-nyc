@@ -27,13 +27,16 @@ with open(VIEW_JSON_PATH, "r") as f:
 LAT = view_json["lat"]
 LON = view_json["lon"]
 SIZE_METERS = view_json.get("size_meters", 300)  # Default 300m if not specified
+VIEW_HEIGHT_METERS = view_json.get("view_height_meters", 200)
 
 # Viewport settings
-VIEWPORT_WIDTH = 2560
-VIEWPORT_HEIGHT = 1440
+VIEWPORT_WIDTH = view_json["width_px"]
+VIEWPORT_HEIGHT = view_json["height_px"]
 
 # Camera settings from view.json
-CAMERA_ZOOM = 100  # Parallel scale - lower = more zoomed in, higher = more zoomed out
+CAMERA_ZOOM = (
+  VIEW_HEIGHT_METERS / 2
+)  # Parallel scale - lower = more zoomed in, higher = more zoomed out
 CAMERA_AZIMUTH = view_json["camera_azimuth_degrees"]  # Horizontal angle in degrees
 CAMERA_ELEVATION_DEG = view_json[
   "camera_elevation_degrees"

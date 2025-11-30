@@ -132,14 +132,14 @@ def export_web_view(output_dir: Path, port: int) -> Path:
     print("   ⏳ Loading page...")
     page.goto(url, wait_until="networkidle")
 
-    # Reload page - Playwright has initialization issues on first load
-    print("   🔄 Reloading page...")
-    page.wait_for_timeout(2000)
-    page.reload(wait_until="networkidle")
-
     # Wait for tiles to load
-    print("   ⏳ Waiting 10 seconds for tiles to load...")
-    page.wait_for_timeout(10000)
+    print("   ⏳ Waiting for tiles to stabilize (window.TILES_LOADED)...")
+    try:
+      page.wait_for_function("window.TILES_LOADED === true", timeout=60000)
+      print("   ✅ Tiles loaded signal received")
+    except Exception as e:
+      print(f"   ⚠️  Timeout waiting for tiles to load: {e}")
+      print("   📸 Taking screenshot anyway...")
 
     # Take screenshot
     print("   📸 Taking screenshot...")
