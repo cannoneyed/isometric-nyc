@@ -18,14 +18,9 @@ def _():
     from google import genai
     from google.genai import types
     from PIL import Image
-
-    from isometric_nyc.data.google_maps import GoogleMapsClient
-    from isometric_nyc.data.nyc_opendata import NYCOpenDataClient
     return (
         Any,
-        GoogleMapsClient,
         Image,
-        NYCOpenDataClient,
         dataclasses,
         genai,
         io,
@@ -63,7 +58,7 @@ def _(Any, address_input, dataclasses, gmaps, nyc):
     class BuildingData:
         address: str
         coords: tuple[float, float]
-    
+
         footprint_data: Any
         sv_url: str
         sat_url: str
@@ -92,7 +87,7 @@ def _(Any, address_input, dataclasses, gmaps, nyc):
             sat_url=sat_url,
             sv_url=sv_url
         )
-    
+
         return data
     return (get_building_data,)
 
