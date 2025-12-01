@@ -43,3 +43,24 @@ Generation will be done in one of two ways:
 
 [x] Modify `export_views.py` and the `web/main.js` script to be fully
 parameterized by a specific `view.json`.
+
+[x] Create a `plan_tiles.py` script that generates a plan for generating an m by
+n set of tiles. The user should specificy initial params (e.g. name, lat/lng,
+camera height, view angles, and m/n tiles) and then the planner should create
+mXn tile directories in the `tile_plans/<name>` directory, each one
+corresponding to a tile. Each tile MUST be offset and overlap by HALF of the
+tile width/height depending on if it's above/below or left/right of the previous
+tile. That is, if we have a 2 x 2 grid, then we'd have something like the
+following tile definitions:
+
+A B C D E F G H I
+
+Tile 1: A B | D E Tile 2: B C | E F Tile 3: D E | G H Tile 4: E F | H I
+
+The first tile (top left) should be centered on the specified lat/lng, and then
+we need to calculate the lat/lng offset for each of the subsequent tiles based
+on the isometric view frustum.
+
+Each one of the tile directories (e.g. `tile_plans/<name>/001`) must be
+populated with the `view.json` containing all of the camera metadata described
+above and needed in `export_views.py`
