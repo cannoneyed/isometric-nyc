@@ -64,3 +64,9 @@ on the isometric view frustum.
 Each one of the tile directories (e.g. `tile_plans/<name>/001`) must be
 populated with the `view.json` containing all of the camera metadata described
 above and needed in `export_views.py`
+
+[x] Create a `validate_plan.py` script that stitches together the generated
+images from `export_views.py` into a single large image to verify that the
+tiling logic is correct. This script should look for `render.png` and
+`whitebox.png` in each tile directory and stitch them into `full_render.png` and
+`full_whitebox.png` in the parent plan directory.
