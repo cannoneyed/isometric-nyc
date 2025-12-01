@@ -184,7 +184,7 @@ def generate_tile(
 
   contents = [
     generation_prompt,
-    whitebox_ref,
+    # whitebox_ref,
     render_ref,
     reference_ref,
   ]
