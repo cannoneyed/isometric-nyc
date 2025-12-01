@@ -6,6 +6,7 @@ app = marimo.App(width="medium")
 
 @app.cell
 def _():
+    import json
     import os
 
     import marimo as mo
@@ -13,7 +14,7 @@ def _():
     from google import genai
     from google.genai import types
     from PIL import Image
-    return Image, genai, load_dotenv, mo, os, types
+    return Image, genai, json, load_dotenv, mo, os, types
 
 
 @app.cell
@@ -33,17 +34,21 @@ def _(gemini_api_key, genai):
 
 
 @app.cell
-def _(os):
-    exports_dir = os.path.join(os.getcwd() , "exports")
+def _(json, os):
+    tile_dir = "/Users/andycoenen/cannoneyed/isometric-nyc/tile_plans/test/001"
     references_dir = os.path.join(os.getcwd() , "references")
 
-    lat = 40.7505
-    lon = -73.9934
-    return exports_dir, lat, lon, references_dir
+    view_json_path = os.path.join(tile_dir, 'view.json')
+    with open(view_json_path, 'r') as f:
+        view_json = json.load(f)
+
+    latitude = view_json["lat"]
+    longitude = view_json["lon"]
+    return latitude, longitude, references_dir, tile_dir
 
 
 @app.cell
-def _(client, exports_dir, lat, lon, os, types):
+def _(client, latitude, longitude, os, tile_dir, types):
     # First, we want to use Gemini to generate a description of the image so that we can ensure that the Nano Banana generation
     # follows the guide image correctly
     pixel_art_techniques = f"""
@@ -61,13 +66,13 @@ def _(client, exports_dir, lat, lon, os, types):
     """.strip()
 
     description_prompt = f"""
-    You are an advanced image analysis agent. Your task is to generate a checklist of no more than ten features from the attached overhead isometric render of a section of New York City. These features will be used to populate a prompt for an image generation model that will transform the input image into a stylized isometric pixel art style image in the style of SimCity 3000 based on the constraints. It's critical that the model adhere to the colors and textures of the guide image, and that's what the checklist should aim to ensure.
+    You are an advanced image analysis agent. Your task is to generate a checklist of no more than five features from the attached overhead isometric render of a section of New York City. These features will be used to populate a prompt for an image generation model that will transform the input image into a stylized isometric pixel art style image in the style of SimCity 3000 based on the constraints. It's critical that the model adhere to the colors and textures of the guide image, and that's what the checklist should aim to ensure.
 
     The following instructions will also be provided to the model for adhering to the pixel art style - you may emphasize any of these points to ensure that the model most accurately adheres to the colors, styles, and features of the reference image.
 
     The image is an overhead isometric render of the following coordinates:
-    latitude: {lat}
-    longitude: {lon}
+    latitude: {latitude}
+    longitude: {longitude}
 
     {pixel_art_techniques}
 
@@ -75,7 +80,7 @@ def _(client, exports_dir, lat, lon, os, types):
     """
 
     # Upload the full-size reference image
-    _render_path = os.path.join(exports_dir, "web_20251130_182827.png")
+    _render_path = os.path.join(tile_dir, "render.png")
     _render_ref = client.files.upload(file=_render_path)
 
     # Generate the checklist of features
@@ -135,18 +140,18 @@ def _(checklist, pixel_art_techniques):
 def _(
     Image,
     client,
-    exports_dir,
     generation_prompt,
     mo,
     os,
     references_dir,
+    tile_dir,
     types,
 ):
-    aspect_ratio = "16:9" # "1:1", "16:9", "9:16", "4:3", "3:4", "21:9", "9:21"
+    aspect_ratio = "1:1" # "1:1", "16:9", "9:16", "4:3", "3:4", "21:9", "9:21"
     resolution = "1K" # "1K", "2K", "4K"
 
-    whitebox_path = os.path.join(exports_dir, "whitebox_20251130_182821.png")
-    render_path = os.path.join(exports_dir, "web_20251130_182827_resized.png")
+    whitebox_path = os.path.join(tile_dir, "whitebox.png")
+    render_path = os.path.join(tile_dir, "render.png")
     reference_path = os.path.join(references_dir, "simcity.jpg")
 
     whitebox_ref = client.files.upload(file=whitebox_path)
@@ -169,14 +174,15 @@ def _(
         )
     )
 
+    output_path = os.path.join(tile_dir, 'generation.png')
     for part in response.parts:
         if part.text is not None:
             print(part.text)
         elif image:= part.as_image():
             print('Saving image...')
-            image.save("/tmp/output.png")
+            image.save(output_path)
 
-    _output_image = Image.open("/tmp/output.png")
+    _output_image = Image.open(output_path)
 
     mo.hstack([
         mo.vstack([mo.md("**Nano Banana Image**"), _output_image]),

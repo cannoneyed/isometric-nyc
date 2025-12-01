@@ -414,6 +414,25 @@ def render_tile(
   # Calculate zoom based on view height
   camera_zoom = view_height_meters / 2
 
+  # Auto-calculate required size based on view frustum to ensure coverage
+  # Calculate view diagonal in world units
+  if viewport_width and viewport_height:
+    aspect_ratio = viewport_width / viewport_height
+    view_width_meters = view_height_meters * aspect_ratio
+    # Diagonal of the visible rectangular area
+    diagonal_meters = (view_width_meters**2 + view_height_meters**2) ** 0.5
+
+    # We need to fetch geometry that covers this diagonal (plus rotation)
+    # The fetch logic uses a box of size = size_meters * 1.5
+    # So we need size_meters * 1.5 >= diagonal_meters
+    # Let's be conservative and ensure size_meters >= diagonal_meters
+    if size_meters < diagonal_meters:
+      print(
+        f"⚠️  Provided size_meters ({size_meters}m) is too small for view ({view_height_meters}m height)."
+      )
+      print(f"    Auto-adjusting fetch size to {diagonal_meters:.0f}m.")
+      size_meters = diagonal_meters
+
   conn = get_db_connection()
 
   # 1. Coordinate Transform: GPS -> NYC State Plane (FEET)

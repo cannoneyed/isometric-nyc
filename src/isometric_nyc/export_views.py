@@ -212,7 +212,7 @@ def main():
 
   args = parser.parse_args()
 
-  if args.tile_dir.exists():
+  if args.tile_dir and args.tile_dir.exists():
     view_json_path = args.tile_dir / "view.json"
     output_dir = args.tile_dir
     if not view_json_path.exists():
@@ -220,7 +220,7 @@ def main():
       sys.exit(1)
   else:
     output_dir = args.output_dir
-    if not args.view_json.exists():
+    if not args.view_json or not args.view_json.exists():
       view_json_path = DEFAULT_VIEW_JSON
     else:
       view_json_path = args.view_json
