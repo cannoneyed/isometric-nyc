@@ -26,24 +26,20 @@ import view from "../view.json";
 const API_KEY = import.meta.env.VITE_GOOGLE_TILES_API_KEY;
 console.log("API Key loaded:", API_KEY ? "Yes" : "No");
 
-// Fixed canvas size (consistent rendering regardless of window size)
-const CANVAS_WIDTH = view.width_px;
-const CANVAS_HEIGHT = view.height_px;
-
-// Check for export mode (hides UI for clean screenshots)
 const urlParams = new URLSearchParams(window.location.search);
 const EXPORT_MODE = urlParams.get("export") === "true";
 
-// Madison Square Garden coordinates
-const LAT = view.lat;
-const LON = view.lon;
-const HEIGHT = view.camera_height_meters; // meters above ground
-
-// Camera angles (SimCity isometric style)
-// Azimuth: direction camera is FACING (30° = NE-ish, like whitebox.py)
-// Elevation: negative = looking down at ground
-const CAMERA_AZIMUTH = view.camera_azimuth_degrees; // Square on the avenues
-const CAMERA_ELEVATION = view.camera_elevation_degrees; // Straight down
+// Configuration with URL param overrides
+const CANVAS_WIDTH = parseInt(urlParams.get("width")) || view.width_px;
+const CANVAS_HEIGHT = parseInt(urlParams.get("height")) || view.height_px;
+const LAT = parseFloat(urlParams.get("lat")) || view.lat;
+const LON = parseFloat(urlParams.get("lon")) || view.lon;
+const CAMERA_AZIMUTH =
+  parseFloat(urlParams.get("azimuth")) || view.camera_azimuth_degrees;
+const CAMERA_ELEVATION =
+  parseFloat(urlParams.get("elevation")) || view.camera_elevation_degrees;
+const VIEW_HEIGHT_METERS =
+  parseFloat(urlParams.get("view_height")) || view.view_height_meters || 200;
 
 let scene, renderer, controls, tiles, transition;
 let isOrthographic = true; // Start in orthographic (isometric) mode
@@ -262,7 +258,7 @@ function positionCamera() {
   // In whitebox.py, the camera is positioned so the focal point (0,0,0) is in the CENTER of the screen.
   // (0,0,0) corresponds to the lat/lon in view.json.
 
-  const frustumHeight = view.view_height_meters || 200;
+  const frustumHeight = VIEW_HEIGHT_METERS;
   const halfHeight = frustumHeight / 2;
   const halfWidth = halfHeight * aspect;
 

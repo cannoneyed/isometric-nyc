@@ -385,6 +385,8 @@ def render_tile(
   viewport_width=None,
   viewport_height=None,
   output_path=None,
+  camera_elevation_deg=None,
+  view_height_meters=None,
 ):
   """
   Render a 3D tile of NYC buildings.
@@ -396,10 +398,21 @@ def render_tile(
     use_satellite: Whether to use satellite imagery
     viewport_width, viewport_height: Render resolution
     output_path: If provided, save screenshot to this path instead of showing interactive viewer
+    camera_elevation_deg: Camera elevation angle in degrees
+    view_height_meters: Height of the view in world meters (affects zoom)
   """
   # Use defaults from constants if not specified
   viewport_width = viewport_width or VIEWPORT_WIDTH
   viewport_height = viewport_height or VIEWPORT_HEIGHT
+  camera_elevation_deg = (
+    camera_elevation_deg if camera_elevation_deg is not None else CAMERA_ELEVATION_DEG
+  )
+  view_height_meters = (
+    view_height_meters if view_height_meters is not None else VIEW_HEIGHT_METERS
+  )
+
+  # Calculate zoom based on view height
+  camera_zoom = view_height_meters / 2
 
   conn = get_db_connection()
 
@@ -777,10 +790,10 @@ def render_tile(
   # Elevation: -90 = looking straight down, 0 = horizontal, 90 = looking up
   # Note: Geometry is already rotated by -ORIENTATION_DEG to align with azimuth
   # So camera positioning doesn't need azimuth rotation for overhead view
-  elevation_rad = np.radians(CAMERA_ELEVATION_DEG)
+  elevation_rad = np.radians(camera_elevation_deg)
   dist = 2000
 
-  if abs(CAMERA_ELEVATION_DEG) > 80:  # Near-overhead view
+  if abs(camera_elevation_deg) > 80:  # Near-overhead view
     # Camera directly above, looking down
     # Geometry rotated by +azimuth aligns azimuth direction with +Y
     plotter.camera.position = (0, 0, dist)
@@ -805,7 +818,7 @@ def render_tile(
     # Elevation determines height (Z) and distance (Y)
 
     # Convert elevation to radians (0=horizontal, -90=down)
-    elev_rad = np.radians(CAMERA_ELEVATION_DEG)
+    elev_rad = np.radians(camera_elevation_deg)
 
     # Calculate Y and Z components based on elevation
     # Z is height: sin(elevation)
@@ -826,9 +839,9 @@ def render_tile(
     plotter.camera.focal_point = (0, 0, 0)
     plotter.camera.up = (0, 0, 1)
 
-  plotter.camera.parallel_scale = CAMERA_ZOOM
+  plotter.camera.parallel_scale = camera_zoom
 
-  print(f"📷 Camera: Az={CAMERA_AZIMUTH}° El={CAMERA_ELEVATION_DEG}°")
+  print(f"📷 Camera: Az={orientation_deg}° El={camera_elevation_deg}°")
   print(f"   Position: {plotter.camera.position}")
 
   if output_path:

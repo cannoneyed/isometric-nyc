@@ -2,64 +2,67 @@
 Export views from both whitebox.py and web viewer.
 
 This script captures screenshots from both rendering pipelines using the same
-view parameters defined in view.json. The outputs can be compared for
+view parameters defined in a JSON configuration file. The outputs can be compared for
 alignment verification.
 
 Usage:
-  uv run python src/isometric_nyc/export_views.py [--output-dir OUTPUT_DIR]
+  uv run python src/isometric_nyc/export_views.py [VIEW_JSON_PATH] [--output-dir OUTPUT_DIR]
 """
 
 import argparse
+import json
 import subprocess
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict
+from urllib.parse import urlencode
 
 from playwright.sync_api import sync_playwright
 
-from isometric_nyc.whitebox import (
-  LAT,
-  LON,
-  ORIENTATION_DEG,
-  SIZE_METERS,
-  VIEWPORT_HEIGHT,
-  VIEWPORT_WIDTH,
-  render_tile,
-)
+from isometric_nyc.whitebox import render_tile
 
 # Default output directory
 DEFAULT_OUTPUT_DIR = Path(__file__).parent.parent.parent / "exports"
+DEFAULT_VIEW_JSON = Path(__file__).parent.parent / "view.json"
 
 # Web server configuration
 WEB_DIR = Path(__file__).parent.parent / "web"
 WEB_PORT = 5173  # Vite default port
 
 
-def export_whitebox(output_dir: Path) -> Path:
+def load_view_config(path: Path) -> Dict[str, Any]:
+  """Load view configuration from JSON file."""
+  with open(path, "r") as f:
+    return json.load(f)
+
+
+def export_whitebox(output_dir: Path, view_config: Dict[str, Any]) -> Path:
   """
   Export screenshot from whitebox.py renderer.
 
   Args:
     output_dir: Directory to save the output
+    view_config: View configuration dictionary
 
   Returns:
     Path to the saved image
   """
   output_dir.mkdir(parents=True, exist_ok=True)
-  timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-  output_path = output_dir / f"whitebox_{timestamp}.png"
+  output_path = output_dir / "whitebox.png"
 
   print("🎨 Rendering whitebox view...")
   render_tile(
-    lat=LAT,
-    lon=LON,
-    size_meters=SIZE_METERS,
-    orientation_deg=ORIENTATION_DEG,
+    lat=view_config["lat"],
+    lon=view_config["lon"],
+    size_meters=view_config.get("size_meters", 300),
+    orientation_deg=view_config["camera_azimuth_degrees"],
     use_satellite=True,
-    viewport_width=VIEWPORT_WIDTH,
-    viewport_height=VIEWPORT_HEIGHT,
+    viewport_width=view_config["width_px"],
+    viewport_height=view_config["height_px"],
     output_path=str(output_path),
+    camera_elevation_deg=view_config["camera_elevation_degrees"],
+    view_height_meters=view_config.get("view_height_meters", 200),
   )
 
   return output_path
@@ -90,22 +93,35 @@ def start_web_server(web_dir: Path, port: int) -> subprocess.Popen:
   return process
 
 
-def export_web_view(output_dir: Path, port: int) -> Path:
+def export_web_view(output_dir: Path, port: int, view_config: Dict[str, Any]) -> Path:
   """
   Export screenshot from web viewer using Playwright.
 
   Args:
     output_dir: Directory to save the output
     port: Port where web server is running
+    view_config: View configuration dictionary
 
   Returns:
     Path to the saved image
   """
   output_dir.mkdir(parents=True, exist_ok=True)
-  timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-  output_path = output_dir / f"web_{timestamp}.png"
+  output_path = output_dir / "render.png"
 
-  url = f"http://localhost:{port}/?export=true"
+  # Construct URL parameters from view config
+  params = {
+    "export": "true",
+    "lat": view_config["lat"],
+    "lon": view_config["lon"],
+    "width": view_config["width_px"],
+    "height": view_config["height_px"],
+    "azimuth": view_config["camera_azimuth_degrees"],
+    "elevation": view_config["camera_elevation_degrees"],
+    "view_height": view_config.get("view_height_meters", 200),
+  }
+
+  query_string = urlencode(params)
+  url = f"http://localhost:{port}/?{query_string}"
 
   print(f"🌐 Capturing web view from {url}...")
 
@@ -120,7 +136,7 @@ def export_web_view(output_dir: Path, port: int) -> Path:
       ],
     )
     context = browser.new_context(
-      viewport={"width": 1280, "height": 720},
+      viewport={"width": view_config["width_px"], "height": view_config["height_px"]},
       device_scale_factor=1,
     )
     page = context.new_page()
@@ -156,6 +172,17 @@ def main():
     description="Export views from whitebox and web viewer"
   )
   parser.add_argument(
+    "--tile_dir",
+    type=Path,
+    default=None,
+    help="Path to tile generation directory",
+  )
+  parser.add_argument(
+    "--view_json",
+    type=Path,
+    help="Path to view.json configuration file",
+  )
+  parser.add_argument(
     "--output-dir",
     type=Path,
     default=DEFAULT_OUTPUT_DIR,
@@ -185,13 +212,31 @@ def main():
 
   args = parser.parse_args()
 
+  if args.tile_dir.exists():
+    view_json_path = args.tile_dir / "view.json"
+    output_dir = args.tile_dir
+    if not view_json_path.exists():
+      print(f"❌ Error: View config file not found: {view_json_path}")
+      sys.exit(1)
+  else:
+    output_dir = args.output_dir
+    if not args.view_json.exists():
+      view_json_path = DEFAULT_VIEW_JSON
+    else:
+      view_json_path = args.view_json
+
+  view_config = load_view_config(view_json_path)
+
   print("=" * 60)
   print("🏙️  ISOMETRIC NYC VIEW EXPORTER")
   print("=" * 60)
-  print(f"📁 Output directory: {args.output_dir}")
-  print(f"📍 View: {LAT}, {LON}")
-  print(f"📐 Size: {SIZE_METERS}m, Orientation: {ORIENTATION_DEG}°")
-  print(f"🖥️  Resolution: {VIEWPORT_WIDTH}x{VIEWPORT_HEIGHT}")
+  print(f"📄 Config: {view_json_path}")
+  print(f"📁 Output directory: {output_dir}")
+  print(f"📍 View: {view_config['lat']}, {view_config['lon']}")
+  print(
+    f"📐 Size: {view_config.get('size_meters', 300)}m, Orientation: {view_config['camera_azimuth_degrees']}°"
+  )
+  print(f"🖥️  Resolution: {view_config['width_px']}x{view_config['height_px']}")
   print("=" * 60)
 
   results = {}
@@ -200,7 +245,7 @@ def main():
   try:
     # Export whitebox view
     if not args.web_only:
-      whitebox_path = export_whitebox(args.output_dir)
+      whitebox_path = export_whitebox(output_dir, view_config)
       results["whitebox"] = whitebox_path
 
     # Export web view
@@ -210,7 +255,7 @@ def main():
         web_server = start_web_server(WEB_DIR, args.port)
 
       try:
-        web_path = export_web_view(args.output_dir, args.port)
+        web_path = export_web_view(output_dir, args.port, view_config)
         results["web"] = web_path
       finally:
         # Stop web server

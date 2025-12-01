@@ -41,5 +41,5 @@ Generation will be done in one of two ways:
 
 ---
 
-[] Modify `export_views.py` and the `web/main.js` script to be fully
+[x] Modify `export_views.py` and the `web/main.js` script to be fully
 parameterized by a specific `view.json`.
