@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple
 from urllib.parse import urlencode
 
 from playwright.sync_api import sync_playwright
@@ -52,18 +52,22 @@ def export_whitebox(output_dir: Path, view_config: Dict[str, Any]) -> Path:
   output_path = output_dir / "whitebox.png"
 
   print("🎨 Rendering whitebox view...")
-  render_tile(
-    lat=view_config["lat"],
-    lon=view_config["lon"],
-    size_meters=view_config.get("size_meters", 300),
-    orientation_deg=view_config["camera_azimuth_degrees"],
-    use_satellite=True,
-    viewport_width=view_config["width_px"],
-    viewport_height=view_config["height_px"],
-    output_path=str(output_path),
-    camera_elevation_deg=view_config["camera_elevation_degrees"],
-    view_height_meters=view_config.get("view_height_meters", 200),
-  )
+  try:
+    render_tile(
+      lat=view_config["lat"],
+      lon=view_config["lon"],
+      size_meters=view_config.get("size_meters", 300),
+      orientation_deg=view_config["camera_azimuth_degrees"],
+      use_satellite=True,
+      viewport_width=view_config["width_px"],
+      viewport_height=view_config["height_px"],
+      output_path=str(output_path),
+      camera_elevation_deg=view_config["camera_elevation_degrees"],
+      view_height_meters=view_config.get("view_height_meters", 200),
+    )
+  except Exception as e:
+    print(f"❌ Error rendering whitebox: {e}")
+    raise e
 
   return output_path
 
@@ -93,78 +97,86 @@ def start_web_server(web_dir: Path, port: int) -> subprocess.Popen:
   return process
 
 
-def export_web_view(output_dir: Path, port: int, view_config: Dict[str, Any]) -> Path:
+def process_web_views(tasks: List[Tuple[Path, Dict[str, Any]]], port: int) -> None:
   """
-  Export screenshot from web viewer using Playwright.
+  Process multiple web view exports in a single browser session.
 
   Args:
-    output_dir: Directory to save the output
+    tasks: List of (output_dir, view_config) tuples
     port: Port where web server is running
-    view_config: View configuration dictionary
-
-  Returns:
-    Path to the saved image
   """
-  output_dir.mkdir(parents=True, exist_ok=True)
-  output_path = output_dir / "render.png"
+  if not tasks:
+    return
 
-  # Construct URL parameters from view config
-  params = {
-    "export": "true",
-    "lat": view_config["lat"],
-    "lon": view_config["lon"],
-    "width": view_config["width_px"],
-    "height": view_config["height_px"],
-    "azimuth": view_config["camera_azimuth_degrees"],
-    "elevation": view_config["camera_elevation_degrees"],
-    "view_height": view_config.get("view_height_meters", 200),
-  }
-
-  query_string = urlencode(params)
-  url = f"http://localhost:{port}/?{query_string}"
-
-  print(f"🌐 Capturing web view from {url}...")
+  print(f"🌐 Capturing {len(tasks)} web views...")
 
   with sync_playwright() as p:
-    # Launch browser in non-headless mode for proper WebGL rendering
+    # Launch browser in headless mode (ensure WebGL works)
     browser = p.chromium.launch(
-      headless=False,
+      headless=True,
       args=[
         "--enable-webgl",
         "--use-gl=angle",
         "--ignore-gpu-blocklist",
       ],
     )
-    context = browser.new_context(
-      viewport={"width": view_config["width_px"], "height": view_config["height_px"]},
-      device_scale_factor=1,
-    )
-    page = context.new_page()
 
-    # Enable console logging from the page
-    page.on("console", lambda msg: print(f"   [browser] {msg.text}"))
+    # We can reuse the context if viewport size is constant, but it might vary per view.
+    # To be safe and handle varying sizes, we'll create a new page/context per view
+    # or check if we can resize.
+    # For now, creating a new page per view is safer and reasonably fast.
 
-    # Navigate to the page
-    print("   ⏳ Loading page...")
-    page.goto(url, wait_until="networkidle")
+    for output_dir, view_config in tasks:
+      output_dir.mkdir(parents=True, exist_ok=True)
+      output_path = output_dir / "render.png"
 
-    # Wait for tiles to load
-    print("   ⏳ Waiting for tiles to stabilize (window.TILES_LOADED)...")
-    try:
-      page.wait_for_function("window.TILES_LOADED === true", timeout=60000)
-      print("   ✅ Tiles loaded signal received")
-    except Exception as e:
-      print(f"   ⚠️  Timeout waiting for tiles to load: {e}")
-      print("   📸 Taking screenshot anyway...")
+      print(f"   Processing {output_dir.name}...")
 
-    # Take screenshot
-    print("   📸 Taking screenshot...")
-    page.screenshot(path=str(output_path))
+      # Construct URL parameters from view config
+      params = {
+        "export": "true",
+        "lat": view_config["lat"],
+        "lon": view_config["lon"],
+        "width": view_config["width_px"],
+        "height": view_config["height_px"],
+        "azimuth": view_config["camera_azimuth_degrees"],
+        "elevation": view_config["camera_elevation_degrees"],
+        "view_height": view_config.get("view_height_meters", 200),
+      }
+
+      query_string = urlencode(params)
+      url = f"http://localhost:{port}/?{query_string}"
+
+      context = browser.new_context(
+        viewport={"width": view_config["width_px"], "height": view_config["height_px"]},
+        device_scale_factor=1,
+      )
+      page = context.new_page()
+
+      # Enable console logging from the page
+      # page.on("console", lambda msg: print(f"   [browser] {msg.text}"))
+
+      # Navigate to the page
+      # print(f"   ⏳ Loading page {url}...")
+      page.goto(url, wait_until="networkidle")
+
+      # Wait for tiles to load
+      # print("   ⏳ Waiting for tiles to stabilize...")
+      try:
+        page.wait_for_function("window.TILES_LOADED === true", timeout=60000)
+        # print("   ✅ Tiles loaded")
+      except Exception as e:
+        print(f"   ⚠️  Timeout waiting for tiles to load: {e}")
+        print("   📸 Taking screenshot anyway...")
+
+      # Take screenshot
+      page.screenshot(path=str(output_path))
+      print(f"   ✅ Saved web render to {output_path}")
+
+      page.close()
+      context.close()
 
     browser.close()
-
-  print(f"   ✅ Saved to {output_path}")
-  return output_path
 
 
 def main():
@@ -175,18 +187,18 @@ def main():
     "--tile_dir",
     type=Path,
     default=None,
-    help="Path to tile generation directory",
+    help="Path to tile generation directory (can be single tile or parent of multiple)",
   )
   parser.add_argument(
     "--view_json",
     type=Path,
-    help="Path to view.json configuration file",
+    help="Path to view.json configuration file (for single view)",
   )
   parser.add_argument(
     "--output-dir",
     type=Path,
     default=DEFAULT_OUTPUT_DIR,
-    help="Directory to save exported images",
+    help="Directory to save exported images (for single view)",
   )
   parser.add_argument(
     "--whitebox-only",
@@ -209,54 +221,84 @@ def main():
     action="store_true",
     help="Don't start web server (assume it's already running)",
   )
+  parser.add_argument(
+    "--limit",
+    type=int,
+    help="Limit number of tiles to process (for debugging)",
+  )
 
   args = parser.parse_args()
 
+  # 1. Determine tasks: List of (output_dir, view_config)
+  tasks = []
+
   if args.tile_dir and args.tile_dir.exists():
-    view_json_path = args.tile_dir / "view.json"
-    output_dir = args.tile_dir
-    if not view_json_path.exists():
-      print(f"❌ Error: View config file not found: {view_json_path}")
-      sys.exit(1)
-  else:
-    output_dir = args.output_dir
-    if not args.view_json or not args.view_json.exists():
-      view_json_path = DEFAULT_VIEW_JSON
+    # Check if it's a single tile directory (has view.json)
+    if (args.tile_dir / "view.json").exists():
+      print(f"📂 Found single tile directory: {args.tile_dir}")
+      view_config = load_view_config(args.tile_dir / "view.json")
+      tasks.append((args.tile_dir, view_config))
     else:
-      view_json_path = args.view_json
+      # Assume it's a parent directory containing tile subdirectories
+      print(f"📂 Scanning parent directory for tiles: {args.tile_dir}")
+      subdirs = sorted([d for d in args.tile_dir.iterdir() if d.is_dir()])
+      for d in subdirs:
+        if (d / "view.json").exists():
+          view_config = load_view_config(d / "view.json")
+          tasks.append((d, view_config))
+      print(f"   Found {len(tasks)} tile directories.")
 
-  view_config = load_view_config(view_json_path)
+  elif args.view_json and args.view_json.exists():
+    print(f"📄 Using single view file: {args.view_json}")
+    view_config = load_view_config(args.view_json)
+    tasks.append((args.output_dir, view_config))
+
+  else:
+    # Default fallback
+    if DEFAULT_VIEW_JSON.exists():
+      print(f"📄 Using default view file: {DEFAULT_VIEW_JSON}")
+      view_config = load_view_config(DEFAULT_VIEW_JSON)
+      tasks.append((args.output_dir, view_config))
+    else:
+      print("❌ No configuration found. Please provide --tile_dir or --view_json.")
+      sys.exit(1)
+
+  if not tasks:
+    print("❌ No tasks found.")
+    sys.exit(0)
+
+  # Apply limit if requested
+  if args.limit:
+    print(f"⚠️  Limiting to first {args.limit} tasks.")
+    tasks = tasks[: args.limit]
 
   print("=" * 60)
-  print("🏙️  ISOMETRIC NYC VIEW EXPORTER")
-  print("=" * 60)
-  print(f"📄 Config: {view_json_path}")
-  print(f"📁 Output directory: {output_dir}")
-  print(f"📍 View: {view_config['lat']}, {view_config['lon']}")
-  print(
-    f"📐 Size: {view_config.get('size_meters', 300)}m, Orientation: {view_config['camera_azimuth_degrees']}°"
-  )
-  print(f"🖥️  Resolution: {view_config['width_px']}x{view_config['height_px']}")
+  print(f"🏙️  ISOMETRIC NYC VIEW EXPORTER - Processing {len(tasks)} tasks")
   print("=" * 60)
 
-  results = {}
   web_server = None
 
   try:
-    # Export whitebox view
+    # 2. Export Whitebox Views
     if not args.web_only:
-      whitebox_path = export_whitebox(output_dir, view_config)
-      results["whitebox"] = whitebox_path
+      print(f"\n🎨 Starting Whitebox Exports ({len(tasks)} tasks)...")
+      for i, (output_dir, view_config) in enumerate(tasks):
+        print(f"   [{i + 1}/{len(tasks)}] {output_dir.name}...")
+        try:
+          export_whitebox(output_dir, view_config)
+        except Exception as e:
+          print(f"   ❌ Failed to export whitebox for {output_dir.name}: {e}")
 
-    # Export web view
+    # 3. Export Web Views
     if not args.whitebox_only:
-      # Start web server if needed
+      print(f"\n🌐 Starting Web Exports ({len(tasks)} tasks)...")
+
+      # Start web server if needed (only once)
       if not args.no_start_server:
         web_server = start_web_server(WEB_DIR, args.port)
 
       try:
-        web_path = export_web_view(output_dir, args.port, view_config)
-        results["web"] = web_path
+        process_web_views(tasks, args.port)
       finally:
         # Stop web server
         if web_server:
@@ -270,14 +312,9 @@ def main():
       web_server.terminate()
     sys.exit(1)
 
-  # Summary
   print("\n" + "=" * 60)
   print("📦 EXPORT COMPLETE")
   print("=" * 60)
-  for name, path in results.items():
-    print(f"   {name}: {path}")
-
-  return results
 
 
 if __name__ == "__main__":
