@@ -70,3 +70,6 @@ images from `export_views.py` into a single large image to verify that the
 tiling logic is correct. This script should look for `render.png` and
 `whitebox.png` in each tile directory and stitch them into `full_render.png` and
 `full_whitebox.png` in the parent plan directory.
+
+[x] Implement `generate_tile.py` script to generate isometric pixel art for a
+single tile using the nano-banana notebook logic.
