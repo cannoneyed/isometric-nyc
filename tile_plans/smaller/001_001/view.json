@@ -1,0 +1,16 @@
+{
+  "name": "smaller - 1x1",
+  "lat": 40.74975263496053,
+  "lon": -73.99221320446641,
+  "camera_azimuth_degrees": -15,
+  "camera_elevation_degrees": -45,
+  "width_px": 512,
+  "height_px": 512,
+  "view_height_meters": 150.0,
+  "grid_pos": {
+    "row": 1,
+    "col": 1
+  },
+  "row": 1,
+  "col": 1
+}

@@ -128,7 +128,7 @@ def generate_tile(
 
   # Prepare generation prompt
   generation_prompt = """
-    (((Isometric pixel art:1.6))), (classic city builder game aesthetic:1.5), (orthographic projection:1.5), (highly detailed 32-bit graphics:1.4), (sharp crisp edges:1.3), (dense urban cityscape:1.3), (complex architectural geometry:1.2), (directional hard shadows:1.2), neutral color palette, bird's-eye view.
+    (((Isometric pixel art:1.6))), (classic city builder game aesthetic:1.5), (orthographic projection:1.5), (detailed 32-bit graphics:1.4), (sharp crisp edges:1.3), (dense urban cityscape:1.3), (complex architectural geometry:1.2), (directional hard shadows:1.2), neutral color palette, bird's-eye view.
 
     <render> is the 3D render of the city - use this image as a reference for the details, textures, colors, and lighting of the buildings, but DO NOT  downsample the pixels - we want to use the style of <reference>.
 
@@ -168,8 +168,8 @@ def generate_tile(
     whitebox_ref,
     render_prefix,
     render_ref,
-    # reference_prefix,
-    # reference_ref,
+    reference_prefix,
+    reference_ref,
     generation_prompt,
   ]
 

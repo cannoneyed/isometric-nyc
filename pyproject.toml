@@ -31,6 +31,7 @@ generate-tile = "isometric_nyc.generate_tile:main"
 isometric-nyc = "isometric_nyc.main:main"
 inspect-db = "isometric_nyc.inspect_db:main"
 inspect-columns = "isometric_nyc.inspect_columns:main"
+plan-tiles = "isometric_nyc.plan_tiles:main"
 whitebox = "isometric_nyc.whitebox:main"
 
 [tool.ruff]
