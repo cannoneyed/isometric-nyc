@@ -14,7 +14,7 @@ from isometric_nyc.create_template import create_template
 
 MODEL_NAME = "gemini-2.5-flash"
 IMAGE_MODEL_NAME = "gemini-3-pro-image-preview"
-REFERENCE_IMAGE_NAME = "style_a.png"
+REFERENCE_IMAGE_NAME = "style_c.png"
 
 
 def generate_tile(
@@ -128,13 +128,14 @@ def generate_tile(
 
   # Prepare generation prompt
   generation_prompt = """
-    (((Isometric pixel art:1.6))), (classic city builder game aesthetic:1.5), (orthographic projection:1.5), (detailed 32-bit graphics:1.4), (sharp crisp edges:1.3), (dense urban cityscape:1.3), (complex architectural geometry:1.2), (directional hard shadows:1.2), neutral color palette, bird's-eye view.
+<render> is the 3D render of the city - use this image as a reference for the details, textures, colors, and lighting of the buildings, but DO NOT  downsample the pixels - we want to use the style of <reference>.
 
-    <render> is the 3D render of the city - use this image as a reference for the details, textures, colors, and lighting of the buildings, but DO NOT  downsample the pixels - we want to use the style of <reference>.
+<reference> is a reference image for the style of SimCity 3000 pixel art - you MUST use this style for the pixel art generation.
 
-    <reference> is a reference image for the style of SimCity 3000 pixel art - you MUST use this style for the pixel art generation.
+Use the white masses in <whitebox> as the blueprint for all building shapes and locations. Check carefully to make sure every building in <whitebox> and <render> is present in the generation, and ensure that the colors and textures of the buildings are correct.
 
-    Use the white masses in <whitebox> as the blueprint for all building shapes and locations. Check carefully to make sure every building in <whitebox> and <render> is present in the generation, and ensure that the colors and textures of the buildings are correct.
+Style Instructions:
+(((Isometric pixel art:1.6))), (classic city builder game aesthetic:1.5), (orthographic projection:1.5), (detailed 32-bit graphics:1.4), (sharp crisp edges:1.3), (dense urban cityscape:1.3), (complex architectural geometry:1.2), (directional hard shadows:1.2), neutral color palette, bird's-eye view.
     """
 
   # Upload assets for generation
@@ -163,14 +164,13 @@ def generate_tile(
   render_prefix = "This is a rendered view of the 3D building data using Google 3D tiles API. We'll refer to this as <render>."
   reference_prefix = "This is a reference image for the style of SimCity 3000 pixel art. We'll refer to this as <reference>."
 
-  contents = [
+  image_contents = [
     whitebox_prefix,
     whitebox_ref,
     render_prefix,
     render_ref,
     reference_prefix,
     reference_ref,
-    generation_prompt,
   ]
 
   # Create template from neighbors if they exist
@@ -183,24 +183,31 @@ def generate_tile(
     print("Found template.png, uploading and updating prompt...")
     template_prefix = "This is a template image that contains parts of neighboring tiles that have already been generated. We'll refer to this as <template>."
     template_ref = client.files.upload(file=template_path)
-    contents.append(template_prefix)
-    contents.append(template_ref)
+    image_contents.append(template_prefix)
+    image_contents.append(template_ref)
 
     # Update prompt to include template instructions
     # Assuming template is the 4th image (index 3)
-    contents[0] += """
-
-    TEMPLATE INSTRUCTIONS:
-    The last image provided is a template image <template>. You must continue the generation by filling in the white pixels in the template, ensuring that the colors and textures of the buildings are correct.
+    generation_prompt += """
+Generation Instructions:
+The last image provided is a template image <template>. It contains parts of neighboring tiles that have already been generated. The white areas are empty and need to be filled.
     
-    The non-white pixels MUST be preserved exactly as they appear in the template, and you MUST adhere to the style of the non-white pixels in the template.
+You must continue the generation by filling in the white areas, using the <whitebox> geometry and <render> as guides.
+    
+The existing neighbor parts (the colorful pixel art sections) MUST be preserved exactly as they appear in the template.
     """
 
   print("Generating pixel art image...")
+  prompt_contents = image_contents + [generation_prompt]
+
+  print("🔥🔥🔥 Prompt:")
+  for content in prompt_contents:
+    if isinstance(content, str):
+      print(content)
 
   response = client.models.generate_content(
     model=IMAGE_MODEL_NAME,
-    contents=contents,
+    contents=prompt_contents,
     config=types.GenerateContentConfig(
       response_modalities=["TEXT", "IMAGE"],
       image_config=types.ImageConfig(
@@ -256,8 +263,10 @@ def generate_tile(
               # Make white pixels in template transparent
               datas = tmpl.getdata()
               new_data = []
+
               for item in datas:
                 # Check for white (allowing slight variance)
+                # Pure white (255, 255, 255) is the background color from create_template.py
                 if item[0] > 250 and item[1] > 250 and item[2] > 250:
                   new_data.append((255, 255, 255, 0))  # Transparent
                 else:
