@@ -73,3 +73,6 @@ tiling logic is correct. This script should look for `render.png` and
 
 [x] Implement `generate_tile.py` script to generate isometric pixel art for a
 single tile using the nano-banana notebook logic.
+
+[ ] Update `generate_tile.py` to automatically generate templates from neighbors
+using `create_template.py` logic before generation.

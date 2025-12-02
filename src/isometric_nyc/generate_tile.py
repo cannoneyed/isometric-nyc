@@ -10,7 +10,9 @@ from google import genai
 from google.genai import types
 from PIL import Image
 
-MODEL_NAME = "gemini-3-pro-preview"
+from isometric_nyc.create_template import create_template
+
+MODEL_NAME = "gemini-2.5-flash"
 IMAGE_MODEL_NAME = "gemini-3-pro-image-preview"
 REFERENCE_IMAGE_NAME = "style_a.png"
 
@@ -18,7 +20,7 @@ REFERENCE_IMAGE_NAME = "style_a.png"
 def generate_tile(
   tile_dir_path: Path,
   references_dir_path: Path,
-  downscale_factor: float = 2.0,
+  downscale_factor: float = 4.0,
   skip_description: bool = False,
 ) -> None:
   """
@@ -51,15 +53,16 @@ def generate_tile(
 
   print(f"Processing tile at {latitude}, {longitude}...")
 
-  # Upload the full-size reference image (render.png)
-  render_path = tile_dir_path / "render.png"
-  if not render_path.exists():
+  # Full-size render path (used for feature checklist)
+  render_path_full = tile_dir_path / "render.png"
+  if not render_path_full.exists():
     raise FileNotFoundError(f"render.png not found in {tile_dir_path}")
 
-  # Handle downscaling if requested
+  # Downscaled render path (used for image generation)
+  render_path_downscaled: Path | None = None
   if downscale_factor > 1.0:
     print(f"Downscaling render.png by factor of {downscale_factor}...")
-    with Image.open(render_path) as img:
+    with Image.open(render_path_full) as img:
       new_width = int(img.width / downscale_factor)
       new_height = int(img.height / downscale_factor)
       resized_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
@@ -67,12 +70,12 @@ def generate_tile(
       # Save to temp file
       with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_file:
         resized_img.save(tmp_file.name)
-        render_path = Path(tmp_file.name)
-        print(f"Saved downscaled image to {render_path}")
+        render_path_downscaled = Path(tmp_file.name)
+        print(f"Saved downscaled image to {render_path_downscaled}")
 
   # Define prompts (copied from nano-banana.py)
   pixel_art_techniques = """
-    PIXEL ART TECHNIQUES (Apply Aggressively): Translate the textures and details from image_2.png into the following pixel art conventions:
+    PIXEL ART TECHNIQUES (Apply Aggressively): Translate the textures and details from <render> into the following pixel art conventions:
 
     Heavy Dithering: All gradients, shadows, and complex textures (like the arena roof, asphalt, and building facades) must be rendered using visible cross-hatch or Bayer pattern dithering. There should be NO smooth color transitions.
 
@@ -101,15 +104,16 @@ def generate_tile(
 
   checklist = ""
   if not skip_description:
-    print("Uploading render.png for analysis...")
-    render_ref = client.files.upload(file=render_path)
+    # Use full-size render for feature analysis (better detail)
+    print("Uploading full-size render.png for analysis...")
+    render_ref_full = client.files.upload(file=render_path_full)
 
     # Generate the checklist of features
     print("Generating feature checklist...")
     checklist_response = client.models.generate_content(
       model=MODEL_NAME,
       contents=[
-        render_ref,
+        render_ref_full,
         description_prompt,
       ],
       config=types.GenerateContentConfig(
@@ -120,43 +124,17 @@ def generate_tile(
     print(f"Checklist generated:\n{checklist}")
   else:
     print("Skipping description generation...")
-    # Use render_path upload for final generation if not uploaded here
-    # However, checklist is used in generation_prompt below.
-    # If skipped, we should probably handle it or use a default text.
-    # For now, leaving it empty or generic instructions might be best?
-    # The prompt template expects {checklist}.
     checklist = "Follow the style of the reference images."
 
   # Prepare generation prompt
-  generation_prompt = f"""
-    Generate a low-resolution, isometric pixel art conversion of the provided reference image, strictly adhering to the visual style of late 1990s PC strategy games like SimCity 3000.
+  generation_prompt = """
+    (((Isometric pixel art:1.6))), (classic city builder game aesthetic:1.5), (orthographic projection:1.5), (highly detailed 32-bit graphics:1.4), (sharp crisp edges:1.3), (dense urban cityscape:1.3), (complex architectural geometry:1.2), (directional hard shadows:1.2), neutral color palette, bird's-eye view.
 
-    It should look like a 640x480 game screenshot stretched onto a modern monitor.
+    <render> is the 3D render of the city - use this image as a reference for the details, textures, colors, and lighting of the buildings, but DO NOT  downsample the pixels - we want to use the style of <reference>.
 
-    Do not generate high-definition "voxel art" or smooth digital paintings. The aesthetic must be crunchy, retro, and low-fi. Ensure you stick to a low-fi SVGA color palette.
+    <reference> is a reference image for the style of SimCity 3000 pixel art - you MUST use this style for the pixel art generation.
 
-    image_0.png is the whitebox geometry - the final image must adhere to the shapes of the buildings defined here.
-
-    image_1.png is the 3D render of the city - use this image as a reference for the details, textures, colors, and lighting of the buildings, but DO NOT JUST downsample the pixels - we want to use the style of image 3.
-
-    image_3.jpg is a reference image for the style of SimCity 3000 pixel art - you MUST use this style for the pixel art generation.
-
-    CRITICAL: STYLE OVER REALISM
-
-    Do NOT simply downsample or blur the photorealistic reference image (image_2.png).
-
-    The result must NOT look like a low-resolution photograph.
-
-    It MUST look like a piece of pixel art that was painstakingly drawn pixel-by-pixel using a limited color palette. The aesthetic should be "crunchy," "retro," and "low-fi."
-
-    GEOMETRY & COMPOSITION (Adhere Strictly):
-
-    Use the white masses in image_0.png as the blueprint for all building shapes and locations.
-
-    {pixel_art_techniques}
-
-    Instructions:
-    {checklist}
+    Use the white masses in <whitebox> as the blueprint for all building shapes and locations. Check carefully to make sure every building in <whitebox> and <render> is present in the generation, and ensure that the colors and textures of the buildings are correct.
     """
 
   # Upload assets for generation
@@ -173,27 +151,39 @@ def generate_tile(
   print("Uploading assets for generation...")
   whitebox_ref = client.files.upload(file=whitebox_path)
 
-  # If we skipped description, we might not have uploaded render_ref yet?
-  # Wait, render_ref was uploaded in the description block above.
-  # If skip_description is True, render_ref is undefined.
-  if skip_description:
-    print("Uploading render.png for generation...")
-    render_ref = client.files.upload(file=render_path)
+  # Upload render for generation (use downscaled version if available)
+  render_path_for_generation = render_path_downscaled or render_path_full
+  print(
+    f"Uploading render.png for generation (downscaled: {render_path_downscaled is not None})..."
+  )
+  render_ref = client.files.upload(file=render_path_for_generation)
 
   reference_ref = client.files.upload(file=reference_path)
+  whitebox_prefix = "This is a whitebox geometry of isometric render of a section of New York City. We'll refer to this as <whitebox>."
+  render_prefix = "This is a rendered view of the 3D building data using Google 3D tiles API. We'll refer to this as <render>."
+  reference_prefix = "This is a reference image for the style of SimCity 3000 pixel art. We'll refer to this as <reference>."
 
   contents = [
-    generation_prompt,
-    # whitebox_ref,
+    whitebox_prefix,
+    whitebox_ref,
+    render_prefix,
     render_ref,
-    reference_ref,
+    # reference_prefix,
+    # reference_ref,
+    generation_prompt,
   ]
+
+  # Create template from neighbors if they exist
+  print("Checking for neighbors to create template...")
+  create_template(tile_dir_path)
 
   # Check for template.png
   template_path = tile_dir_path / "template.png"
   if template_path.exists():
     print("Found template.png, uploading and updating prompt...")
+    template_prefix = "This is a template image that contains parts of neighboring tiles that have already been generated. We'll refer to this as <template>."
     template_ref = client.files.upload(file=template_path)
+    contents.append(template_prefix)
     contents.append(template_ref)
 
     # Update prompt to include template instructions
@@ -201,10 +191,9 @@ def generate_tile(
     contents[0] += """
 
     TEMPLATE INSTRUCTIONS:
-    The last image provided is a template image (image_3.png). It contains parts of neighboring tiles that have already been generated.
-    You MUST respect the pixels in this image that are NOT white.
-    You should only generate content for the white pixels in this image, ensuring seamless continuity with the existing parts.
-    The non-white pixels MUST be preserved exactly as they appear in the template.
+    The last image provided is a template image <template>. You must continue the generation by filling in the white pixels in the template, ensuring that the colors and textures of the buildings are correct.
+    
+    The non-white pixels MUST be preserved exactly as they appear in the template, and you MUST adhere to the style of the non-white pixels in the template.
     """
 
   print("Generating pixel art image...")
@@ -296,10 +285,12 @@ def generate_tile(
     print("Generation complete.")
 
   # Cleanup temp file if it was created
-  if downscale_factor > 1.0 and str(render_path).startswith(tempfile.gettempdir()):
+  if render_path_downscaled and str(render_path_downscaled).startswith(
+    tempfile.gettempdir()
+  ):
     try:
-      os.unlink(render_path)
-      print(f"Cleaned up temp file {render_path}")
+      os.unlink(render_path_downscaled)
+      print(f"Cleaned up temp file {render_path_downscaled}")
     except Exception as e:
       print(f"Error cleaning up temp file: {e}")
 

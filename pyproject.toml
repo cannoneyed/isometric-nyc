@@ -27,6 +27,7 @@ check-boundaries = "isometric_nyc.check_boundaries:main"
 check-coordinates = "isometric_nyc.check_coordinates:main"
 check-db = "isometric_nyc.check_db:main"
 export-views = "isometric_nyc.export_views:main"
+generate-tile = "isometric_nyc.generate_tile:main"
 isometric-nyc = "isometric_nyc.main:main"
 inspect-db = "isometric_nyc.inspect_db:main"
 inspect-columns = "isometric_nyc.inspect_columns:main"
@@ -41,7 +42,7 @@ indent-style = "space"
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
-ignore = []
+ignore = ["E501"]
 
 [dependency-groups]
 dev = [
