@@ -26,6 +26,7 @@ def create_template(tile_dir_path: Path) -> None:
   col = view_json.get("col")
   width_px = view_json.get("width_px", 1024)
   height_px = view_json.get("height_px", 1024)
+  tile_step = view_json.get("tile_step", 0.5)
 
   if row is None or col is None:
     print("Error: view.json missing 'row' or 'col' fields.")
@@ -48,6 +49,10 @@ def create_template(tile_dir_path: Path) -> None:
   canvas = Image.new("RGB", (width_px, height_px), "white")
 
   found_neighbor = False
+
+  # Calculate step sizes in pixels
+  step_w = int(width_px * tile_step)
+  step_h = int(height_px * tile_step)
 
   for r_off, c_off, name in neighbors:
     n_row = row + r_off
@@ -74,30 +79,33 @@ def create_template(tile_dir_path: Path) -> None:
           found_neighbor = True
 
           # Logic for pasting neighbor parts
-          # Overlap is 50% (half width/height)
-          half_w = width_px // 2
-          half_h = height_px // 2
-
           if name == "left":
-            # Take Right half of neighbor -> Paste to Left half of canvas
-            # Crop box: (left, top, right, bottom)
-            region = n_img.crop((half_w, 0, width_px, height_px))
+            # Neighbor is shifted LEFT by step_w
+            # We want the part of neighbor that overlaps with us
+            # Neighbor's right-most part [step_w, width] overlaps our [0, width-step_w]
+            region = n_img.crop((step_w, 0, width_px, height_px))
             canvas.paste(region, (0, 0))
 
           elif name == "right":
-            # Take Left half of neighbor -> Paste to Right half of canvas
-            region = n_img.crop((0, 0, half_w, height_px))
-            canvas.paste(region, (half_w, 0))
+            # Neighbor is shifted RIGHT by step_w
+            # We want the part of neighbor that overlaps with us
+            # Neighbor's left-most part [0, width-step_w] overlaps our [step_w, width]
+            region = n_img.crop((0, 0, width_px - step_w, height_px))
+            canvas.paste(region, (step_w, 0))
 
           elif name == "top":
-            # Take Bottom half of neighbor -> Paste to Top half of canvas
-            region = n_img.crop((0, half_h, width_px, height_px))
+            # Neighbor is shifted UP by step_h
+            # We want the part of neighbor that overlaps with us
+            # Neighbor's bottom-most part [step_h, height] overlaps our [0, height-step_h]
+            region = n_img.crop((0, step_h, width_px, height_px))
             canvas.paste(region, (0, 0))
 
           elif name == "bottom":
-            # Take Top half of neighbor -> Paste to Bottom half of canvas
-            region = n_img.crop((0, 0, width_px, half_h))
-            canvas.paste(region, (0, half_h))
+            # Neighbor is shifted DOWN by step_h
+            # We want the part of neighbor that overlaps with us
+            # Neighbor's top-most part [0, height-step_h] overlaps our [step_h, height]
+            region = n_img.crop((0, 0, width_px, height_px - step_h))
+            canvas.paste(region, (0, step_h))
 
       except Exception as e:
         print(f"Error processing neighbor {name}: {e}")

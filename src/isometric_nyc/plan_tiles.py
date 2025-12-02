@@ -97,12 +97,14 @@ def generate_plan(
   elevation,
   width_px=1024,
   height_px=1024,
+  tile_step=0.5,
 ):
   base_dir = Path("tile_plans") / name
 
   print(f"Generating plan '{name}' with {rows}x{cols} tiles...")
   print(f"Base Center: {start_lat}, {start_lon}")
   print(f"Output Directory: {base_dir}")
+  print(f"Tile Step: {tile_step}")
 
   # Ensure base directory exists
   if not base_dir.exists():
@@ -118,8 +120,8 @@ def generate_plan(
       # Columns shift RIGHT (+)
       # Rows shift DOWN (Screen Y -)
 
-      shift_x_px = c * (width_px / 2)
-      shift_y_px = -r * (height_px / 2)
+      shift_x_px = c * (width_px * tile_step)
+      shift_y_px = -r * (height_px * tile_step)
 
       lat, lon = calculate_offset(
         start_lat,
@@ -150,6 +152,7 @@ def generate_plan(
         "width_px": width_px,
         "height_px": height_px,
         "view_height_meters": view_height_meters,
+        "tile_step": tile_step,
         "grid_pos": {"row": r, "col": c},
         "row": r,
         "col": c,
@@ -185,6 +188,12 @@ def main():
   )
   parser.add_argument("--width", type=int, default=1024, help="Tile width in pixels")
   parser.add_argument("--height", type=int, default=1024, help="Tile height in pixels")
+  parser.add_argument(
+    "--tile-step",
+    type=float,
+    default=0.5,
+    help="Fraction of tile size to step for next tile (default: 0.5)",
+  )
 
   args = parser.parse_args()
 
@@ -199,6 +208,7 @@ def main():
     args.elevation,
     args.width,
     args.height,
+    args.tile_step,
   )
 
 

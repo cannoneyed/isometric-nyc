@@ -128,11 +128,7 @@ def generate_tile(
 
   # Prepare generation prompt
   generation_prompt = """
-<render> is the 3D render of the city - use this image as a reference for the details, textures, colors, and lighting of the buildings, but DO NOT  downsample the pixels - we want to use the style of <reference>.
-
-<reference> is a reference image for the style of SimCity 3000 pixel art - you MUST use this style for the pixel art generation.
-
-Use the white masses in <whitebox> as the blueprint for all building shapes and locations. Check carefully to make sure every building in <whitebox> and <render> is present in the generation, and ensure that the colors and textures of the buildings are correct.
+<render> is the 3D render of the city - use this image as a reference for the details, textures, colors, and lighting of the buildings, but DO NOT  just use these pixels - we want to copy these details but use the style of <reference>.
 
 Style Instructions:
 (((Isometric pixel art:1.6))), (classic city builder game aesthetic:1.5), (orthographic projection:1.5), (detailed 32-bit graphics:1.4), (sharp crisp edges:1.3), (dense urban cityscape:1.3), (complex architectural geometry:1.2), (directional hard shadows:1.2), neutral color palette, bird's-eye view.
@@ -160,17 +156,17 @@ Style Instructions:
   render_ref = client.files.upload(file=render_path_for_generation)
 
   reference_ref = client.files.upload(file=reference_path)
-  whitebox_prefix = "This is a whitebox geometry of isometric render of a section of New York City. We'll refer to this as <whitebox>."
+  whitebox_prefix = "This is a depth map geometry of isometric render of a section of New York City. We'll refer to this as <depth_map>."
   render_prefix = "This is a rendered view of the 3D building data using Google 3D tiles API. We'll refer to this as <render>."
   reference_prefix = "This is a reference image for the style of SimCity 3000 pixel art. We'll refer to this as <reference>."
 
   image_contents = [
-    whitebox_prefix,
-    whitebox_ref,
-    render_prefix,
+    # whitebox_ref,
+    # whitebox_prefix,
     render_ref,
-    reference_prefix,
+    render_prefix,
     reference_ref,
+    reference_prefix,
   ]
 
   # Create template from neighbors if they exist
@@ -183,18 +179,15 @@ Style Instructions:
     print("Found template.png, uploading and updating prompt...")
     template_prefix = "This is a template image that contains parts of neighboring tiles that have already been generated. We'll refer to this as <template>."
     template_ref = client.files.upload(file=template_path)
-    image_contents.append(template_prefix)
     image_contents.append(template_ref)
+    image_contents.append(template_prefix)
 
     # Update prompt to include template instructions
-    # Assuming template is the 4th image (index 3)
     generation_prompt += """
 Generation Instructions:
-The last image provided is a template image <template>. It contains parts of neighboring tiles that have already been generated. The white areas are empty and need to be filled.
-    
-You must continue the generation by filling in the white areas, using the <whitebox> geometry and <render> as guides.
-    
-The existing neighbor parts (the colorful pixel art sections) MUST be preserved exactly as they appear in the template.
+The last image provided is a template image <template>. Please replace the white part of the template image with the isometric pixel art generation, following <render> as a guide, and sticking to the style of <reference>.
+
+The existing parts of the template image (the colorful pixel art sections) MUST be preserved exactly as they appear in the template.
     """
 
   print("Generating pixel art image...")
