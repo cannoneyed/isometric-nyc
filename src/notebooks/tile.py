@@ -71,7 +71,7 @@ def _(client, dataclasses):
             self.id = id
             self.path = path
             self.ref = client.files.upload(file=self.path)
-            self.index = f'image_{index}' 
+            self.index = f'Image {chr(ord('A') + index - 1)}'
             self.description = description.replace('IMAGE_INDEX', self.index)
 
     @dataclasses.dataclass
@@ -103,51 +103,45 @@ def _(Image, Images, client, mo, os, tile_dir, types):
     def generate_template():
         aspect_ratio = "1:1" # "1:1", "16:9", "9:16", "4:3", "3:4", "21:9", "9:21"
         resolution = "1K" # "1K", "2K", "4K"
-    
-        # generation_prompt = f"""
-        # Isometric pixel art image of a tile of New York City.
-    
-        # Style Instructions:
-        # (((Isometric pixel art:1.6))), (classic city builder game aesthetic:1.5), (orthographic projection:1.5), (detailed 32-bit graphics:1.4), (sharp crisp edges:1.3), (dense urban cityscape:1.3), (complex architectural geometry:1.2), (directional hard shadows:1.2), neutral color palette, bird's-eye view.
-    
-        # Generation Instructions:
-        # {get_index('template')} is a masked image, with the right half covered in white. Please generate an exact copy of {get_index('template')} but replace the white part of the masked image with the missing isometric pixel art generation. Ensure that all buildings are present in {get_index('whitebox')} and use {get_index('render')} for colors, details, etc, but in the style of {get_index('template')}.
-    
-        # DO NOT CHANGE THE EXISTING (NON-WHITE) PARTS OF THE MASKED IMAGE {get_index('template')}!!!
-        # """
-    
+
         images = Images()
-    
+
         images.add_image_contents(
             id='template',
             path=os.path.join(tile_dir, "template.png"),
             description="IMAGE_INDEX is a masked image that contains parts of neighboring tiles that have already been generated, with a portion of the image masked out in white."
         )
-    
+
+        images.add_image_contents(
+            id='render',
+            path=os.path.join(tile_dir, "render.png"),
+            description="IMAGE_INDEX is a rendered view of the 3D building data using Google 3D tiles API"
+        )
+
         generation_prompt = f"""
-    Isometric pixel art image of a small section of New York City, in the style of classic computer city builder games such as SimCity 3000.
-    
-    Style Instructions:
-    (((Isometric pixel art:1.6))), (classic city builder game aesthetic:1.5), (orthographic projection:1.5), (detailed 32-bit graphics:1.4), (sharp crisp edges:1.3), (dense urban cityscape:1.3), (complex architectural geometry:1.2), (directional hard shadows:1.2), neutral color palette, bird's-eye view.
+    Generate the missing half of an isometric pixel art image of a small section of New York City, in the style of classic computer city builder games such as SimCity 3000.
 
     Image Descriptions:
     {images.get_descriptions()}
-    
+
+    Style Instructions:
+    (((Isometric pixel art:1.6))), (classic city builder game aesthetic:1.5), (orthographic projection:1.5), (detailed 32-bit graphics:1.4), (sharp crisp edges:1.3), (dense urban cityscape:1.3), (complex architectural geometry:1.2), (directional hard shadows:1.2), neutral color palette, bird's-eye view.
+
     Generation Instructions:
-    {images.get_index('template')} is has the right half covered in white. Please replace the white part of the masked image with the missing isometric pixel art generation. The buildings must flow seamlessly across the scene.
-    
+    {images.get_index('template')} is has the right half covered in white. Please replace the white part of the masked image with the missing isometric pixel art generation. The buildings must flow seamlessly across the scene. The missing half of the masked image has pixel art buildings that correspond the 3D building data in ({images.get_index('render')}), however the style of the generated image must **exactly** match the style of the existing parts of the masked image. There must be no gaps or inconsistencies between the existing parts of the template and the generated parts of the generated image.
+
     DO NOT CHANGE THE EXISTING PARTS OF {images.get_index('template')}!!!
     """.strip()
-    
+
         contents = images.contents + [generation_prompt]
-    
+
         for c in contents:
             if isinstance(c, str):
                 print(c)
             else:
                 print(type(c))
-        
-    
+
+
         response = client.models.generate_content(
             model="gemini-3-pro-image-preview",
             contents=contents,
@@ -158,7 +152,7 @@ def _(Image, Images, client, mo, os, tile_dir, types):
                 ),
             )
         )
-    
+
         output_path = os.path.join(tile_dir, 'tmp.png')
         for part in response.parts:
             if part.text is not None:
@@ -166,17 +160,22 @@ def _(Image, Images, client, mo, os, tile_dir, types):
             elif image:= part.as_image():
                 print('Saving image...')
                 image.save(output_path)
-    
+
         output_image = Image.open(output_path)
         template_image = Image.open(images.get_path('template'))
-    
+
         return output_image, template_image
 
-    _output_image, _template_image = generate_template()
+    generate_template()
+
+    _output_image = Image.open(os.path.join(tile_dir, 'tmp.png'))
+    _template_image = Image.open(os.path.join(tile_dir, 'template.png'))
+    _render_image = Image.open(os.path.join(tile_dir, 'render.png'))
 
     mo.hstack([
         mo.vstack([mo.md("**Nano Banana Image**"), _output_image]),
         mo.vstack([mo.md("**Template**"), _template_image]),
+        mo.vstack([mo.md("**Render**"), _render_image]),
     ])
     return
 
@@ -188,10 +187,16 @@ def _(BaseModel, Images, List, Literal, Optional, client, json, os, tile_dir):
 
         images.add_image_contents(
             id='template',
-            path=os.path.join(tile_dir, "tmp.png"),
+            path=os.path.join(tile_dir, "template.png"),
             description="IMAGE_INDEX is a masked image that contains parts of neighboring tiles that have already been generated, with a portion of the image masked out in white."
         )
-    
+
+        images.add_image_contents(
+            id='render',
+            path=os.path.join(tile_dir, "render.png"),
+            description="IMAGE_INDEX is a rendered view of the 3D building data using Google 3D tiles API"
+        )
+
         images.add_image_contents(
             id='generation',
             path=os.path.join(tile_dir, "tmp.png"),
@@ -204,7 +209,7 @@ def _(BaseModel, Images, List, Literal, Optional, client, json, os, tile_dir):
             status: Literal["GOOD", "BAD"]
             issues: List[int]
             issues_description: Optional[str] = None
-    
+
         generation_prompt = f"""
     You are an advanced image analysis agent tasked with checking the output of a generative AI pipeline.
 
@@ -213,18 +218,19 @@ def _(BaseModel, Images, List, Literal, Optional, client, json, os, tile_dir):
 
     The generative AI pipeline was given a masked image ({images.get_index('template')}) and asked to generate the missing parts of the image, resulting in the generated image ({images.get_index('generation')}).)
     Your task is to triple check the generated image ({images.get_index('generation')}) to ensure that the following criteria are met:
+
     1. The generated image must seamlessly integrate with the existing parts of the masked image ({images.get_index('template')}). There must be no gaps or inconsistencies between the existing parts of the template and the generated parts of the generated image.
     2. The style of the generated image must exactly match the style of the existing parts of the masked image. This includes color palette, lighting, perspective, and overall artistic style.
     3. All buildings and structures in the generated image must be complete and coherent. There should be no half-formed buildings or structures that do not make sense within the context of the scene.
-    4. The generated image must accurately reflect the urban density and architectural complexity of New York City, as specified in the original prompt.
+    4. The generated image contents and buildings must match the 3D building data as represented in the rendered view ({images.get_index('render')}). Any buildings or structures present in the rendered view must be accurately represented in the generated image.
 
     Please provide a detailed analysis of the generated image ({images.get_index('generation')}), highlighting any areas that do not meet the above criteria. If the generated image meets all criteria, please confirm that it is acceptable, using the following output schema:
     """.strip()
-    
+
         contents = images.contents + [generation_prompt]
 
         response = client.models.generate_content(
-            model="gemini-3-pro-preview",
+            model="gemini-2.5-pro",
             contents=contents,
             config={
                 "response_mime_type": "application/json",
