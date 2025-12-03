@@ -8,7 +8,7 @@ from google.genai import types
 from isometric_nyc.tile_generation.shared import Images
 
 
-def generate_tile(tile_dir: str):
+def generate_tile(tile_dir: str, generation_suffix: str):
   load_dotenv()
   client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
@@ -24,8 +24,8 @@ def generate_tile(tile_dir: str):
 
   images.add_image_contents(
     id="render",
-    path=os.path.join(tile_dir, "render.png"),
-    description="IMAGE_INDEX is a rendered view of the 3D building data using Google 3D tiles API",
+    path=os.path.join(tile_dir, "render_256.png"),
+    description="IMAGE_INDEX is a rendered view of the 3D building data using Google 3D tiles API at 256x256 resolution",
   )
 
   images.add_image_contents(
@@ -69,20 +69,23 @@ DO NOT CHANGE THE EXISTING PARTS OF {images.get_index("template")}!!!
   )
 
   output_path = os.path.join(tile_dir, "generation.png")
+  versioned_output_path = os.path.join(tile_dir, f"generation{generation_suffix}.png")
   for part in response.parts:
     if part.text is not None:
       print(part.text)
     elif image := part.as_image():
       print("Saving image...")
       image.save(output_path)
+      image.save(versioned_output_path)
 
 
 def main():
+  generation_suffix = os.path.basename(__file__).split(".")[0].split("_")[-1]
   config_path = os.path.join(os.path.dirname(__file__), "config.json")
   with open(config_path, "r") as f:
     config = json.load(f)
   tile_dir = config["tile_dir"]
-  generate_tile(tile_dir)
+  generate_tile(tile_dir, generation_suffix)
 
 
 if __name__ == "__main__":

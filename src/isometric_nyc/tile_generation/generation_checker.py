@@ -47,15 +47,34 @@ You are an advanced image analysis agent tasked with checking the output of a ge
 Image Descriptions:
 {images.get_descriptions()}
 
-The generative AI pipeline was given a masked image ({images.get_index("template")}) and asked to generate the missing parts of the image, resulting in the generated image ({images.get_index("generation")}).)
-Your task is to triple check the generated image ({images.get_index("generation")}) to ensure that the following criteria are met:
+Your task is to grade {images.get_index("generation")}. To pass, {images.get_index("generation")} must successfully translate the **facts** of {images.get_index("render")} into the **style** of {images.get_index("template")}.
 
-1. The generated image must seamlessly integrate with the existing parts of the masked image ({images.get_index("template")}). There must be no gaps or inconsistencies between the existing parts of the template and the generated parts of the generated image.
-2. The style of the generated image must exactly match the style of the existing parts of the masked image. This includes color palette, lighting, perspective, and overall artistic style.
-3. All buildings and structures in the generated image must be complete and coherent. There should be no half-formed buildings or structures that do not make sense within the context of the scene.
-4. The generated image contents and buildings must match the 3D building data as represented in the rendered view ({images.get_index("render")}). Any buildings or structures present in the rendered view must be accurately represented in the generated image.
+### Step 1: Visual Inventory (Mental Scratchpad)
+Before providing a verdict, compare the dominant buildings in the Ground Truth Render ({images.get_index("render")}) vs the Generated Result ({images.get_index("generation")}). 
+- Do the colors of the major facades match? (e.g., if the render has a black glass tower, the pixel art must be dark/black).
+- Do the material textures match? (e.g., brick vs. glass vs. concrete).
+- Do the relative heights match?
 
-Please provide a detailed analysis of the generated image ({images.get_index("generation")}), highlighting any areas that do not meet the above criteria. If the generated image meets all criteria, please confirm that it is acceptable, using the following output schema:
+### Step 2: Evaluation Criteria
+
+1. **Perfect Continuity (Pass/Fail):** The left half of {images.get_index("generation")} must EXACTLY match the unmasked parts of {images.get_index("template")}. No shifting, blurring, or color changes at the seam.
+
+2. **Strict Style Adherence (Pass/Fail):** The generated section must be distinct, sharp Pixel Art (hard edges, specific color palette, sprites).
+   - It must **NOT** look like a blurry photo or a 3D render.
+   - Roads must be flat pixel surfaces, not textured asphalt.
+   - Cars must be pixel sprites, not blurry blobs.
+
+3. **Semantic Fidelity to Render:** - While the *style* must differ from {images.get_index("render")}, the *architectural identity* must match. 
+   - **Color Matching:** The color palette of specific buildings in {images.get_index("generation")} must reflect the local colors in {images.get_index("render")}. If a building is dark/black in the render, it must be dark in the pixel art. If it is beige brick in the render, it must be beige pixel art.
+   - **Material Translation:** A glass building in the render should look like a reflective surface in pixel art; a concrete building should look matte.
+   - **Hallucination Check:** The generator must not invent new building styles that do not exist in the render just to satisfy the pixel art aesthetic.
+
+4. **Coherence:** No half-formed buildings or Escher-like geometry errors.
+
+5. **No Gaps:** No empty white space remaining.
+
+### Output
+If the image fails any criteria, explain specifically why (e.g., "Failure: The main skyscraper is black glass in the render but appears as white concrete in the generation").
 """.strip()
 
   contents = images.contents + [generation_prompt]
@@ -71,7 +90,12 @@ Please provide a detailed analysis of the generated image ({images.get_index("ge
 
   output = GenerationCheck.model_validate_json(response.text)
   print("🔥", json.dumps(output.model_dump(), indent=2))
-  return output
+
+  if output.status == "GOOD":
+    print("The first checker is good! Prompt the user for manual feedback.")
+    return True
+  else:
+    return False
 
 
 def main():

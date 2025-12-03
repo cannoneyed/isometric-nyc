@@ -1,0 +1,6 @@
+{
+  "tools": {
+    "core": ["run_shell_command(uv)"]
+  },
+  "autoApprovedTools": ["run_shell_command"]
+}
