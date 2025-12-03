@@ -24,7 +24,7 @@ class Images:
     image_ref = ImageRef(id=id, index=index, path=path, description=description)
     self.refs[id] = image_ref
 
-    ref = self.client.files.upload(file=self.path)
+    ref = self.client.files.upload(file=image_ref.path)
     self.contents.append(ref)
     self.descriptions.append(image_ref.description)
 

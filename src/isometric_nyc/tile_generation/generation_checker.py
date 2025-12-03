@@ -13,7 +13,7 @@ def check_generation(tile_dir: str):
   load_dotenv()
   client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
-  images = Images()
+  images = Images(client=client)
 
   images.add_image_contents(
     id="template",
@@ -61,7 +61,7 @@ Please provide a detailed analysis of the generated image ({images.get_index("ge
   contents = images.contents + [generation_prompt]
 
   response = client.models.generate_content(
-    model="gemini-2.5-pro",
+    model="gemini-3-pro-preview",
     contents=contents,
     config={
       "response_mime_type": "application/json",
@@ -75,7 +75,8 @@ Please provide a detailed analysis of the generated image ({images.get_index("ge
 
 
 def main():
-  with open("config.json", "r") as f:
+  config_path = os.path.join(os.path.dirname(__file__), "config.json")
+  with open(config_path, "r") as f:
     config = json.load(f)
   tile_dir = config["tile_dir"]
   check_generation(tile_dir)

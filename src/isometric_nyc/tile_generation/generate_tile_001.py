@@ -78,7 +78,8 @@ DO NOT CHANGE THE EXISTING PARTS OF {images.get_index("template")}!!!
 
 
 def main():
-  with open("config.json", "r") as f:
+  config_path = os.path.join(os.path.dirname(__file__), "config.json")
+  with open(config_path, "r") as f:
     config = json.load(f)
   tile_dir = config["tile_dir"]
   generate_tile(tile_dir)

@@ -66,3 +66,10 @@ You may use any of the following images in the tile dir:
    generation must match the pixel art style of the template image.
 3. `whitebox.png` - this is a 3D "depth map" render of the building geometry in
    simple grayscale. It can be used as a depth/position reference.
+
+## Important
+
+This pipeline MUST BE GENERIC - that is, do not fix specific issues with the
+specific generations. We need it to be able to work for ANY
+template/render/whitebox for any location in the city with any buildings /
+features.
