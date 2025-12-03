@@ -130,6 +130,8 @@ def generate_tile(
   generation_prompt = """
 <render> is the 3D render of the city - use this image as a reference for the details, textures, colors, and lighting of the buildings, but DO NOT  just use these pixels - we want to copy these details but use the style of <reference>.
 
+Use the guides in <depth_map> as the blueprint for all building shapes and locations. Check carefully to make sure every building in <depth_map> and <render> is present in the generation, and ensure that the colors and textures of the buildings are correct.
+
 Style Instructions:
 (((Isometric pixel art:1.6))), (classic city builder game aesthetic:1.5), (orthographic projection:1.5), (detailed 32-bit graphics:1.4), (sharp crisp edges:1.3), (dense urban cityscape:1.3), (complex architectural geometry:1.2), (directional hard shadows:1.2), neutral color palette, bird's-eye view.
     """
@@ -161,8 +163,8 @@ Style Instructions:
   reference_prefix = "This is a reference image for the style of SimCity 3000 pixel art. We'll refer to this as <reference>."
 
   image_contents = [
-    # whitebox_ref,
-    # whitebox_prefix,
+    whitebox_ref,
+    whitebox_prefix,
     render_ref,
     render_prefix,
     reference_ref,
@@ -185,7 +187,7 @@ Style Instructions:
     # Update prompt to include template instructions
     generation_prompt += """
 Generation Instructions:
-The last image provided is a template image <template>. Please replace the white part of the template image with the isometric pixel art generation, following <render> as a guide, and sticking to the style of <reference>.
+The last image provided is a template image <template>. Please replace the white part of the template image with the isometric pixel art generation, following the <whitebox> geometry and <render> as guides, and sticking to the style of <reference>.
 
 The existing parts of the template image (the colorful pixel art sections) MUST be preserved exactly as they appear in the template.
     """
