@@ -17,17 +17,7 @@ def _():
     from google.genai import types
     from PIL import Image
     from pydantic import BaseModel
-    return (
-        BaseModel,
-        List,
-        Literal,
-        Optional,
-        dataclasses,
-        genai,
-        json,
-        load_dotenv,
-        os,
-    )
+    return BaseModel, List, Literal, dataclasses, genai, json, load_dotenv, os
 
 
 @app.cell
@@ -59,12 +49,11 @@ def _(json, os):
 
 
 @app.cell
-def _(client, dataclasses):
+def _(dataclasses):
     class ImageRef:
       def __init__(self, *, id: str, index: int, path: str, description: str):
         self.id = id
         self.path = path
-        self.ref = client.files.upload(file=self.path)
         self.index = f"Image {chr(ord('A') + index - 1)}"
         self.description = description.replace("IMAGE_INDEX", self.index)
 
@@ -93,66 +82,117 @@ def _(client, dataclasses):
 
 
 @app.cell
-def _(BaseModel, Images, List, Literal, Optional, client, json, os, tile_dir):
-    def check_generation():
-      images = Images()
-
-      images.add_image_contents(
-        id="template",
-        path=os.path.join(tile_dir, "template.png"),
-        description="IMAGE_INDEX is a masked image that contains parts of neighboring tiles that have already been generated, with a portion of the image masked out in white.",
-      )
-
-      images.add_image_contents(
-        id="render",
-        path=os.path.join(tile_dir, "render.png"),
-        description="IMAGE_INDEX is a rendered view of the 3D building data using Google 3D tiles API",
-      )
-
-      images.add_image_contents(
-        id="generation",
-        path=os.path.join(tile_dir, "tmp.png"),
-        description="IMAGE_INDEX is a generated image that fills in the missing parts of the masked image.",
-      )
-
-      class GenerationCheck(BaseModel):
+def _(BaseModel, List, Literal):
+    class GenerationCheck(BaseModel):
         """A Pydantic schema for the generation check response."""
-
+        
         description: str
-        status: Literal["GOOD", "BAD"]
-        issues: List[int]
-        issues_description: Optional[str] = None
+        status: Literal["PASS", "FAIL", "FIX"]
+        fixes: List[str]
+    return (GenerationCheck,)
 
-      generation_prompt = f"""
-      You are an advanced image analysis agent tasked with checking the output of a generative AI pipeline.
 
-      Image Descriptions:
-      {images.get_descriptions()}
+@app.cell
+def _(GenerationCheck, Images, client, json, os, tile_dir):
+    def check_generation():
+        images = Images()
+    
+        images.add_image_contents(
+            id="template",
+            path=os.path.join(tile_dir, "template.png"),
+            description="IMAGE_INDEX is a masked image that contains parts of neighboring tiles that have already been generated, with a portion of the image masked out in white.",
+        )
 
-      The generative AI pipeline was given a masked image ({images.get_index("template")}) and asked to generate the missing parts of the image, resulting in the generated image ({images.get_index("generation")}).)
-      Your task is to triple check the generated image ({images.get_index("generation")}) to ensure that the following criteria are met:
+        images.add_image_contents(
+            id="render",
+            path=os.path.join(tile_dir, "render.png"),
+            description="IMAGE_INDEX is a rendered view of the 3D building data using Google 3D tiles API",
+        )
 
-      1. The generated image must seamlessly integrate with the existing parts of the masked image ({images.get_index("template")}). There must be no gaps or inconsistencies between the existing parts of the template and the generated parts of the generated image.
-      2. The style of the generated image must exactly match the style of the existing parts of the masked image. This includes color palette, lighting, perspective, and overall artistic style.
-      3. All buildings and structures in the generated image must be complete and coherent. There should be no half-formed buildings or structures that do not make sense within the context of the scene.
-      4. The generated image contents and buildings must match the 3D building data as represented in the rendered view ({images.get_index("render")}). Any buildings or structures present in the rendered view must be accurately represented in the generated image.
+        images.add_image_contents(
+            id="generation",
+            path=os.path.join(tile_dir, "generation006.png"),
+            description="IMAGE_INDEX is a generated image that fills in the missing parts of the masked image.",
+        )
 
-      Please provide a detailed analysis of the generated image ({images.get_index("generation")}), highlighting any areas that do not meet the above criteria. If the generated image meets all criteria, please confirm that it is acceptable, using the following output schema:
-      """.strip()
+        generation_prompt = f"""
+    You are an advanced image analysis agent tasked with checking the output of a generative AI pipeline. You must provide a PASS, FAIL, or FIX rating with justification and potential fix steps.
 
-      contents = images.contents + [generation_prompt]
+    Image Descriptions:
+    {images.get_descriptions()}
 
-      response = client.models.generate_content(
-        model="gemini-2.5-pro",
-        contents=contents,
-        config={
-          "response_mime_type": "application/json",
-          "response_json_schema": GenerationCheck.model_json_schema(),
-        },
-      )
+    The generative AI pipeline was given a masked image ({images.get_index("template")}) and asked to generate the missing parts of the image, resulting in the generated image ({images.get_index("generation")}).)
+    Your task is to triple check the generated image ({images.get_index("generation")}) to ensure that the following criteria are met:
 
-      output = GenerationCheck.model_validate_json(response.text)
-      print("🔥", json.dumps(output.model_dump(), indent=2))
+    PASS/FAIL CRITERIA:
+    If any of the following criteria are not met it's an automatic FAIL.
+
+    1. The generated image must seamlessly integrate with the existing parts of the masked image ({images.get_index("template")}). There must be no gaps or inconsistencies between the existing parts of the template and the generated parts of the generated image.
+    2. The style of the generated image must exactly match the style of the existing parts of the masked image. This includes color palette, lighting, perspective, and overall pixel art style.
+    3. All buildings and structures in the generated image must be complete and coherent. There should be no half-formed buildings or structures that do not make sense within the context of the scene. There should be no "whitebox" rendered buildings or any buildings that are not present in the render image ({images.get_index('render')})
+
+    FIX CRITERIA:
+    If any of the below issues are present, you can output a FIX rating
+
+    1. The generated image contents and buildings should _mostly_ match the 3D building data as represented in the rendered view ({images.get_index("render")}). Any buildings or structures present in the rendered view should be accurately represented in the generated image - some flexibility is ok but major features must be adhered to. If there's a major style discrepancy, ouput a FIX string in the following format:
+
+    <fix>Adjust the building to be more pixel-art styled</fix>
+
+    Examples:
+        """.strip()
+
+        contents = images.contents + [generation_prompt]
+
+        # Now, add in the few-shot examples:
+        # ====
+        few_shot_images = Images()
+
+        copied_example = GenerationCheck(
+            description="The generation is a copy of the render image.",
+            status="FAIL",
+            fixes=[]
+        )
+        few_shot_images.add_image_contents(
+            id='copied',
+            path=os.path.join(tile_dir, "few_shots", "copied.png"),
+            description=copied_example.model_dump_json()
+        )
+
+        pixelated_example = GenerationCheck(
+            description="Some of the buildings are pixelated / blurry",
+            status="FIX",
+            fixes=["Two buildings are blurry"],
+        )
+        few_shot_images.add_image_contents(
+            id='pixelated',
+            path=os.path.join(tile_dir, "few_shots", "some_blurry.png"),
+            description=pixelated_example.model_dump_json()
+        )
+
+        good_example = GenerationCheck(
+            description="The generation adheres to the style of the template image and the form of the reference image",
+            status="PASS",
+            fixes=[]
+        )
+        few_shot_images.add_image_contents(
+            id="good",
+            path=os.path.join(tile_dir, "few_shots", "good.png"),
+            description=good_example.model_dump_json()
+        )
+
+        contents = contents + few_shot_images.contents
+    
+        response = client.models.generate_content(
+            model="gemini-3-pro-preview",
+            contents=contents,
+            config={
+              "response_mime_type": "application/json",
+              "response_json_schema": GenerationCheck.model_json_schema(),
+            },
+        )
+    
+        output = GenerationCheck.model_validate_json(response.text)
+        print("🔥", json.dumps(output.model_dump(), indent=2))
 
     check_generation()
     return
