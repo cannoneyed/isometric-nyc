@@ -1,0 +1,1 @@
+Convert the input image to <isometric nyc pixel art>
