@@ -1,0 +1,119 @@
+{
+  "camera_azimuth_degrees": -15,
+  "camera_elevation_degrees": -45,
+  "width_px": 1080,
+  "height_px": 1080,
+  "view_height_meters": 200,
+  "locations": [
+    {
+      "name": "Madison Square Garden",
+      "lat": 40.7505,
+      "lon": -73.9934
+    },
+    {
+      "name": "Empire State Building",
+      "lat": 40.7484,
+      "lon": -73.9857
+    },
+    {
+      "name": "Statue of Liberty",
+      "lat": 40.6892,
+      "lon": -74.0445
+    },
+    {
+      "name": "Central Park",
+      "lat": 40.785,
+      "lon": -73.9682
+    },
+    {
+      "name": "Times Square",
+      "lat": 40.758,
+      "lon": -73.9854
+    },
+    {
+      "name": "Grand Central Terminal",
+      "lat": 40.7527,
+      "lon": -73.9772
+    },
+    {
+      "name": "Wall Street",
+      "lat": 40.7074,
+      "lon": -74.0113
+    },
+    {
+      "name": "Brooklyn Bridge",
+      "lat": 40.7061,
+      "lon": -73.9969
+    },
+    {
+      "name": "One World Trade Center",
+      "lat": 40.7127,
+      "lon": -74.0134
+    },
+    {
+      "name": "New York Stock Exchange",
+      "lat": 40.7069,
+      "lon": -74.0113
+    },
+    {
+      "name": "Federal Hall",
+      "lat": 40.7074,
+      "lon": -74.0101
+    },
+    {
+      "name": "St. Patrick's Cathedral",
+      "lat": 40.7585,
+      "lon": -73.976
+    },
+    {
+      "name": "St. Paul's Chapel",
+      "lat": 40.7113,
+      "lon": -74.0092
+    },
+    {
+      "name": "Trump Tower",
+      "lat": 40.7625,
+      "lon": -73.9738
+    },
+    {
+      "name": "Rockefeller Center",
+      "lat": 40.7587,
+      "lon": -73.9787
+    },
+    {
+      "name": "Radio City Music Hall",
+      "lat": 40.7601,
+      "lon": -73.9799
+    },
+    {
+      "name": "Bryant Park",
+      "lat": 40.7536,
+      "lon": -73.9832
+    },
+    {
+      "name": "Madison Square Park",
+      "lat": 40.742,
+      "lon": -73.988
+    },
+    {
+      "name": "West Village",
+      "lat": 40.7354,
+      "lon": -74.0049
+    },
+    {
+      "name": "East Village",
+      "lat": 40.7281,
+      "lon": -73.9812
+    },
+    {
+      "name": "Lower East Side",
+      "lat": 40.715,
+      "lon": -73.9843
+    },
+    {
+      "name": "Two Bridges",
+      "lat": 40.7107,
+      "lon": -73.9962
+    }
+  ]
+}
