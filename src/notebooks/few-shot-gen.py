@@ -111,10 +111,14 @@ def _(Image, client, mo, os, tile_dir, types):
 
     output_image, composition_image = generate_template()
 
+    _output_image = output_image.resize((512, 512))
+    _composition_image = composition_image.resize((512, 512))
+
     mo.hstack([
-        mo.vstack([mo.md("**Nano Banana Image**"), output_image]),
-        mo.vstack([mo.md("**Template**"), composition_image]),
+        mo.vstack([mo.md("**Nano Banana Image**"), _output_image]),
+        mo.vstack([mo.md("**Composition**"), _composition_image]),
     ])
+
     return
 
 
