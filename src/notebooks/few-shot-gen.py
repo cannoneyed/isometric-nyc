@@ -61,7 +61,7 @@ def _(Image, client, mo, os, tile_dir, types):
     You are an advanced image generation agent tasked with using the information in the provided images to generate an isometric pixel art image of a tile of New York City, in the style of classic city builder games such as SimCity 3000.
 
     Generation Instructions:
-    The upper left quadrant is a whitebox render of the buildings, and the upper right quadrant is a 3D render of the buildings using the Google Maps 3D Tiles API. Your task is to generate the pixel art version of the tile in the lower left quadrant. ENSURE THAT THE GENERATED IMAGE EXACTLY FILLS THE LOWER LEFT QUADRANT!
+    The upper left quadrant is a whitebox render of the buildings, and the upper right quadrant is a 3D render of the buildings using the Google Maps 3D Tiles API. Your task is to finish the masked pixel art version of the tile in the lower left quadrant - fill in all missing pixels to complete the image based on the templates above. ENSURE THAT THE GENERATED IMAGE EXACTLY AND ONLY FILLS THE LOWER RIGHT QUADRANT OF THE IMAGE - DO NOT MODIFY THE OTHER QUADRANTS. Use the architectural details, building shapes, and layout from the upper quadrants to inform your pixel art generation. The final image should be a seamless blend of the provided templates, maintaining the isometric pixel art style throughout.
 
     Style Instructions:
     (((Isometric pixel art:1.6))), (classic city builder game aesthetic:1.5), (orthographic projection:1.5), (detailed 32-bit graphics:1.4), (sharp crisp edges:1.3), (dense urban cityscape:1.3), (complex architectural geometry:1.2), (directional hard shadows:1.2), neutral color palette, bird's-eye view.
@@ -115,15 +115,6 @@ def _(Image, client, mo, os, tile_dir, types):
         mo.vstack([mo.md("**Nano Banana Image**"), output_image]),
         mo.vstack([mo.md("**Template**"), composition_image]),
     ])
-    return composition_image, output_image
-
-
-@app.cell
-def _(composition_image, mo, output_image):
-    mo.hstack([
-        mo.vstack([mo.md("**Nano Banana Image**"), output_image]),
-        mo.vstack([mo.md("**Template**"), composition_image]),
-    ])
     return
 
 
@@ -144,16 +135,16 @@ def _(Image, mo, os, tile_dir):
     # Get the dimensions of the image
     _width, _height = _generated_image.size
 
-    # Define the crop box for the lower-left quadrant
+    # Define the crop box for the lower-right quadrant
     # The box is a 4-tuple: (left, upper, right, lower)
-    _crop_box = (0, _height // 2, _width // 2, _height)
+    _crop_box = (_width // 2, _height // 2, _width, _height)
 
     # Crop the image
-    _lower_left_quadrant = _generated_image.crop(_crop_box)
+    _lower_right_quadrant = _generated_image.crop(_crop_box)
 
     # Resize the cropped quadrant to 1024x1024 using a high-quality filter
     _target_size = (1024, 1024)
-    spliced_image = _lower_left_quadrant.resize(
+    spliced_image = _lower_right_quadrant.resize(
         _target_size, Image.Resampling.LANCZOS
     )
 

@@ -18,12 +18,27 @@ from typing import List
 from PIL import Image
 
 
-def composite_images(tile_dir: Path, blank_bottom_left: bool = False) -> None:
+def composite_images(
+  tile_dir: Path, no_output: bool = False, infill: bool = False
+) -> None:
   """
   Composite images for a single tile directory into a 2x2 grid (1:1 aspect ratio).
-  Layout:
-  [Whitebox] [Render]
-  [Generation] [Empty]
+  Layout options:
+  Default:
+    [Whitebox] [Render]
+    [Generation] [Empty]
+
+  no_output (infill=False):
+    [Whitebox] [Render]
+    [Empty] [Empty]
+
+  infill:
+    [Whitebox] [Render]
+    [Left-Half-Generation] [Generation]
+
+  no_output (infill=True):
+    [Whitebox] [Render]
+    [Left-Half-Generation] [Empty]
   """
   images = {
     "whitebox": tile_dir / "whitebox.png",
@@ -33,7 +48,8 @@ def composite_images(tile_dir: Path, blank_bottom_left: bool = False) -> None:
 
   # Check if required images exist
   required = ["whitebox", "render"]
-  if not blank_bottom_left:
+  # We need generation if we are NOT blanking bottom left OR if we are infilling
+  if infill or not no_output:
     required.append("generation")
 
   missing = [name for name in required if not images[name].exists()]
@@ -46,24 +62,17 @@ def composite_images(tile_dir: Path, blank_bottom_left: bool = False) -> None:
     img_whitebox = Image.open(images["whitebox"])
     img_render = Image.open(images["render"])
 
-    if not blank_bottom_left:
+    imgs = [img_whitebox, img_render]
+
+    img_generation = None
+    if infill or not no_output:
       img_generation = Image.open(images["generation"])
-      imgs = [img_whitebox, img_render, img_generation]
-    else:
-      imgs = [img_whitebox, img_render]
 
     # Determine quadrant size
     # We use the maximum dimension found across all images to ensure square quadrants that fit everything
-    max_dim = max(max(img.width, img.height) for img in imgs)
-
-    # Resize generation image to fill the quadrant exactly (if present)
-    if not blank_bottom_left and (
-      img_generation.width != max_dim or img_generation.height != max_dim
-    ):
-      img_generation = img_generation.resize(
-        (max_dim, max_dim), Image.Resampling.LANCZOS
-      )
-      imgs[2] = img_generation
+    max_dim = max(img.width for img in imgs)
+    if img_generation:
+      max_dim = max(max_dim, max(img_generation.width, img_generation.height))
 
     # Final image size (2x2 grid)
     final_size = max_dim * 2
@@ -71,25 +80,49 @@ def composite_images(tile_dir: Path, blank_bottom_left: bool = False) -> None:
     # Create final square composite
     final_image = Image.new("RGB", (final_size, final_size), (255, 255, 255))
 
-    # Paste locations
-    # Quadrant 1 (Top-Left): Whitebox
-    # Quadrant 2 (Top-Right): Render
-    # Quadrant 3 (Bottom-Left): Generation (or blank)
-    # Quadrant 4 (Bottom-Right): Empty
+    # Prepare generation images (resize if needed)
+    img_generation_full = None
+    if img_generation:
+      if img_generation.width != max_dim or img_generation.height != max_dim:
+        img_generation_full = img_generation.resize(
+          (max_dim, max_dim), Image.Resampling.LANCZOS
+        )
+      else:
+        img_generation_full = img_generation
 
+    # Paste locations and logic
+    # 1. Whitebox (TL)
+    # 2. Render (TR)
     positions = [
       (0, 0),  # Top-Left
       (max_dim, 0),  # Top-Right
     ]
 
-    if not blank_bottom_left:
-      positions.append((0, max_dim))  # Bottom-Left
-
     for img, (x_offset, y_offset) in zip(imgs, positions):
-      # Center image within its quadrant (except generation which is now full size)
       x = x_offset + (max_dim - img.width) // 2
       y = y_offset + (max_dim - img.height) // 2
       final_image.paste(img, (x, y))
+
+    # 3. Bottom-Left Logic
+    if infill and img_generation_full:
+      # Left half of generation, right half white
+      # Create a white image
+      half_gen = Image.new("RGB", (max_dim, max_dim), (255, 255, 255))
+      # Paste the left half of generation
+      crop_box = (0, 0, max_dim // 2, max_dim)
+      left_half = img_generation_full.crop(crop_box)
+      half_gen.paste(left_half, (0, 0))
+
+      final_image.paste(half_gen, (0, max_dim))
+
+    elif not no_output and img_generation_full:
+      # Full generation
+      final_image.paste(img_generation_full, (0, max_dim))
+
+    # 4. Bottom-Right Logic
+    if infill and not no_output and img_generation_full:
+      # Full generation in bottom right
+      final_image.paste(img_generation_full, (max_dim, max_dim))
 
     # Save
     output_path = tile_dir / "composition.png"
@@ -111,9 +144,14 @@ def main():
     help="Path to tile generation directory (can be single tile or parent of multiple)",
   )
   parser.add_argument(
-    "--blank-bottom-left",
+    "--no-output",
     action="store_true",
-    help="Leave the bottom-left quadrant blank (skip generation.png)",
+    help="Don't show the full generation output (affects quadrants based on infill flag)",
+  )
+  parser.add_argument(
+    "--infill",
+    action="store_true",
+    help="Show left-half generation in bottom-left and full generation in bottom-right",
   )
 
   args = parser.parse_args()
@@ -155,7 +193,7 @@ def main():
   print("=" * 60)
 
   for i, d in enumerate(tile_dirs):
-    composite_images(d, blank_bottom_left=args.blank_bottom_left)
+    composite_images(d, no_output=args.no_output, infill=args.infill)
 
   print("\n" + "=" * 60)
   print("✨ COMPOSITION COMPLETE")
