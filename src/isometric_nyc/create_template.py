@@ -5,9 +5,13 @@ from pathlib import Path
 from PIL import Image
 
 
-def create_template(tile_dir_path: Path) -> None:
+def create_template(tile_dir_path: Path, use_render: bool = False) -> None:
   """
   Creates a template.png for the given tile directory based on its neighbors' generation.png files.
+
+  Args:
+    tile_dir_path: Path to the tile directory containing view.json
+    use_render: If True, use the right half of render.png instead of white pixels
   """
   # Validate tile directory
   if not tile_dir_path.exists():
@@ -47,6 +51,29 @@ def create_template(tile_dir_path: Path) -> None:
   # Create blank canvas (white)
   # "white pixels on the right" implies white background
   canvas = Image.new("RGB", (width_px, height_px), "white")
+
+  # If use_render is True, paste the right half of render.png onto the canvas
+  if use_render:
+    render_path = tile_dir_path / "render.png"
+    if render_path.exists():
+      try:
+        with Image.open(render_path) as render_img:
+          if render_img.size != (width_px, height_px):
+            print(
+              f"Warning: render.png size {render_img.size} does not match expected {(width_px, height_px)}. Skipping render."
+            )
+          else:
+            # Crop the right half of render.png and paste it
+            half_width = width_px // 2
+            right_half = render_img.crop((half_width, 0, width_px, height_px))
+            canvas.paste(right_half, (half_width, 0))
+            print("Added right half of render.png to template")
+      except Exception as e:
+        print(f"Error loading render.png: {e}")
+    else:
+      print(
+        f"Warning: --use-render specified but render.png not found at {render_path}"
+      )
 
   found_neighbor = False
 
@@ -126,11 +153,16 @@ def main():
     "--tile_dir",
     help="Directory containing the tile assets (view.json)",
   )
+  parser.add_argument(
+    "--use-render",
+    action="store_true",
+    help="Use the right half of render.png instead of white pixels",
+  )
 
   args = parser.parse_args()
   tile_dir = Path(args.tile_dir)
 
-  create_template(tile_dir)
+  create_template(tile_dir, use_render=args.use_render)
 
 
 if __name__ == "__main__":
