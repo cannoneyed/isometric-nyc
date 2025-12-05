@@ -52,7 +52,7 @@ def generate_tile(tile_dir: str, reference_image_name: Path):
 
 {images.get_index("render")} is the 3D render of the city - use this image as a reference for the details, textures, colors, and lighting of the buildings, but DO NOT  just use these pixels - we want to copy these details but use the style of {images.get_index("reference")}.
 
-Use the guides in {images.get_index("whitebox")} as the blueprint for all building shapes and locations. Check carefully to make sure every building in {images.get_index("render")} and {images.get_index("whitebox")} is present in the generation, and ensure that the colors and textures of the buildings are correct.
+Use the guides in {images.get_index("whitebox")} as the blueprint for all building shapes and locations. Check carefully to make sure every building in {images.get_index("render")} and {images.get_index("whitebox")} is present in the generation, and ensure that the colors and textures of the buildings are correct. If a building is present in {images.get_index("render")} but not in {images.get_index("whitebox")}, it MUST BE generated.
 
 **Critical Style Rules (SimCity 3000 Aesthetic):**
 1.  **Clean Pixel Art:** The output must be clean, and detailed but low-resolution, as if on a VGA monitor. Avoid noise, random dithering, or messy "high pixelation" artifacts. The pixels should represent defined windows, ledges, and roof details.
