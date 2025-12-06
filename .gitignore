@@ -159,3 +159,6 @@ map_data/**/*.zip
 
 # Exported view images
 exports/
+
+# Infill template images
+**/infill_*.png
