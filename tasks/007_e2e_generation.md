@@ -84,3 +84,10 @@ a new python script called `seed_tiles` (that follows the arg/param conventions
 of scripts such as `export_views.py`) that will take a single arg
 `generation_dir` that points at an empty directory containing a
 "generation_config.json" and populates the SQLite DB in the directory
+
+# Step 2:
+
+Let's update the schema slightly - every quadrant should now also have x and y
+indices, which indicate how many quadrants left/right/up/down they are from the
+seed quadrant (upper right corner of the seed tile). Up should be negative
+steps, and right should be positive.

@@ -35,6 +35,9 @@ isometric-nyc = "isometric_nyc.main:main"
 inspect-db = "isometric_nyc.inspect_db:main"
 inspect-columns = "isometric_nyc.inspect_columns:main"
 plan-tiles = "isometric_nyc.plan_tiles:main"
+check-tiles = "isometric_nyc.e2e_generation.check_tiles:main"
+render-tile = "isometric_nyc.e2e_generation.render_tile:main"
+seed-tiles = "isometric_nyc.e2e_generation.seed_tiles:main"
 whitebox = "isometric_nyc.whitebox:main"
 
 [tool.ruff]
