@@ -317,7 +317,7 @@ def call_oxen_api(image_url: str, prompt: str, api_key: str) -> str:
   }
 
   payload = {
-    "model": "cannoneyed-modern-salmon-unicorn",
+    "model": "cannoneyed-satisfactory-harlequin-minnow",  # V04 infill
     "input_image": image_url,
     "prompt": prompt,
     "num_inference_steps": 28,

@@ -10,7 +10,6 @@ Usage:
 """
 
 import argparse
-import json
 import os
 import uuid
 from pathlib import Path
@@ -18,120 +17,6 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 from google.cloud import storage
-from PIL import Image
-
-
-def create_infill_image(tile_dir_path: Path) -> Path | None:
-  """
-  Creates an infill.png for the given tile directory.
-
-  The infill image is created by:
-  - Taking the overlapping portion of neighbor tile generations
-  - Filling the remaining area with the current tile's render
-
-  Returns the path to the created infill.png, or None if no neighbors found.
-  """
-  # Validate tile directory
-  if not tile_dir_path.exists():
-    raise FileNotFoundError(f"Tile directory not found: {tile_dir_path}")
-
-  # Load view.json
-  view_json_path = tile_dir_path / "view.json"
-  if not view_json_path.exists():
-    raise FileNotFoundError(f"view.json not found in {tile_dir_path}")
-
-  with open(view_json_path, "r") as f:
-    view_json = json.load(f)
-
-  # Extract grid info
-  row = view_json.get("row")
-  col = view_json.get("col")
-  width_px = view_json.get("width_px", 1024)
-  height_px = view_json.get("height_px", 1024)
-  tile_step = view_json.get("tile_step", 0.5)
-
-  if row is None or col is None:
-    print("Error: view.json missing 'row' or 'col' fields.")
-    return None
-
-  # Parent directory (plan directory)
-  plan_dir = tile_dir_path.parent
-
-  # Load the render image for this tile
-  render_path = tile_dir_path / "render.png"
-  if not render_path.exists():
-    print(f"Error: render.png not found in {tile_dir_path}")
-    return None
-
-  with Image.open(render_path) as render_img:
-    if render_img.size != (width_px, height_px):
-      render_img = render_img.resize((width_px, height_px), Image.Resampling.LANCZOS)
-    # Start with the render as the base
-    canvas = render_img.copy()
-
-  # Define neighbors: (row_offset, col_offset, name)
-  neighbors = [
-    (0, -1, "left"),
-    (0, 1, "right"),
-    (-1, 0, "top"),
-    (1, 0, "bottom"),
-  ]
-
-  found_neighbor = False
-
-  # Calculate step sizes in pixels
-  step_w = int(width_px * tile_step)
-  step_h = int(height_px * tile_step)
-
-  for r_off, c_off, name in neighbors:
-    n_row = row + r_off
-    n_col = col + c_off
-
-    # Construct neighbor directory name
-    n_dir_name = f"{n_row:03d}_{n_col:03d}"
-    n_dir_path = plan_dir / n_dir_name
-
-    n_gen_path = n_dir_path / "generation.png"
-
-    if n_gen_path.exists():
-      print(f"Found {name} neighbor at {n_dir_name}")
-      try:
-        with Image.open(n_gen_path) as n_img:
-          # Resize if needed
-          if n_img.size != (width_px, height_px):
-            print(
-              f"Warning: Neighbor {name} size {n_img.size} does not match "
-              f"expected {(width_px, height_px)}. Resizing."
-            )
-            n_img = n_img.resize((width_px, height_px), Image.Resampling.LANCZOS)
-
-          found_neighbor = True
-
-          # Logic for pasting neighbor parts (same as create_template.py)
-          if name == "left":
-            region = n_img.crop((step_w, 0, width_px, height_px))
-            canvas.paste(region, (0, 0))
-          elif name == "right":
-            region = n_img.crop((0, 0, width_px - step_w, height_px))
-            canvas.paste(region, (step_w, 0))
-          elif name == "top":
-            region = n_img.crop((0, step_h, width_px, height_px))
-            canvas.paste(region, (0, 0))
-          elif name == "bottom":
-            region = n_img.crop((0, 0, width_px, height_px - step_h))
-            canvas.paste(region, (0, step_h))
-
-      except Exception as e:
-        print(f"Error processing neighbor {name}: {e}")
-
-  if found_neighbor:
-    output_path = tile_dir_path / "infill.png"
-    canvas.save(output_path)
-    print(f"Created infill image at {output_path}")
-    return output_path
-  else:
-    print("No neighbors with 'generation.png' found. No infill image created.")
-    return None
 
 
 def upload_to_gcs(
@@ -196,9 +81,9 @@ def call_oxen_api(image_url: str, api_key: str) -> str:
   }
 
   payload = {
-    "model": "cannoneyed-modern-salmon-unicorn",
+    "model": "cannoneyed-odd-blue-marmot",  # V04 generation model
     "input_image": image_url,
-    "prompt": "Convert the right side of the image to <isometric nyc pixel art> in precisely the style of the left side.",
+    "prompt": "Convert the input image to <isometric nyc pixel art>",
     "num_inference_steps": 28,
   }
 
@@ -263,21 +148,14 @@ def generate_tile(tile_dir: str, bucket_name: str) -> None:
 
   tile_dir_path = Path(tile_dir)
 
-  # Step 1: Create the infill image
-  print("\n" + "=" * 60)
-  print("STEP 1: Creating infill image")
-  print("=" * 60)
-  infill_path = create_infill_image(tile_dir_path)
-
-  if infill_path is None:
-    print("Cannot proceed without infill image. Exiting.")
-    return
+  # Step 1: Get the render image
+  render_path = tile_dir_path / "render.png"
 
   # Step 2: Upload to Google Cloud Storage
   print("\n" + "=" * 60)
   print("STEP 2: Uploading to Google Cloud Storage")
   print("=" * 60)
-  image_url = upload_to_gcs(infill_path, bucket_name)
+  image_url = upload_to_gcs(render_path, bucket_name)
 
   # Step 3: Call Oxen API
   print("\n" + "=" * 60)
