@@ -204,17 +204,18 @@ def create_infill_template(tile_dir_path: Path) -> Tuple[Path | None, str | None
   ]
 
   # Check neighbors and paste their overlapping regions
-  # Neighbor format: (row_offset, col_offset, quadrants_covered, crop_region)
+  # Neighbor format: (row_offset, col_offset, quadrants_covered, crop_region, paste_pos)
   # crop_region is (x1, y1, x2, y2) of the neighbor's generation to use
+  # For naming {row}_{col}: row increases DOWN, col increases RIGHT
   neighbors = [
-    # Left neighbor: its right half covers our left half (TL, BL)
-    (-1, 0, [0, 2], (half_w, 0, width_px, height_px), (0, 0)),
-    # Right neighbor: its left half covers our right half (TR, BR)
-    (1, 0, [1, 3], (0, 0, half_w, height_px), (half_w, 0)),
-    # Top neighbor: its bottom half covers our top half (TL, TR)
-    (0, -1, [0, 1], (0, half_h, width_px, height_px), (0, 0)),
-    # Bottom neighbor: its top half covers our bottom half (BL, BR)
-    (0, 1, [2, 3], (0, 0, width_px, half_h), (0, half_h)),
+    # Left neighbor (col-1): its right half covers our left half (TL, BL)
+    (0, -1, [0, 2], (half_w, 0, width_px, height_px), (0, 0)),
+    # Right neighbor (col+1): its left half covers our right half (TR, BR)
+    (0, 1, [1, 3], (0, 0, half_w, height_px), (half_w, 0)),
+    # Top neighbor (row-1): its bottom half covers our top half (TL, TR)
+    (-1, 0, [0, 1], (0, half_h, width_px, height_px), (0, 0)),
+    # Bottom neighbor (row+1): its top half covers our bottom half (BL, BR)
+    (1, 0, [2, 3], (0, 0, width_px, half_h), (0, half_h)),
   ]
 
   for r_off, c_off, quadrants, crop_box, paste_pos in neighbors:
@@ -388,6 +389,13 @@ def generate_tile(tile_dir: str, bucket_name: str) -> None:
   # Step 3: Call Oxen API
   print("\n" + "=" * 60)
   print("STEP 3: Calling Oxen API")
+  print(f"Image URL: {image_url}")
+  print(f"Prompt: {prompt}")
+
+  # The generation has the red line... so let's remove it
+  prompt += "Remove the red outline from the image."
+
+  print("\n" + "=" * 60)  #
   print("=" * 60)
   generated_url = call_oxen_api(image_url, prompt, api_key)
 
