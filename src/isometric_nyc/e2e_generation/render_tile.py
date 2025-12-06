@@ -15,6 +15,7 @@ The tile rendered will have quadrant (x, y) in its top-left, with (x+1, y),
 import argparse
 import io
 import json
+import math
 import sqlite3
 import subprocess
 import time
@@ -122,6 +123,148 @@ def get_generation_config(conn: sqlite3.Connection) -> dict:
   return json.loads(row[0])
 
 
+def calculate_offset(
+  lat_center: float,
+  lon_center: float,
+  shift_x_px: float,
+  shift_y_px: float,
+  view_height_meters: float,
+  viewport_height_px: int,
+  azimuth_deg: float,
+  elevation_deg: float,
+) -> tuple[float, float]:
+  """
+  Calculate the new lat/lon center after shifting the view by shift_x_px and shift_y_px.
+  """
+  meters_per_pixel = view_height_meters / viewport_height_px
+
+  shift_right_meters = shift_x_px * meters_per_pixel
+  shift_up_meters = shift_y_px * meters_per_pixel
+
+  elev_rad = math.radians(elevation_deg)
+  sin_elev = math.sin(elev_rad)
+
+  if abs(sin_elev) < 1e-6:
+    raise ValueError(f"Elevation {elevation_deg} is too close to 0/180.")
+
+  delta_rot_x = shift_right_meters
+  delta_rot_y = -shift_up_meters / sin_elev
+
+  azimuth_rad = math.radians(azimuth_deg)
+  cos_a = math.cos(azimuth_rad)
+  sin_a = math.sin(azimuth_rad)
+
+  delta_east_meters = delta_rot_x * cos_a + delta_rot_y * sin_a
+  delta_north_meters = -delta_rot_x * sin_a + delta_rot_y * cos_a
+
+  delta_lat = delta_north_meters / 111111.0
+  delta_lon = delta_east_meters / (111111.0 * math.cos(math.radians(lat_center)))
+
+  return lat_center + delta_lat, lon_center + delta_lon
+
+
+def calculate_quadrant_lat_lng(
+  config: dict, quadrant_x: int, quadrant_y: int
+) -> tuple[float, float]:
+  """
+  Calculate the lat/lng anchor for a quadrant at position (quadrant_x, quadrant_y).
+
+  The anchor is the bottom-right corner of the quadrant.
+  For the TL quadrant (0, 0) of the seed tile, the anchor equals the seed lat/lng.
+  """
+  seed_lat = config["seed"]["lat"]
+  seed_lng = config["seed"]["lng"]
+  width_px = config["width_px"]
+  height_px = config["height_px"]
+  view_height_meters = config["view_height_meters"]
+  azimuth = config["camera_azimuth_degrees"]
+  elevation = config["camera_elevation_degrees"]
+  tile_step = config.get("tile_step", 0.5)
+
+  # Each quadrant step is half a tile (with tile_step=0.5, one tile step = one quadrant)
+  # But quadrant positions are in quadrant units, not tile units
+  # quadrant_x = tile_col + dx, quadrant_y = tile_row + dy
+  # So shift in pixels = quadrant position * (tile_size * tile_step)
+  quadrant_step_x_px = width_px * tile_step
+  quadrant_step_y_px = height_px * tile_step
+
+  shift_x_px = quadrant_x * quadrant_step_x_px
+  shift_y_px = -quadrant_y * quadrant_step_y_px  # Negative because y increases downward
+
+  return calculate_offset(
+    seed_lat,
+    seed_lng,
+    shift_x_px,
+    shift_y_px,
+    view_height_meters,
+    height_px,
+    azimuth,
+    elevation,
+  )
+
+
+def ensure_quadrant_exists(
+  conn: sqlite3.Connection, config: dict, x: int, y: int
+) -> dict:
+  """
+  Ensure a quadrant exists at position (x, y), creating it if necessary.
+
+  Returns the quadrant data.
+  """
+  cursor = conn.cursor()
+
+  # Check if quadrant already exists
+  cursor.execute(
+    """
+    SELECT lat, lng, tile_row, tile_col, quadrant_index, render
+    FROM quadrants
+    WHERE quadrant_x = ? AND quadrant_y = ?
+    """,
+    (x, y),
+  )
+  row = cursor.fetchone()
+
+  if row:
+    return {
+      "lat": row[0],
+      "lng": row[1],
+      "tile_row": row[2],
+      "tile_col": row[3],
+      "quadrant_index": row[4],
+      "has_render": row[5] is not None,
+    }
+
+  # Quadrant doesn't exist - create it
+  lat, lng = calculate_quadrant_lat_lng(config, x, y)
+
+  # Calculate tile_row, tile_col, and quadrant_index
+  # For a quadrant at (x, y), it could belong to multiple tiles due to overlap
+  # We'll use the tile where this quadrant is the TL (index 0)
+  tile_col = x
+  tile_row = y
+  quadrant_index = 0  # TL of its "primary" tile
+
+  cursor.execute(
+    """
+    INSERT INTO quadrants (quadrant_x, quadrant_y, lat, lng, tile_row, tile_col, quadrant_index)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    """,
+    (x, y, lat, lng, tile_row, tile_col, quadrant_index),
+  )
+  conn.commit()
+
+  print(f"   📝 Created quadrant ({x}, {y}) at {lat:.6f}, {lng:.6f}")
+
+  return {
+    "lat": lat,
+    "lng": lng,
+    "tile_row": tile_row,
+    "tile_col": tile_col,
+    "quadrant_index": quadrant_index,
+    "has_render": False,
+  }
+
+
 def get_quadrant(conn: sqlite3.Connection, x: int, y: int) -> dict | None:
   """
   Get a quadrant by its (x, y) position.
@@ -168,13 +311,17 @@ def check_all_quadrants_rendered(conn: sqlite3.Connection, x: int, y: int) -> bo
 
 
 def save_quadrant_render(
-  conn: sqlite3.Connection, x: int, y: int, png_bytes: bytes
+  conn: sqlite3.Connection, config: dict, x: int, y: int, png_bytes: bytes
 ) -> bool:
   """
   Save render bytes for a quadrant at position (x, y).
 
-  Returns True if successful, False if quadrant not found.
+  Creates the quadrant if it doesn't exist.
+  Returns True if successful.
   """
+  # Ensure the quadrant exists first
+  ensure_quadrant_exists(conn, config, x, y)
+
   cursor = conn.cursor()
   cursor.execute(
     """
@@ -254,17 +401,14 @@ def render_quadrant_tile(
     # Get generation config
     config = get_generation_config(conn)
 
-    # Get the quadrant at position (x, y) - this will be the TL of the rendered tile
-    quadrant = get_quadrant(conn, x, y)
-    if not quadrant:
-      print(f"❌ No quadrant found at position ({x}, {y})")
-      return None
-
     # Check if we should skip rendering (all quadrants already have renders)
     if not overwrite:
       if check_all_quadrants_rendered(conn, x, y):
         print(f"⏭️  Skipping ({x}, {y}) - all quadrants already rendered")
         return None
+
+    # Ensure the quadrant exists (creates it if necessary)
+    quadrant = ensure_quadrant_exists(conn, config, x, y)
 
     print(f"📍 Rendering tile starting at quadrant ({x}, {y})")
     print(f"   Covers: ({x},{y}), ({x + 1},{y}), ({x},{y + 1}), ({x + 1},{y + 1})")
@@ -340,10 +484,10 @@ def render_quadrant_tile(
       qx, qy = x + dx, y + dy
       png_bytes = image_to_png_bytes(quad_img)
 
-      if save_quadrant_render(conn, qx, qy, png_bytes):
+      if save_quadrant_render(conn, config, qx, qy, png_bytes):
         print(f"   ✓ Saved quadrant ({qx}, {qy}) - {len(png_bytes)} bytes")
       else:
-        print(f"   ⚠️  Quadrant ({qx}, {qy}) not found in database")
+        print(f"   ⚠️  Failed to save quadrant ({qx}, {qy})")
 
     return output_path
 
