@@ -162,3 +162,5 @@ exports/
 
 # Infill template images
 **/infill_*.png
+# Temporary generated images
+generations/**/*.png

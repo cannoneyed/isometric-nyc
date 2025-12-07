@@ -147,8 +147,8 @@ def get_quadrant(conn: sqlite3.Connection, x: int, y: int) -> dict | None:
     "tile_row": row[2],
     "tile_col": row[3],
     "quadrant_index": row[4],
-    "has_render": row[5] is not None,
-    "has_generation": row[6] is not None,
+    "has_render": bool(row[5]),
+    "has_generation": bool(row[6]),
     "render": row[5],
     "generation": row[6],
   }
