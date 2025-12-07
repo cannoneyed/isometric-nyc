@@ -11,107 +11,20 @@ The assembled image will be saved as renders/check_tiles_assembled.png
 """
 
 import argparse
-import json
 import sqlite3
-import subprocess
-import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from urllib.parse import urlencode
 
 from PIL import Image
 from playwright.sync_api import sync_playwright
 
-# Web server configuration
-WEB_DIR = Path(__file__).parent.parent.parent / "web"
-DEFAULT_WEB_PORT = 5173
-
-
-def wait_for_server(port: int, timeout: float = 30.0, interval: float = 0.5) -> bool:
-  """Wait for the server to be ready by making HTTP requests."""
-  url = f"http://localhost:{port}/"
-  start_time = time.time()
-
-  while time.time() - start_time < timeout:
-    try:
-      req = urllib.request.Request(url, method="HEAD")
-      with urllib.request.urlopen(req, timeout=2):
-        return True
-    except (urllib.error.URLError, ConnectionRefusedError, TimeoutError, OSError):
-      time.sleep(interval)
-
-  return False
-
-
-def start_web_server(web_dir: Path, port: int) -> subprocess.Popen:
-  """Start the Vite dev server and wait for it to be ready."""
-  print(f"🌐 Starting web server on port {port}...")
-
-  if not web_dir.exists():
-    raise RuntimeError(f"Web directory not found: {web_dir}")
-
-  process = subprocess.Popen(
-    ["bun", "run", "dev", "--port", str(port)],
-    cwd=web_dir,
-    stdout=subprocess.PIPE,
-    stderr=subprocess.PIPE,
-  )
-
-  time.sleep(2)
-
-  if process.poll() is not None:
-    stdout = process.stdout.read().decode() if process.stdout else ""
-    stderr = process.stderr.read().decode() if process.stderr else ""
-    raise RuntimeError(
-      f"Web server failed to start.\nstdout: {stdout}\nstderr: {stderr}"
-    )
-
-  print("   ⏳ Waiting for server to be ready...")
-  if wait_for_server(port, timeout=30.0):
-    print(f"   ✅ Server ready on http://localhost:{port}")
-  else:
-    if process.poll() is not None:
-      stdout = process.stdout.read().decode() if process.stdout else ""
-      stderr = process.stderr.read().decode() if process.stderr else ""
-      raise RuntimeError(f"Web server died.\nstdout: {stdout}\nstderr: {stderr}")
-    print("   ⚠️  Server may not be fully ready, continuing anyway...")
-
-  return process
-
-
-def get_generation_config(conn: sqlite3.Connection) -> dict:
-  """Get the generation config from the metadata table."""
-  cursor = conn.cursor()
-  cursor.execute("SELECT value FROM metadata WHERE key = 'generation_config'")
-  row = cursor.fetchone()
-  if not row:
-    raise ValueError("generation_config not found in metadata")
-  return json.loads(row[0])
-
-
-def get_quadrant(conn: sqlite3.Connection, x: int, y: int) -> dict | None:
-  """Get a quadrant by its (x, y) position."""
-  cursor = conn.cursor()
-  cursor.execute(
-    """
-    SELECT lat, lng, tile_row, tile_col, quadrant_index
-    FROM quadrants
-    WHERE quadrant_x = ? AND quadrant_y = ?
-    """,
-    (x, y),
-  )
-  row = cursor.fetchone()
-  if not row:
-    return None
-
-  return {
-    "lat": row[0],
-    "lng": row[1],
-    "tile_row": row[2],
-    "tile_col": row[3],
-    "quadrant_index": row[4],
-  }
+from isometric_nyc.e2e_generation.shared import (
+  DEFAULT_WEB_PORT,
+  WEB_DIR,
+  get_generation_config,
+  get_quadrant,
+  start_web_server,
+)
 
 
 def render_tile(

@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "flask>=3.1.2",
     "google-cloud-storage>=2.18.0",
     "google-genai>=1.52.0",
     "googlemaps>=4.10.0",
