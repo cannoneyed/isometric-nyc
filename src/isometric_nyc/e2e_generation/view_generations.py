@@ -145,7 +145,8 @@ HTML_TEMPLATE = """
     
     .grid {
       display: grid;
-      grid-template-columns: repeat({{ n }}, 1fr);
+      grid-template-columns: repeat({{ n }}, {{ size_px }}px);
+      grid-auto-rows: {{ size_px }}px;
       background: #333;
     }
     
@@ -178,8 +179,8 @@ HTML_TEMPLATE = """
     
     .tile.placeholder {
       background: #3a3a5a;
-      min-width: 256px;
-      min-height: 256px;
+      min-width: {{ size_px }}px;
+      min-height: {{ size_px }}px;
     }
     
     .tile .coords {
@@ -216,6 +217,7 @@ HTML_TEMPLATE = """
     <label>X: <input type="number" id="x" value="{{ x }}"></label>
     <label>Y: <input type="number" id="y" value="{{ y }}"></label>
     <label>N: <input type="number" id="n" value="{{ n }}" min="1" max="10"></label>
+    <label>Size: <input type="number" id="sizePx" value="{{ size_px }}" step="32"></label>
     <button onclick="goTo()">Go</button>
     
     <div class="nav-buttons">
@@ -269,22 +271,23 @@ HTML_TEMPLATE = """
       const x = document.getElementById('x').value;
       const y = document.getElementById('y').value;
       const n = document.getElementById('n').value;
+      const sizePx = document.getElementById('sizePx').value;
       const showLines = document.getElementById('showLines').checked ? '1' : '0';
       const showCoords = document.getElementById('showCoords').checked ? '1' : '0';
       const showRender = document.getElementById('showRender').checked ? '1' : '0';
-      return { x, y, n, showLines, showCoords, showRender };
+      return { x, y, n, sizePx, showLines, showCoords, showRender };
     }
     
     function goTo() {
-      const { x, y, n, showLines, showCoords, showRender } = getParams();
-      window.location.href = `?x=${x}&y=${y}&n=${n}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
+      const { x, y, n, sizePx, showLines, showCoords, showRender } = getParams();
+      window.location.href = `?x=${x}&y=${y}&n=${n}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
     }
     
     function navigate(dx, dy) {
       const params = getParams();
       const x = parseInt(params.x) + dx;
       const y = parseInt(params.y) + dy;
-      window.location.href = `?x=${x}&y=${y}&n=${params.n}&lines=${params.showLines}&coords=${params.showCoords}&render=${params.showRender}`;
+      window.location.href = `?x=${x}&y=${y}&n=${params.n}&size=${params.sizePx}&lines=${params.showLines}&coords=${params.showCoords}&render=${params.showRender}`;
     }
     
     function toggleLines() {
@@ -311,8 +314,8 @@ HTML_TEMPLATE = """
     
     function toggleRender() {
       // This requires a page reload to fetch different data
-      const { x, y, n, showLines, showCoords, showRender } = getParams();
-      window.location.href = `?x=${x}&y=${y}&n=${n}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
+      const { x, y, n, sizePx, showLines, showCoords, showRender } = getParams();
+      window.location.href = `?x=${x}&y=${y}&n=${n}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
     }
     
     // Keyboard navigation
@@ -392,6 +395,7 @@ def index():
   x = request.args.get("x", 0, type=int)
   y = request.args.get("y", 0, type=int)
   n = request.args.get("n", 2, type=int)
+  size_px = request.args.get("size", 256, type=int)
   show_lines = request.args.get("lines", "1") == "1"
   show_coords = request.args.get("coords", "1") == "1"
   show_render = request.args.get("render", "0") == "1"
@@ -412,6 +416,7 @@ def index():
     x=x,
     y=y,
     n=n,
+    size_px=size_px,
     show_lines=show_lines,
     show_coords=show_coords,
     show_render=show_render,

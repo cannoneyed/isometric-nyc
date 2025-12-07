@@ -44,6 +44,11 @@ from isometric_nyc.e2e_generation.shared import (
   start_web_server,
 )
 
+# Oxen API Model Constants
+INPAINTING_MODEL_ID = "cannoneyed-spectacular-beige-hyena"
+GENERATION_MODEL_ID = "cannoneyed-odd-blue-marmot"
+INFILL_MODEL_ID = "cannoneyed-satisfactory-harlequin-minnow"
+
 # =============================================================================
 # GCS and Oxen API Integration (from generate_tile_oxen.py)
 # =============================================================================
@@ -166,18 +171,22 @@ def call_oxen_api(
     "Content-Type": "application/json",
   }
 
-  if use_infill_model:
-    model = "cannoneyed-satisfactory-harlequin-minnow"  # V04 infill model
-    if region_description:
-      prompt = (
-        f"Convert the {region_description} of the image to isometric nyc pixel art "
-        f"in precisely the style of the other part of the image."
-      )
-    else:
-      prompt = "Convert the input image to <isometric nyc pixel art>"
-  else:
-    model = "cannoneyed-odd-blue-marmot"  # V04 generation model
-    prompt = "Convert the input image to <isometric nyc pixel art>"
+  # We're experimenting with using *only* the inpainting model
+  model = INPAINTING_MODEL_ID
+  prompt = "Fill in the outlined section with the missing pixels corresponding to the <isometric nyc pixel art> style, removing the border and exactly following the shape/style/structure of the surrounding image."
+
+  # if use_infill_model:
+  #   model = "cannoneyed-satisfactory-harlequin-minnow"  # V04 infill model
+  #   if region_description:
+  #     prompt = (
+  #       f"Convert the {region_description} of the image to isometric nyc pixel art "
+  #       f"in precisely the style of the other part of the image."
+  #     )
+  #   else:
+  #     prompt = "Convert the input image to <isometric nyc pixel art>"
+  # else:
+  #   model = "cannoneyed-odd-blue-marmot"  # V04 generation model
+  #   prompt = "Convert the input image to <isometric nyc pixel art>"
 
   payload = {
     "model": model,
