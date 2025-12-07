@@ -128,7 +128,7 @@ def import_generation(
   print(f"   Size: {image.size[0]}x{image.size[1]}")
 
   if image.size[0] != image.size[1]:
-    print(f"   ⚠️  Warning: Image is not square")
+    print("   ⚠️  Warning: Image is not square")
 
   quadrant_images = split_into_quadrants(image)
   quad_w, quad_h = quadrant_images[(0, 0)].size
@@ -138,7 +138,7 @@ def import_generation(
 
   try:
     print(f"\n🎯 Importing to tile ({x}, {y})")
-    print(f"   Quadrants: ({x},{y}), ({x+1},{y}), ({x},{y+1}), ({x+1},{y+1})")
+    print(f"   Quadrants: ({x},{y}), ({x + 1},{y}), ({x},{y + 1}), ({x + 1},{y + 1})")
 
     if dry_run:
       print("   (DRY RUN - no changes will be made)\n")
@@ -156,7 +156,9 @@ def import_generation(
 
       # Check if it already has a generation
       if info["has_generation"] and not overwrite:
-        print(f"   ⏭️  Quadrant ({qx}, {qy}) already has generation - skipping (use --overwrite)")
+        print(
+          f"   ⏭️  Quadrant ({qx}, {qy}) already has generation - skipping (use --overwrite)"
+        )
         continue
 
       # Convert to bytes
@@ -164,17 +166,23 @@ def import_generation(
 
       if dry_run:
         status = "overwrite" if info["has_generation"] else "new"
-        print(f"   🔍 Would import quadrant ({qx}, {qy}) [{status}] - {len(png_bytes)} bytes")
+        print(
+          f"   🔍 Would import quadrant ({qx}, {qy}) [{status}] - {len(png_bytes)} bytes"
+        )
         success_count += 1
       else:
         if save_quadrant_generation(conn, qx, qy, png_bytes):
           status = "overwrote" if info["has_generation"] else "imported"
-          print(f"   ✓ {status.capitalize()} quadrant ({qx}, {qy}) - {len(png_bytes)} bytes")
+          print(
+            f"   ✓ {status.capitalize()} quadrant ({qx}, {qy}) - {len(png_bytes)} bytes"
+          )
           success_count += 1
         else:
           print(f"   ❌ Failed to save quadrant ({qx}, {qy})")
 
-    print(f"\n{'🔍 Would import' if dry_run else '✅ Imported'} {success_count}/4 quadrants")
+    print(
+      f"\n{'🔍 Would import' if dry_run else '✅ Imported'} {success_count}/4 quadrants"
+    )
     return success_count > 0
 
   finally:
@@ -250,4 +258,3 @@ def main():
 
 if __name__ == "__main__":
   exit(main())
-
