@@ -12,8 +12,10 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
 
+from google.cloud import storage
 from PIL import Image
 
 # Web server configuration
@@ -516,3 +518,33 @@ def has_any_neighbor_generations(conn: sqlite3.Connection, x: int, y: int) -> bo
   """Check if there are any generated neighbor quadrants for a tile at (x, y)."""
   neighbors = get_neighboring_generated_quadrants(conn, x, y)
   return any(v is not None for v in neighbors.values())
+
+
+def upload_to_gcs(
+  local_path: Path, bucket_name: str, blob_name: str | None = None
+) -> str:
+  """
+  Upload a file to Google Cloud Storage and return its public URL.
+
+  Args:
+    local_path: Path to the local file to upload
+    bucket_name: Name of the GCS bucket
+    blob_name: Name for the blob in GCS (defaults to unique name based on filename)
+
+  Returns:
+    Public URL of the uploaded file
+  """
+  client = storage.Client()
+  bucket = client.bucket(bucket_name)
+
+  if blob_name is None:
+    unique_id = uuid.uuid4().hex[:8]
+    blob_name = f"infills/{local_path.stem}_{unique_id}{local_path.suffix}"
+
+  blob = bucket.blob(blob_name)
+
+  print(f"   📤 Uploading {local_path.name} to gs://{bucket_name}/{blob_name}...")
+  blob.upload_from_filename(str(local_path))
+  blob.make_public()
+
+  return blob.public_url
