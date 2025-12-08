@@ -45,6 +45,7 @@ from isometric_nyc.e2e_generation.shared import (
 )
 
 # Oxen API Model Constants
+OMNI_MODEL_ID = "cannoneyed-gentle-gold-antlion"
 INPAINTING_MODEL_ID = "cannoneyed-spectacular-beige-hyena"
 GENERATION_MODEL_ID = "cannoneyed-odd-blue-marmot"
 INFILL_MODEL_ID = "cannoneyed-satisfactory-harlequin-minnow"
@@ -171,9 +172,9 @@ def call_oxen_api(
     "Content-Type": "application/json",
   }
 
-  # We're experimenting with using *only* the inpainting model
-  model = INPAINTING_MODEL_ID
-  prompt = "Fill in the outlined section with the missing pixels corresponding to the <isometric nyc pixel art> style, removing the border and exactly following the shape/style/structure of the surrounding image."
+  # We're experimenting with using *only* the omni model
+  model = OMNI_MODEL_ID
+  prompt = "Fill in the outlined section with the missing pixels corresponding to the <isometric nyc pixel art> style, removing the border and exactly following the shape/style/structure of the surrounding image (if present)."
 
   # if use_infill_model:
   #   model = "cannoneyed-satisfactory-harlequin-minnow"  # V04 infill model
