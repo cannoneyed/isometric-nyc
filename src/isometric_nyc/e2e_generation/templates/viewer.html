@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Generated Tiles Viewer</title>
+    <link rel="stylesheet" href="/static/viewer.css" />
+    <style>
+      /* Dynamic grid sizing based on template variables */
+      .grid {
+        grid-template-columns: repeat({{ nx }}, {{ size_px }}px);
+        grid-auto-rows: {{ size_px }}px;
+      }
+      .tile.placeholder {
+        min-width: {{ size_px }}px;
+        min-height: {{ size_px }}px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Config data for JS -->
+    <script
+      id="app-config"
+      type="application/json"
+      data-config='{"x": {{ x }}, "y": {{ y }}, "nx": {{ nx }}, "ny": {{ ny }}, "size_px": {{ size_px }}}'
+    ></script>
+
+    <!-- Toast notification container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Fixed toolbar -->
+    <div class="toolbar">
+      <div class="toolbar-row">
+        <div class="controls">
+          <label>X: <input type="number" id="x" value="{{ x }}" /></label>
+          <label>Y: <input type="number" id="y" value="{{ y }}" /></label>
+          <label
+            >NX: <input type="number" id="nx" value="{{ nx }}" min="1" max="20"
+          /></label>
+          <label
+            >NY: <input type="number" id="ny" value="{{ ny }}" min="1" max="20"
+          /></label>
+          <label
+            >Size:
+            <input type="number" id="sizePx" value="{{ size_px }}" step="32"
+          /></label>
+          <button onclick="goTo()">Go</button>
+          <div class="toggle-group">
+            <label
+              ><input
+                type="checkbox"
+                id="showLines"
+                {%
+                if
+                show_lines
+                %}checked{%
+                endif
+                %}
+                onchange="toggleLines()"
+              />
+              Lines</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                id="showCoords"
+                {%
+                if
+                show_coords
+                %}checked{%
+                endif
+                %}
+                onchange="toggleCoords()"
+              />
+              Coords</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                id="showRender"
+                {%
+                if
+                show_render
+                %}checked{%
+                endif
+                %}
+                onchange="toggleRender()"
+              />
+              Renders</label
+            >
+          </div>
+          <div class="toggle-group tools-group">
+            <span class="tools-label">Tools:</span>
+            <button
+              id="selectTool"
+              class="tool-btn"
+              onclick="toggleSelectTool()"
+              title="Select quadrants (S)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"></path>
+                <path d="M13 13l6 6"></path>
+              </svg>
+              Select
+            </button>
+          </div>
+        </div>
+        <div class="toolbar-info">
+          <span>({{ x }}, {{ y }}) → ({{ x + nx - 1 }}, {{ y + ny - 1 }})</span>
+          <span>{{ generation_dir }}</span>
+        </div>
+      </div>
+      <div class="selection-status" id="selectionStatus">
+        <span id="selectionCount">0 quadrants selected</span>
+        <span class="selection-limit">(max 4)</span>
+        <button
+          id="deselectAllBtn"
+          class="deselect-btn"
+          onclick="deselectAll()"
+          disabled
+        >
+          Deselect All
+        </button>
+        <button
+          id="deleteBtn"
+          class="delete-btn"
+          onclick="deleteSelected()"
+          disabled
+        >
+          Delete
+        </button>
+        <button
+          id="generateBtn"
+          class="generate-btn"
+          onclick="generateSelected()"
+          disabled
+        >
+          Generate
+        </button>
+      </div>
+    </div>
+
+    <div
+      class="grid-container {% if show_lines %}show-lines{% endif %} {% if show_coords %}show-coords{% endif %}"
+      id="gridContainer"
+    >
+      <div class="grid">
+        {% for dy in range(ny) %} {% for dx in range(nx) %} {% set qx = x + dx
+        %} {% set qy = y + dy %} {% set has_gen = tiles.get((dx, dy), False) %}
+        <div
+          class="tile {% if not has_gen %}placeholder{% endif %}"
+          data-coords="{{ qx }},{{ qy }}"
+        >
+          <span class="coords">({{ qx }}, {{ qy }})</span>
+          {% if has_gen %}
+          <img
+            src="/tile/{{ qx }}/{{ qy }}?render={{ '1' if show_render else '0' }}"
+            alt="Tile {{ qx }},{{ qy }}"
+          />
+          {% endif %}
+        </div>
+        {% endfor %} {% endfor %}
+      </div>
+    </div>
+
+    <script src="/static/viewer.js"></script>
+  </body>
+</html>

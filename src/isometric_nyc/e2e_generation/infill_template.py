@@ -34,7 +34,6 @@ from typing import Callable
 
 from PIL import Image, ImageDraw
 
-
 # Template and quadrant dimensions
 TEMPLATE_SIZE = 1024
 QUADRANT_SIZE = 512
@@ -229,8 +228,7 @@ class TemplateBuilder:
     # Validate region size
     if not infill_region.is_valid_size():
       raise ValueError(
-        f"Infill region too large: {infill_region.area} pixels "
-        f"(max: {MAX_INFILL_AREA})"
+        f"Infill region too large: {infill_region.area} pixels (max: {MAX_INFILL_AREA})"
       )
 
   def find_optimal_placement(
@@ -324,7 +322,9 @@ class TemplateBuilder:
 
     if missing:
       missing_str = ", ".join(f"({qx}, {qy})" for qx, qy in missing)
-      self._last_validation_error = f"Context quadrants missing generations: {missing_str}"
+      self._last_validation_error = (
+        f"Context quadrants missing generations: {missing_str}"
+      )
       return None
 
     return placement
@@ -816,7 +816,7 @@ def _test_basic():
   info = builder.get_validation_info()
   placement = builder.find_optimal_placement()
 
-  print(f"\nTest 1: Select quadrant (1, 0)")
+  print("\nTest 1: Select quadrant (1, 0)")
   print(f"  Info: {info}")
   print(f"  Placement: {placement}")
   if placement:
@@ -829,7 +829,7 @@ def _test_basic():
   info2 = builder2.get_validation_info()
   placement2 = builder2.find_optimal_placement()
 
-  print(f"\nTest 2: Select quadrant (0, 1) - has generated neighbor to right")
+  print("\nTest 2: Select quadrant (0, 1) - has generated neighbor to right")
   print(f"  Info: {info2}")
   print(f"  Placement: {placement2}")
   if placement2:
@@ -859,4 +859,3 @@ def _test_basic():
 
 if __name__ == "__main__":
   _test_basic()
-

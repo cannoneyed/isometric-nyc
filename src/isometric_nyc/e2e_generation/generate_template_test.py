@@ -158,16 +158,12 @@ class InfillPositioner:
     margin_v = self.template_size - infill_height
 
     # Find valid x position
-    x = self._find_axis_position(
-      margin_h, context.has_left, context.has_right
-    )
+    x = self._find_axis_position(margin_h, context.has_left, context.has_right)
     if x is None:
       return None
 
     # Find valid y position
-    y = self._find_axis_position(
-      margin_v, context.has_top, context.has_bottom
-    )
+    y = self._find_axis_position(margin_v, context.has_top, context.has_bottom)
     if y is None:
       return None
 
@@ -239,23 +235,38 @@ class InfillPositioner:
     """
     # Check area constraint
     if infill_width * infill_height > self.max_area:
-      return False, f"Infill area exceeds 50% of template ({infill_width * infill_height} > {self.max_area})"
+      return (
+        False,
+        f"Infill area exceeds 50% of template ({infill_width * infill_height} > {self.max_area})",
+      )
 
     # Check left edge
     if x == 0 and context.has_left:
-      return False, "Infill at left edge with generated pixels beyond (would create seam)"
+      return (
+        False,
+        "Infill at left edge with generated pixels beyond (would create seam)",
+      )
 
     # Check right edge
     if x + infill_width == self.template_size and context.has_right:
-      return False, "Infill at right edge with generated pixels beyond (would create seam)"
+      return (
+        False,
+        "Infill at right edge with generated pixels beyond (would create seam)",
+      )
 
     # Check top edge
     if y == 0 and context.has_top:
-      return False, "Infill at top edge with generated pixels beyond (would create seam)"
+      return (
+        False,
+        "Infill at top edge with generated pixels beyond (would create seam)",
+      )
 
     # Check bottom edge
     if y + infill_height == self.template_size and context.has_bottom:
-      return False, "Infill at bottom edge with generated pixels beyond (would create seam)"
+      return (
+        False,
+        "Infill at bottom edge with generated pixels beyond (would create seam)",
+      )
 
     return True, "Valid position"
 
@@ -499,9 +510,7 @@ class QuadrantGrid:
 
     # Use the generic positioner to find a valid position
     positioner = InfillPositioner(template_size=1024)
-    position = positioner.find_optimal_position(
-      infill_width, infill_height, context
-    )
+    position = positioner.find_optimal_position(infill_width, infill_height, context)
 
     if position is None:
       return (
@@ -947,12 +956,14 @@ def extract_centered_quadrant(
   half_w = quadrant_width // 2
   half_h = quadrant_height // 2
 
-  return generated_image.crop((
-    half_w,
-    half_h,
-    half_w + quadrant_width,
-    half_h + quadrant_height,
-  ))
+  return generated_image.crop(
+    (
+      half_w,
+      half_h,
+      half_w + quadrant_width,
+      half_h + quadrant_height,
+    )
+  )
 
 
 # =============================================================================

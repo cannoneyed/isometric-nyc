@@ -18,563 +18,84 @@ Keyboard shortcuts:
   L          - Toggle lines
   C          - Toggle coords
   G          - Toggle render/generation mode
+  S          - Toggle select tool
 """
 
 import argparse
+import os
 import sqlite3
+import tempfile
+import threading
+import time
+import traceback
+from io import BytesIO
 from pathlib import Path
+from urllib.parse import urlencode
 
-from flask import Flask, Response, render_template_string, request
+import requests
+from dotenv import load_dotenv
+from flask import Flask, Response, jsonify, render_template, request
+from PIL import Image
+from playwright.sync_api import sync_playwright
 
-app = Flask(__name__)
+from isometric_nyc.e2e_generation.infill_template import (
+  QUADRANT_SIZE,
+  InfillRegion,
+  TemplateBuilder,
+  validate_quadrant_selection,
+)
+from isometric_nyc.e2e_generation.shared import (
+  DEFAULT_WEB_PORT,
+  WEB_DIR,
+  ensure_quadrant_exists,
+  get_generation_config,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_generation as shared_get_quadrant_generation,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_render as shared_get_quadrant_render,
+)
+from isometric_nyc.e2e_generation.shared import (
+  image_to_png_bytes,
+  png_bytes_to_image,
+  save_quadrant_generation,
+  save_quadrant_render,
+  split_tile_into_quadrants,
+  start_web_server,
+  upload_to_gcs,
+)
+
+# Load environment variables
+load_dotenv()
+
+# Setup Flask with template and static folders relative to this file
+VIEWER_DIR = Path(__file__).parent
+app = Flask(
+  __name__,
+  template_folder=str(VIEWER_DIR / "templates"),
+  static_folder=str(VIEWER_DIR / "static"),
+)
+
+# Generation lock - only one generation at a time
+generation_lock = threading.Lock()
+generation_state = {
+  "is_generating": False,
+  "quadrants": [],  # List of quadrant coords being generated
+  "status": "idle",  # idle, validating, rendering, uploading, generating, saving, complete, error
+  "message": "",
+  "error": None,
+  "started_at": None,
+}
 
 # Will be set by main()
 GENERATION_DIR: Path | None = None
+WEB_SERVER_PORT: int = DEFAULT_WEB_PORT
+WEB_SERVER_PROCESS = None
 
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-  <title>Generated Tiles Viewer</title>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    
-    body {
-      font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
-      background: #1a1a2e;
-      color: #eee;
-      min-height: 100vh;
-      padding: 20px;
-    }
-    
-    h1 {
-      font-size: 1.5rem;
-      margin-bottom: 20px;
-      color: #00d9ff;
-    }
-    
-    .controls {
-      margin-bottom: 20px;
-      display: flex;
-      gap: 15px;
-      align-items: center;
-      flex-wrap: wrap;
-    }
-    
-    .controls label {
-      color: #888;
-    }
-    
-    .controls input[type="number"] {
-      width: 60px;
-      padding: 8px;
-      border: 1px solid #333;
-      border-radius: 4px;
-      background: #16213e;
-      color: #fff;
-      font-family: inherit;
-    }
-    
-    .controls button {
-      padding: 8px 16px;
-      background: #00d9ff;
-      color: #1a1a2e;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-family: inherit;
-      font-weight: bold;
-    }
-    
-    .controls button:hover {
-      background: #00b8d4;
-    }
-    
-    .toggle-group {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-left: 10px;
-      padding-left: 15px;
-      border-left: 1px solid #333;
-    }
-    
-    .toggle-group label {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      cursor: pointer;
-      user-select: none;
-    }
-    
-    .toggle-group input[type="checkbox"] {
-      width: 18px;
-      height: 18px;
-      accent-color: #00d9ff;
-      cursor: pointer;
-    }
-    
-    .grid-container {
-      display: inline-block;
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    
-    .grid-container.show-lines {
-      border: 2px solid #333;
-    }
-    
-    .grid {
-      display: grid;
-      grid-template-columns: repeat({{ nx }}, {{ size_px }}px);
-      grid-auto-rows: {{ size_px }}px;
-      background: #333;
-    }
-    
-    .grid-container.show-lines .grid {
-      gap: 2px;
-    }
-    
-    .grid-container:not(.show-lines) .grid {
-      gap: 0;
-      background: transparent;
-    }
-    
-    .grid-container:not(.show-lines) {
-      border: none;
-    }
-    
-    .tile {
-      position: relative;
-      background: #2a2a4a;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    
-    .tile img {
-      display: block;
-      max-width: 100%;
-      height: auto;
-    }
-    
-    .tile.placeholder {
-      background: #3a3a5a;
-      min-width: {{ size_px }}px;
-      min-height: {{ size_px }}px;
-    }
-    
-    .tile .coords {
-      position: absolute;
-      top: 8px;
-      left: 8px;
-      background: rgba(0, 0, 0, 0.7);
-      padding: 4px 8px;
-      border-radius: 4px;
-      font-size: 0.75rem;
-      color: #00d9ff;
-      transition: opacity 0.2s;
-    }
-    
-    .tile.placeholder .coords {
-      color: #666;
-    }
-    
-    .grid-container:not(.show-coords) .tile .coords {
-      opacity: 0;
-    }
-    
-    /* Tool button styles */
-    .tools-group {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    
-    .tools-label {
-      color: #666;
-      font-size: 0.85rem;
-    }
-    
-    .tool-btn {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 12px;
-      background: #333;
-      color: #888;
-      border: 1px solid #444;
-      border-radius: 4px;
-      cursor: pointer;
-      font-family: inherit;
-      font-size: 0.85rem;
-      transition: all 0.2s;
-    }
-    
-    .tool-btn:hover {
-      background: #444;
-      color: #fff;
-      border-color: #555;
-    }
-    
-    .tool-btn.active {
-      background: #00d9ff;
-      color: #1a1a2e;
-      border-color: #00d9ff;
-    }
-    
-    .tool-btn svg {
-      width: 14px;
-      height: 14px;
-    }
-    
-    /* Selection styles */
-    .tile.selected {
-      outline: 3px solid #ff3333;
-      outline-offset: -3px;
-      z-index: 10;
-    }
-    
-    .grid-container.show-lines .tile.selected {
-      outline-color: #ff3333;
-    }
-    
-    .tile.selectable {
-      cursor: pointer;
-    }
-    
-    .tile.placeholder.selected {
-      background: rgba(255, 51, 51, 0.15);
-    }
-    
-    /* Selection status bar */
-    .selection-status {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 15px;
-      padding: 8px 12px;
-      background: rgba(255, 51, 51, 0.1);
-      border: 1px solid rgba(255, 51, 51, 0.3);
-      border-radius: 6px;
-      font-size: 0.9rem;
-      color: #ff6666;
-    }
-    
-    .selection-status.empty {
-      background: transparent;
-      border-color: #333;
-      color: #666;
-    }
-    
-    .selection-limit {
-      color: #888;
-      font-size: 0.8rem;
-    }
-    
-    .deselect-btn {
-      padding: 4px 10px;
-      background: #ff3333;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-family: inherit;
-      font-size: 0.8rem;
-      margin-left: auto;
-      transition: all 0.2s;
-    }
-    
-    .deselect-btn:hover:not(:disabled) {
-      background: #ff5555;
-    }
-    
-    .deselect-btn:disabled {
-      background: #444;
-      color: #666;
-      cursor: not-allowed;
-    }
-    
-    .generate-btn {
-      padding: 6px 16px;
-      background: #00d9ff;
-      color: #1a1a2e;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-family: inherit;
-      font-size: 0.85rem;
-      font-weight: bold;
-      transition: all 0.2s;
-    }
-    
-    .generate-btn:hover:not(:disabled) {
-      background: #00b8d4;
-    }
-    
-    .generate-btn:disabled {
-      background: #444;
-      color: #666;
-      cursor: not-allowed;
-      font-weight: normal;
-    }
-    
-    .info {
-      margin-top: 20px;
-      color: #666;
-      font-size: 0.85rem;
-    }
-    
-
-  </style>
-</head>
-<body>
-  <h1>🎨 Generated Tiles Viewer</h1>
-  
-  <div class="controls">
-    <label>X: <input type="number" id="x" value="{{ x }}"></label>
-    <label>Y: <input type="number" id="y" value="{{ y }}"></label>
-    <label>NX: <input type="number" id="nx" value="{{ nx }}" min="1" max="20"></label>
-    <label>NY: <input type="number" id="ny" value="{{ ny }}" min="1" max="20"></label>
-    <label>Size: <input type="number" id="sizePx" value="{{ size_px }}" step="32"></label>
-    <button onclick="goTo()">Go</button>
-    
-    
-    <div class="toggle-group">
-      <label>
-        <input type="checkbox" id="showLines" {% if show_lines %}checked{% endif %} onchange="toggleLines()">
-        Lines
-      </label>
-      <label>
-        <input type="checkbox" id="showCoords" {% if show_coords %}checked{% endif %} onchange="toggleCoords()">
-        Coords
-      </label>
-      <label>
-        <input type="checkbox" id="showRender" {% if show_render %}checked{% endif %} onchange="toggleRender()">
-        Renders
-      </label>
-    </div>
-    
-    <div class="toggle-group tools-group">
-      <span class="tools-label">Tools:</span>
-      <button id="selectTool" class="tool-btn" onclick="toggleSelectTool()" title="Select quadrants">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"></path>
-          <path d="M13 13l6 6"></path>
-        </svg>
-        Select
-      </button>
-    </div>
-  </div>
-  
-  <div class="selection-status" id="selectionStatus">
-    <span id="selectionCount">0 quadrants selected</span>
-    <span class="selection-limit">(max 4)</span>
-    <button id="deselectAllBtn" class="deselect-btn" onclick="deselectAll()" disabled>Deselect All</button>
-    <button id="generateBtn" class="generate-btn" onclick="generateSelected()" disabled>Generate</button>
-  </div>
-  
-  <div class="grid-container {% if show_lines %}show-lines{% endif %} {% if show_coords %}show-coords{% endif %}" id="gridContainer">
-    <div class="grid">
-      {% for dy in range(ny) %}
-        {% for dx in range(nx) %}
-          {% set qx = x + dx %}
-          {% set qy = y + dy %}
-          {% set has_gen = tiles.get((dx, dy), False) %}
-          <div class="tile {% if not has_gen %}placeholder{% endif %}" data-coords="{{ qx }},{{ qy }}">
-            <span class="coords">({{ qx }}, {{ qy }})</span>
-            {% if has_gen %}
-              <img src="/tile/{{ qx }}/{{ qy }}?render={{ '1' if show_render else '0' }}" alt="Tile {{ qx }},{{ qy }}">
-            {% endif %}
-          </div>
-        {% endfor %}
-      {% endfor %}
-    </div>
-  </div>
-  
-  <div class="info">
-    <p>Showing {{ nx }}×{{ ny }} quadrants from ({{ x }}, {{ y }}) through ({{ x + nx - 1 }}, {{ y + ny - 1 }})</p>
-    <p>Generation dir: {{ generation_dir }}</p>
-  </div>
-  
-  <script>
-    function getParams() {
-      const x = document.getElementById('x').value;
-      const y = document.getElementById('y').value;
-      const nx = document.getElementById('nx').value;
-      const ny = document.getElementById('ny').value;
-      const sizePx = document.getElementById('sizePx').value;
-      const showLines = document.getElementById('showLines').checked ? '1' : '0';
-      const showCoords = document.getElementById('showCoords').checked ? '1' : '0';
-      const showRender = document.getElementById('showRender').checked ? '1' : '0';
-      return { x, y, nx, ny, sizePx, showLines, showCoords, showRender };
-    }
-    
-    function goTo() {
-      const { x, y, nx, ny, sizePx, showLines, showCoords, showRender } = getParams();
-      window.location.href = `?x=${x}&y=${y}&nx=${nx}&ny=${ny}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
-    }
-    
-    function navigate(dx, dy) {
-      const params = getParams();
-      const x = parseInt(params.x) + dx;
-      const y = parseInt(params.y) + dy;
-      window.location.href = `?x=${x}&y=${y}&nx=${params.nx}&ny=${params.ny}&size=${params.sizePx}&lines=${params.showLines}&coords=${params.showCoords}&render=${params.showRender}`;
-    }
-    
-    function toggleLines() {
-      const container = document.getElementById('gridContainer');
-      const showLines = document.getElementById('showLines').checked;
-      container.classList.toggle('show-lines', showLines);
-      
-      // Update URL without reload
-      const url = new URL(window.location);
-      url.searchParams.set('lines', showLines ? '1' : '0');
-      history.replaceState({}, '', url);
-    }
-    
-    function toggleCoords() {
-      const container = document.getElementById('gridContainer');
-      const showCoords = document.getElementById('showCoords').checked;
-      container.classList.toggle('show-coords', showCoords);
-      
-      // Update URL without reload
-      const url = new URL(window.location);
-      url.searchParams.set('coords', showCoords ? '1' : '0');
-      history.replaceState({}, '', url);
-    }
-    
-    function toggleRender() {
-      // This requires a page reload to fetch different data
-      const { x, y, nx, ny, sizePx, showLines, showCoords, showRender } = getParams();
-      window.location.href = `?x=${x}&y=${y}&nx=${nx}&ny=${ny}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
-    }
-    
-    // Keyboard navigation
-    document.addEventListener('keydown', (e) => {
-      if (e.target.tagName === 'INPUT') return;
-      
-      switch(e.key) {
-        case 'ArrowLeft': navigate(-1, 0); break;
-        case 'ArrowRight': navigate(1, 0); break;
-        case 'ArrowUp': navigate(0, -1); break;
-        case 'ArrowDown': navigate(0, 1); break;
-        case 'l': case 'L':
-          document.getElementById('showLines').click();
-          break;
-        case 'c': case 'C':
-          document.getElementById('showCoords').click();
-          break;
-        case 'g': case 'G':
-          document.getElementById('showRender').click();
-          break;
-        case 's': case 'S':
-          toggleSelectTool();
-          break;
-        case 'Escape':
-          if (selectToolActive) toggleSelectTool();
-          break;
-      }
-    });
-    
-    // Select tool state
-    let selectToolActive = false;
-    const selectedQuadrants = new Set();
-    const MAX_SELECTION = 4;
-    
-    function toggleSelectTool() {
-      selectToolActive = !selectToolActive;
-      const btn = document.getElementById('selectTool');
-      const tiles = document.querySelectorAll('.tile');
-      
-      if (selectToolActive) {
-        btn.classList.add('active');
-        tiles.forEach(tile => tile.classList.add('selectable'));
-      } else {
-        btn.classList.remove('active');
-        tiles.forEach(tile => tile.classList.remove('selectable'));
-      }
-    }
-    
-    function updateSelectionStatus() {
-      const count = selectedQuadrants.size;
-      const countEl = document.getElementById('selectionCount');
-      const statusEl = document.getElementById('selectionStatus');
-      const deselectBtn = document.getElementById('deselectAllBtn');
-      const generateBtn = document.getElementById('generateBtn');
-      
-      countEl.textContent = `${count} quadrant${count !== 1 ? 's' : ''} selected`;
-      statusEl.classList.toggle('empty', count === 0);
-      deselectBtn.disabled = count === 0;
-      generateBtn.disabled = count === 0;
-    }
-    
-    function generateSelected() {
-      if (selectedQuadrants.size === 0) return;
-      
-      const coords = Array.from(selectedQuadrants);
-      console.log('Generate requested for:', coords);
-      // TODO: Implement generation
-    }
-    
-    function deselectAll() {
-      selectedQuadrants.clear();
-      document.querySelectorAll('.tile.selected').forEach(tile => {
-        tile.classList.remove('selected');
-      });
-      updateSelectionStatus();
-      console.log('Deselected all quadrants');
-    }
-    
-    function toggleTileSelection(tileEl, qx, qy) {
-      if (!selectToolActive) return;
-      
-      const key = `${qx},${qy}`;
-      if (selectedQuadrants.has(key)) {
-        selectedQuadrants.delete(key);
-        tileEl.classList.remove('selected');
-        console.log(`Deselected quadrant (${qx}, ${qy})`);
-      } else {
-        // Check if we've hit the max selection limit
-        if (selectedQuadrants.size >= MAX_SELECTION) {
-          console.log(`Cannot select more than ${MAX_SELECTION} quadrants`);
-          return;
-        }
-        selectedQuadrants.add(key);
-        tileEl.classList.add('selected');
-        console.log(`Selected quadrant (${qx}, ${qy})`);
-      }
-      
-      updateSelectionStatus();
-      
-      // Log current selection
-      if (selectedQuadrants.size > 0) {
-        console.log('Selected:', Array.from(selectedQuadrants).join('; '));
-      }
-    }
-    
-    // Setup tile click handlers
-    document.querySelectorAll('.tile').forEach(tile => {
-      tile.addEventListener('click', (e) => {
-        if (!selectToolActive) return;
-        e.preventDefault();
-        e.stopPropagation();
-        
-        const coords = tile.dataset.coords.split(',').map(Number);
-        toggleTileSelection(tile, coords[0], coords[1]);
-      });
-    });
-    
-    // Initialize selection status
-    updateSelectionStatus();
-  </script>
-</body>
-</html>
-"""
+# Oxen API configuration
+OMNI_MODEL_ID = "cannoneyed-gentle-gold-antlion"
+GCS_BUCKET_NAME = "isometric-nyc-infills"
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -648,8 +169,8 @@ def index():
       data = get_quadrant_data(qx, qy, use_render=show_render)
       tiles[(dx, dy)] = data is not None
 
-  return render_template_string(
-    HTML_TEMPLATE,
+  return render_template(
+    "viewer.html",
     x=x,
     y=y,
     nx=nx,
@@ -680,8 +201,496 @@ def tile(x: str, y: str):
   return Response(data, mimetype="image/png")
 
 
+# =============================================================================
+# Generation API
+# =============================================================================
+
+
+def call_oxen_api(image_url: str, api_key: str) -> str:
+  """Call the Oxen API to generate pixel art."""
+  endpoint = "https://hub.oxen.ai/api/images/edit"
+
+  headers = {
+    "Authorization": f"Bearer {api_key}",
+    "Content-Type": "application/json",
+  }
+
+  prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  payload = {
+    "model": OMNI_MODEL_ID,
+    "input_image": image_url,
+    "prompt": prompt,
+    "num_inference_steps": 28,
+  }
+
+  print(f"   🤖 Calling Oxen API with model {OMNI_MODEL_ID}...")
+  response = requests.post(endpoint, headers=headers, json=payload, timeout=300)
+  response.raise_for_status()
+
+  result = response.json()
+
+  if "images" in result and len(result["images"]) > 0:
+    return result["images"][0]["url"]
+  elif "url" in result:
+    return result["url"]
+  elif "image_url" in result:
+    return result["image_url"]
+  elif "output" in result:
+    return result["output"]
+  else:
+    raise ValueError(f"Unexpected API response format: {result}")
+
+
+def download_image_to_pil(url: str) -> Image.Image:
+  """Download an image from a URL and return as PIL Image."""
+  response = requests.get(url, timeout=120)
+  response.raise_for_status()
+  return Image.open(BytesIO(response.content))
+
+
+def render_quadrant(
+  conn: sqlite3.Connection,
+  config: dict,
+  x: int,
+  y: int,
+  port: int,
+) -> bytes | None:
+  """
+  Render a quadrant and save to database.
+
+  Returns the PNG bytes of the rendered quadrant.
+  """
+  # Ensure the quadrant exists in the database
+  quadrant = ensure_quadrant_exists(conn, config, x, y)
+
+  print(f"   🎨 Rendering tile for quadrant ({x}, {y})...")
+
+  # Build URL for rendering
+  params = {
+    "export": "true",
+    "lat": quadrant["lat"],
+    "lon": quadrant["lng"],
+    "width": config["width_px"],
+    "height": config["height_px"],
+    "azimuth": config["camera_azimuth_degrees"],
+    "elevation": config["camera_elevation_degrees"],
+    "view_height": config.get("view_height_meters", 200),
+  }
+  query_string = urlencode(params)
+  url = f"http://localhost:{port}/?{query_string}"
+
+  # Render using Playwright
+  with sync_playwright() as p:
+    browser = p.chromium.launch(
+      headless=True,
+      args=[
+        "--enable-webgl",
+        "--use-gl=angle",
+        "--ignore-gpu-blocklist",
+      ],
+    )
+
+    context = browser.new_context(
+      viewport={"width": config["width_px"], "height": config["height_px"]},
+      device_scale_factor=1,
+    )
+    page = context.new_page()
+
+    page.goto(url, wait_until="networkidle")
+
+    try:
+      page.wait_for_function("window.TILES_LOADED === true", timeout=60000)
+    except Exception:
+      print("      ⚠️  Timeout waiting for tiles, continuing anyway...")
+
+    # Get screenshot as bytes
+    screenshot_bytes = page.screenshot(type="png")
+
+    page.close()
+    context.close()
+    browser.close()
+
+  # Open as PIL image and split into quadrants
+  full_tile = Image.open(BytesIO(screenshot_bytes))
+  quadrant_images = split_tile_into_quadrants(full_tile)
+
+  # Save all quadrants to database
+  result_bytes = None
+  for (dx, dy), quad_img in quadrant_images.items():
+    qx, qy = x + dx, y + dy
+    png_bytes = image_to_png_bytes(quad_img)
+    save_quadrant_render(conn, config, qx, qy, png_bytes)
+    print(f"      ✓ Saved render for ({qx}, {qy})")
+
+    # Return the specific quadrant we were asked for
+    if qx == x and qy == y:
+      result_bytes = png_bytes
+
+  return result_bytes
+
+
+def update_generation_state(
+  status: str, message: str = "", error: str | None = None
+) -> None:
+  """Update the global generation state."""
+  global generation_state
+  generation_state["status"] = status
+  generation_state["message"] = message
+  if error:
+    generation_state["error"] = error
+
+
+def run_generation(
+  conn: sqlite3.Connection,
+  config: dict,
+  selected_quadrants: list[tuple[int, int]],
+) -> dict:
+  """
+  Run the full generation pipeline for selected quadrants.
+
+  Returns dict with success status and message/error.
+  """
+  global generation_state
+
+  update_generation_state("validating", "Checking API key...")
+
+  # Check for API key
+  api_key = os.getenv("OXEN_OMNI_v04_API_KEY")
+  if not api_key:
+    update_generation_state("error", error="OXEN_OMNI_v04_API_KEY not set")
+    return {
+      "success": False,
+      "error": "OXEN_OMNI_v04_API_KEY environment variable not set",
+    }
+
+  # Create helper functions for validation
+  def has_generation_in_db(qx: int, qy: int) -> bool:
+    gen = shared_get_quadrant_generation(conn, qx, qy)
+    return gen is not None
+
+  def get_render_from_db_with_render(qx: int, qy: int) -> Image.Image | None:
+    """Get render, rendering if it doesn't exist yet."""
+    render_bytes = shared_get_quadrant_render(conn, qx, qy)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+
+    # Need to render - make sure web server is running
+    update_generation_state("rendering", f"Rendering quadrant ({qx}, {qy})...")
+    ensure_web_server_running()
+    print(f"   📦 Rendering quadrant ({qx}, {qy})...")
+    render_bytes = render_quadrant(conn, config, qx, qy, WEB_SERVER_PORT)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+    return None
+
+  def get_generation_from_db(qx: int, qy: int) -> Image.Image | None:
+    gen_bytes = shared_get_quadrant_generation(conn, qx, qy)
+    if gen_bytes:
+      return png_bytes_to_image(gen_bytes)
+    return None
+
+  update_generation_state("validating", "Validating quadrant selection...")
+
+  # Validate selection with auto-expansion
+  is_valid, msg, placement = validate_quadrant_selection(
+    selected_quadrants, has_generation_in_db, allow_expansion=True
+  )
+
+  if not is_valid:
+    update_generation_state("error", error=msg)
+    return {"success": False, "error": msg}
+
+  print(f"✅ Validation: {msg}")
+
+  # Get primary quadrants (the ones user selected, not padding)
+  primary_quadrants = (
+    placement.primary_quadrants if placement.primary_quadrants else selected_quadrants
+  )
+  padding_quadrants = placement.padding_quadrants if placement else []
+
+  if padding_quadrants:
+    print(f"   📦 Padding quadrants: {padding_quadrants}")
+
+  # Create the infill region (may be expanded)
+  if placement._expanded_region is not None:
+    region = placement._expanded_region
+  else:
+    region = InfillRegion.from_quadrants(selected_quadrants)
+
+  # Build the template
+  update_generation_state("rendering", "Building template image...")
+  builder = TemplateBuilder(
+    region, has_generation_in_db, get_render_from_db_with_render, get_generation_from_db
+  )
+
+  print("📋 Building template...")
+  result = builder.build(border_width=2, allow_expansion=True)
+
+  if result is None:
+    error_msg = builder._last_validation_error or "Failed to build template"
+    update_generation_state("error", error=error_msg)
+    return {
+      "success": False,
+      "error": error_msg,
+    }
+
+  template_image, placement = result
+
+  # Save template to temp file and upload to GCS
+  with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+    template_path = Path(tmp.name)
+    template_image.save(template_path)
+
+  try:
+    update_generation_state("uploading", "Uploading template to cloud...")
+    print("📤 Uploading template to GCS...")
+    image_url = upload_to_gcs(template_path, GCS_BUCKET_NAME)
+
+    update_generation_state(
+      "generating", "Calling AI model (this may take a minute)..."
+    )
+    print("🤖 Calling Oxen API...")
+    generated_url = call_oxen_api(image_url, api_key)
+
+    update_generation_state("saving", "Downloading and saving results...")
+    print("📥 Downloading generated image...")
+    generated_image = download_image_to_pil(generated_url)
+
+    # Extract quadrants from generated image and save to database
+    print("💾 Saving generated quadrants to database...")
+
+    # Figure out what quadrants are in the infill region
+    all_infill_quadrants = (
+      placement.all_infill_quadrants
+      if placement.all_infill_quadrants
+      else region.overlapping_quadrants()
+    )
+
+    # For each infill quadrant, extract pixels from the generated image
+    saved_count = 0
+    for qx, qy in all_infill_quadrants:
+      # Calculate position in the generated image
+      # The quadrant's world position is (qx * QUADRANT_SIZE, qy * QUADRANT_SIZE)
+      # The template's world offset is (placement.world_offset_x, placement.world_offset_y)
+      quad_world_x = qx * QUADRANT_SIZE
+      quad_world_y = qy * QUADRANT_SIZE
+
+      template_x = quad_world_x - placement.world_offset_x
+      template_y = quad_world_y - placement.world_offset_y
+
+      # Crop this quadrant from the generated image
+      crop_box = (
+        template_x,
+        template_y,
+        template_x + QUADRANT_SIZE,
+        template_y + QUADRANT_SIZE,
+      )
+      quad_img = generated_image.crop(crop_box)
+      png_bytes = image_to_png_bytes(quad_img)
+
+      # Only save primary quadrants (not padding)
+      if (qx, qy) in primary_quadrants or (qx, qy) in [
+        (q[0], q[1]) for q in primary_quadrants
+      ]:
+        if save_quadrant_generation(conn, config, qx, qy, png_bytes):
+          print(f"   ✓ Saved generation for ({qx}, {qy})")
+          saved_count += 1
+        else:
+          print(f"   ⚠️ Failed to save generation for ({qx}, {qy})")
+      else:
+        print(f"   ⏭️ Skipped padding quadrant ({qx}, {qy})")
+
+    update_generation_state("complete", f"Generated {saved_count} quadrant(s)")
+    return {
+      "success": True,
+      "message": f"Generated {saved_count} quadrant{'s' if saved_count != 1 else ''}",
+      "quadrants": primary_quadrants,
+    }
+
+  finally:
+    # Clean up temp file
+    template_path.unlink(missing_ok=True)
+
+
+@app.route("/api/status")
+def api_status():
+  """API endpoint to check generation status."""
+  return jsonify(generation_state)
+
+
+@app.route("/api/delete", methods=["POST"])
+def api_delete():
+  """API endpoint to delete generation data for selected quadrants."""
+  # Check if already generating
+  if generation_state.get("is_generating"):
+    return jsonify(
+      {
+        "success": False,
+        "error": "Cannot delete while generation is in progress.",
+      }
+    )
+
+  data = request.get_json()
+  if not data or "quadrants" not in data:
+    return jsonify({"success": False, "error": "No quadrants specified"})
+
+  quadrants = data["quadrants"]
+  if not quadrants:
+    return jsonify({"success": False, "error": "Empty quadrants list"})
+
+  # Connect to database (quadrants.db, not tiles.db)
+  db_path = Path(GENERATION_DIR) / "quadrants.db"
+  conn = sqlite3.connect(db_path)
+
+  try:
+    deleted_count = 0
+    for qx, qy in quadrants:
+      # Clear the generation column (set to NULL) but keep the row
+      # Columns are quadrant_x and quadrant_y
+      cursor = conn.execute(
+        """
+        UPDATE quadrants
+        SET generation = NULL
+        WHERE quadrant_x = ? AND quadrant_y = ?
+        """,
+        (qx, qy),
+      )
+      if cursor.rowcount > 0:
+        deleted_count += 1
+
+    conn.commit()
+
+    return jsonify(
+      {
+        "success": True,
+        "message": f"Deleted generation data for {deleted_count} quadrant{'s' if deleted_count != 1 else ''}",
+        "deleted": deleted_count,
+      }
+    )
+  except Exception as e:
+    return jsonify({"success": False, "error": str(e)})
+  finally:
+    conn.close()
+
+
+@app.route("/api/generate", methods=["POST"])
+def api_generate():
+  """API endpoint to generate tiles for selected quadrants."""
+  global generation_state
+
+  # Check if already generating
+  if not generation_lock.acquire(blocking=False):
+    return jsonify(
+      {
+        "success": False,
+        "error": "Generation already in progress. Please wait.",
+        "status": generation_state,
+      }
+    ), 429
+
+  try:
+    # Parse request
+    data = request.get_json()
+    if not data or "quadrants" not in data:
+      return jsonify(
+        {
+          "success": False,
+          "error": "Missing 'quadrants' in request body",
+        }
+      ), 400
+
+    quadrants = data["quadrants"]
+    if not isinstance(quadrants, list) or len(quadrants) == 0:
+      return jsonify(
+        {
+          "success": False,
+          "error": "quadrants must be a non-empty list",
+        }
+      ), 400
+
+    # Convert to list of tuples
+    selected_quadrants = []
+    for q in quadrants:
+      if isinstance(q, list) and len(q) == 2:
+        selected_quadrants.append((int(q[0]), int(q[1])))
+      elif isinstance(q, dict) and "x" in q and "y" in q:
+        selected_quadrants.append((int(q["x"]), int(q["y"])))
+      else:
+        return jsonify(
+          {
+            "success": False,
+            "error": f"Invalid quadrant format: {q}",
+          }
+        ), 400
+
+    # Initialize generation state
+    generation_state["is_generating"] = True
+    generation_state["quadrants"] = selected_quadrants
+    generation_state["status"] = "starting"
+    generation_state["message"] = "Starting generation..."
+    generation_state["error"] = None
+    generation_state["started_at"] = time.time()
+
+    print(f"\n{'=' * 60}")
+    print(f"🎯 Generation request: {selected_quadrants}")
+    print(f"{'=' * 60}")
+
+    # Connect to database
+    conn = get_db_connection()
+    try:
+      config = get_generation_config(conn)
+      result = run_generation(conn, config, selected_quadrants)
+
+      if result["success"]:
+        print(f"✅ Generation complete: {result['message']}")
+        generation_state["status"] = "complete"
+        generation_state["message"] = result["message"]
+        return jsonify(result), 200
+      else:
+        print(f"❌ Generation failed: {result['error']}")
+        generation_state["status"] = "error"
+        generation_state["error"] = result["error"]
+        return jsonify(result), 400
+
+    except Exception as e:
+      traceback.print_exc()
+      generation_state["status"] = "error"
+      generation_state["error"] = str(e)
+      return jsonify(
+        {
+          "success": False,
+          "error": str(e),
+        }
+      ), 500
+    finally:
+      conn.close()
+
+  finally:
+    generation_state["is_generating"] = False
+    generation_lock.release()
+
+
+def ensure_web_server_running() -> None:
+  """Ensure the web server for rendering is running."""
+  global WEB_SERVER_PROCESS
+
+  if WEB_SERVER_PROCESS is not None:
+    # Check if still running
+    if WEB_SERVER_PROCESS.poll() is None:
+      return  # Still running
+
+  # Start the web server
+  print(f"🌐 Starting web server for rendering on port {WEB_SERVER_PORT}...")
+  WEB_SERVER_PROCESS = start_web_server(WEB_DIR, WEB_SERVER_PORT)
+
+
 def main():
-  global GENERATION_DIR
+  global GENERATION_DIR, WEB_SERVER_PORT
 
   parser = argparse.ArgumentParser(description="View generated tiles in a grid.")
   parser.add_argument(
@@ -693,17 +702,24 @@ def main():
     "--port",
     type=int,
     default=8080,
-    help="Port to run the server on (default: 8080)",
+    help="Port to run the Flask server on (default: 8080)",
   )
   parser.add_argument(
     "--host",
     default="127.0.0.1",
     help="Host to bind to (default: 127.0.0.1)",
   )
+  parser.add_argument(
+    "--web-port",
+    type=int,
+    default=DEFAULT_WEB_PORT,
+    help=f"Port for the Vite web server used for rendering (default: {DEFAULT_WEB_PORT})",
+  )
 
   args = parser.parse_args()
 
   GENERATION_DIR = args.generation_dir.resolve()
+  WEB_SERVER_PORT = args.web_port
 
   if not GENERATION_DIR.exists():
     print(f"❌ Error: Directory not found: {GENERATION_DIR}")
@@ -716,10 +732,19 @@ def main():
 
   print("🎨 Starting tile viewer...")
   print(f"   Generation dir: {GENERATION_DIR}")
-  print(f"   Server: http://{args.host}:{args.port}/")
+  print(f"   Flask server: http://{args.host}:{args.port}/")
+  print(f"   Web render port: {WEB_SERVER_PORT}")
   print("   Press Ctrl+C to stop")
 
-  app.run(host=args.host, port=args.port, debug=True)
+  try:
+    app.run(host=args.host, port=args.port, debug=True, use_reloader=False)
+  finally:
+    # Clean up web server on exit
+    if WEB_SERVER_PROCESS is not None:
+      print("\n🛑 Stopping web server...")
+      WEB_SERVER_PROCESS.terminate()
+      WEB_SERVER_PROCESS.wait()
+
   return 0
 
 
