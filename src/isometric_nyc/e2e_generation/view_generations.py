@@ -578,6 +578,126 @@ def api_delete():
     conn.close()
 
 
+@app.route("/api/render", methods=["POST"])
+def api_render():
+  """API endpoint to render tiles for selected quadrants."""
+  global generation_state
+
+  # Check if already generating/rendering
+  if not generation_lock.acquire(blocking=False):
+    return jsonify(
+      {
+        "success": False,
+        "error": "Operation already in progress. Please wait.",
+        "status": generation_state,
+      }
+    ), 429
+
+  try:
+    # Parse request
+    data = request.get_json()
+    if not data or "quadrants" not in data:
+      return jsonify(
+        {
+          "success": False,
+          "error": "Missing 'quadrants' in request body",
+        }
+      ), 400
+
+    quadrants = data["quadrants"]
+    if not isinstance(quadrants, list) or len(quadrants) == 0:
+      return jsonify(
+        {
+          "success": False,
+          "error": "quadrants must be a non-empty list",
+        }
+      ), 400
+
+    # Convert to list of tuples
+    selected_quadrants = []
+    for q in quadrants:
+      if isinstance(q, list) and len(q) == 2:
+        selected_quadrants.append((int(q[0]), int(q[1])))
+      elif isinstance(q, dict) and "x" in q and "y" in q:
+        selected_quadrants.append((int(q["x"]), int(q["y"])))
+      else:
+        return jsonify(
+          {
+            "success": False,
+            "error": f"Invalid quadrant format: {q}",
+          }
+        ), 400
+
+    # Initialize generation state (reuse for rendering)
+    generation_state["is_generating"] = True
+    generation_state["quadrants"] = selected_quadrants
+    generation_state["status"] = "rendering"
+    generation_state["message"] = "Starting render..."
+    generation_state["error"] = None
+    generation_state["started_at"] = time.time()
+
+    print(f"\n{'=' * 60}")
+    print(f"🎨 Render request: {selected_quadrants}")
+    print(f"{'=' * 60}")
+
+    # Connect to database
+    conn = get_db_connection()
+    try:
+      config = get_generation_config(conn)
+
+      # Ensure web server is running
+      update_generation_state("rendering", "Starting web server...")
+      ensure_web_server_running()
+
+      rendered_count = 0
+      total = len(selected_quadrants)
+
+      for i, (qx, qy) in enumerate(selected_quadrants):
+        update_generation_state(
+          "rendering", f"Rendering quadrant ({qx}, {qy})... ({i + 1}/{total})"
+        )
+        print(f"   🎨 Rendering quadrant ({qx}, {qy})...")
+
+        try:
+          render_bytes = render_quadrant(conn, config, qx, qy, WEB_SERVER_PORT)
+          if render_bytes:
+            rendered_count += 1
+            print(f"      ✓ Rendered quadrant ({qx}, {qy})")
+          else:
+            print(f"      ⚠️ No render output for ({qx}, {qy})")
+        except Exception as e:
+          print(f"      ❌ Failed to render ({qx}, {qy}): {e}")
+          traceback.print_exc()
+
+      update_generation_state("complete", f"Rendered {rendered_count} quadrant(s)")
+      print(f"✅ Render complete: {rendered_count}/{total} quadrants")
+
+      return jsonify(
+        {
+          "success": True,
+          "message": f"Rendered {rendered_count} quadrant{'s' if rendered_count != 1 else ''}",
+          "quadrants": selected_quadrants,
+        }
+      ), 200
+
+    except Exception as e:
+      traceback.print_exc()
+      generation_state["status"] = "error"
+      generation_state["error"] = str(e)
+      return jsonify(
+        {
+          "success": False,
+          "error": str(e),
+        }
+      ), 500
+    finally:
+      conn.close()
+
+  finally:
+    generation_state["is_generating"] = False
+    generation_lock.release()
+
+
 @app.route("/api/generate", methods=["POST"])
 def api_generate():
   """API endpoint to generate tiles for selected quadrants."""

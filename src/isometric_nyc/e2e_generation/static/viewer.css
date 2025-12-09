@@ -342,6 +342,47 @@ body.generating .tool-btn {
   cursor: not-allowed;
 }
 
+.render-btn {
+  padding: 4px 12px;
+  background: #f59e0b;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.render-btn:hover:not(:disabled) {
+  background: #d97706;
+}
+
+.render-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+.render-btn.loading {
+  background: #666;
+  cursor: wait;
+}
+
+.render-btn .spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
 .generate-btn {
   padding: 4px 12px;
   background: #00d9ff;
