@@ -1,0 +1,15 @@
+{
+  "name": "test_generation",
+  "seed": {
+    "lat": 40.7484,
+    "lng": -73.9857
+  },
+  "n_tiles_x": 2,
+  "n_tiles_y": 2,
+  "camera_azimuth_degrees": -15,
+  "camera_elevation_degrees": -45,
+  "width_px": 1024,
+  "height_px": 1024,
+  "view_height_meters": 300,
+  "tile_step": 0.5
+}
