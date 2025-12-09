@@ -1,0 +1,30 @@
+[
+  {
+    "quadrants": "(-5,-7),(-5,-6)",
+    "status": "done"
+  },
+  {
+    "quadrants": "(-5,-4),(-5,-3)",
+    "status": "done"
+  },
+  {
+    "quadrants": "(-5,-1),(-5,0)",
+    "status": "done"
+  },
+  {
+    "quadrants": "(-5,2),(-5,3)",
+    "status": "done"
+  },
+  {
+    "quadrants": "(-5,-8)",
+    "status": "done"
+  },
+  {
+    "quadrants": "(-5,-5)",
+    "status": "done"
+  },
+  {
+    "quadrants": "(-5,-2)",
+    "status": "done"
+  }
+]

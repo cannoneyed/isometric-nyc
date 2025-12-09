@@ -248,48 +248,113 @@ class TemplateBuilder:
     1. Try to maximize context by checking generated neighbors
     2. Position infill to include as much context as possible
     3. Validate that edges touching template boundary have no generated neighbors
-    4. If allow_expansion and context quadrants are missing, expand the infill region
+    4. If placement has missing context, try alternative placements
+    5. If allow_expansion and context quadrants are still missing, expand the infill
+    """
+    # Try multiple placement strategies
+    # Strategy 1: Maximize context (original approach)
+    # Strategy 2+: Exclude problematic sides that would pull in non-generated quadrants
+
+    placement = self._try_placement_with_context_preferences(
+      include_left=True,
+      include_right=True,
+      include_top=True,
+      include_bottom=True,
+    )
+
+    if placement is not None:
+      missing = self._find_missing_context_quadrants(placement)
+      if not missing:
+        return placement
+
+      # There are missing context quadrants - try alternative placements
+      # that exclude the sides causing the problem
+      alternative = self._try_alternative_placements(missing, allow_expansion)
+      if alternative is not None:
+        return alternative
+
+      # All alternatives failed, try expansion on the original placement
+      if allow_expansion:
+        expanded_placement = self._expand_to_cover_missing(placement, missing)
+        if expanded_placement is not None:
+          return expanded_placement
+
+      # Everything failed
+      missing_str = ", ".join(f"({qx}, {qy})" for qx, qy in missing)
+      self._last_validation_error = (
+        f"Context quadrants missing generations: {missing_str}"
+      )
+      return None
+
+    return placement
+
+  def _try_placement_with_context_preferences(
+    self,
+    include_left: bool,
+    include_right: bool,
+    include_top: bool,
+    include_bottom: bool,
+  ) -> TemplatePlacement | None:
+    """
+    Try to find a valid placement with given context preferences.
+
+    Args:
+      include_left: Whether to try to include left context
+      include_right: Whether to try to include right context
+      include_top: Whether to try to include top context
+      include_bottom: Whether to try to include bottom context
+
+    Returns:
+      TemplatePlacement if valid (passes seam check), None otherwise
     """
     # Calculate available margin on each side
     margin_x = TEMPLATE_SIZE - self.region.width
     margin_y = TEMPLATE_SIZE - self.region.height
 
     # Check for generated context on each side of the infill region
-    has_left_gen = self._has_generated_context("left")
-    has_right_gen = self._has_generated_context("right")
-    has_top_gen = self._has_generated_context("top")
-    has_bottom_gen = self._has_generated_context("bottom")
+    has_left_gen = self._has_generated_context("left") if include_left else False
+    has_right_gen = self._has_generated_context("right") if include_right else False
+    has_top_gen = self._has_generated_context("top") if include_top else False
+    has_bottom_gen = self._has_generated_context("bottom") if include_bottom else False
 
-    # Determine optimal infill position to maximize context
-    # If we have generated context on a side, we want margin there
-
+    # Determine infill position based on context preferences
     # Horizontal positioning
     if has_left_gen and has_right_gen:
-      # Center horizontally if we have context on both sides
       infill_x = margin_x // 2
     elif has_left_gen:
-      # Put infill on right to include left context
       infill_x = margin_x
     elif has_right_gen:
-      # Put infill on left to include right context
       infill_x = 0
     else:
-      # No horizontal context, default to left
-      infill_x = 0
+      # No horizontal context to include - position to avoid seams
+      # If we're NOT including left but there IS generated content on left,
+      # push infill to include right side (avoid left seam)
+      actual_left_gen = self._has_generated_context("left")
+      actual_right_gen = self._has_generated_context("right")
+      if actual_right_gen and not actual_left_gen:
+        infill_x = 0
+      elif actual_left_gen and not actual_right_gen:
+        infill_x = margin_x
+      else:
+        infill_x = 0
 
     # Vertical positioning
     if has_top_gen and has_bottom_gen:
-      # Center vertically if we have context on both sides
       infill_y = margin_y // 2
     elif has_top_gen:
-      # Put infill on bottom to include top context
       infill_y = margin_y
     elif has_bottom_gen:
-      # Put infill on top to include bottom context
       infill_y = 0
     else:
-      # No vertical context, default to top
-      infill_y = 0
+      # No vertical context to include - position to avoid seams
+      actual_top_gen = self._has_generated_context("top")
+      actual_bottom_gen = self._has_generated_context("bottom")
+      if actual_bottom_gen and not actual_top_gen:
+        infill_y = 0
+      elif actual_top_gen and not actual_bottom_gen:
+        infill_y = margin_y
+      else:
+        infill_y = 0
 
     # Calculate world offset
     world_offset_x = self.region.x - infill_x
@@ -310,24 +375,183 @@ class TemplateBuilder:
       self._last_validation_error = error
       return None
 
-    # Check for missing context quadrants
-    missing = self._find_missing_context_quadrants(placement)
-
-    if missing and allow_expansion:
-      # Try to expand the infill region to cover missing quadrants
-      expanded_placement = self._expand_to_cover_missing(placement, missing)
-      if expanded_placement is not None:
-        return expanded_placement
-      # Expansion failed, fall through to error
-
-    if missing:
-      missing_str = ", ".join(f"({qx}, {qy})" for qx, qy in missing)
-      self._last_validation_error = (
-        f"Context quadrants missing generations: {missing_str}"
-      )
-      return None
-
     return placement
+
+  def _try_alternative_placements(
+    self,
+    missing: list[tuple[int, int]],
+    allow_expansion: bool,
+  ) -> TemplatePlacement | None:
+    """
+    Try alternative placements that avoid missing context quadrants.
+
+    When the optimal placement would include non-generated context quadrants,
+    we try placements that exclude certain sides to avoid those quadrants.
+    """
+    # Determine which sides are causing problems
+    # Missing quadrants are in certain positions relative to the infill
+    infill_quadrants = set(self.region.overlapping_quadrants())
+    infill_min_qx = min(q[0] for q in infill_quadrants)
+    infill_max_qx = max(q[0] for q in infill_quadrants)
+    infill_min_qy = min(q[1] for q in infill_quadrants)
+    infill_max_qy = max(q[1] for q in infill_quadrants)
+
+    problem_sides = set()
+    for qx, qy in missing:
+      if qx < infill_min_qx:
+        problem_sides.add("left")
+      if qx > infill_max_qx:
+        problem_sides.add("right")
+      if qy < infill_min_qy:
+        problem_sides.add("top")
+      if qy > infill_max_qy:
+        problem_sides.add("bottom")
+
+    # Try placements that exclude problem sides
+    # Generate combinations of sides to exclude
+    side_combinations = []
+
+    # First, try excluding just the problem sides
+    if problem_sides:
+      side_combinations.append(problem_sides)
+
+    # Then try excluding individual problem sides
+    for side in problem_sides:
+      side_combinations.append({side})
+
+    # Try each combination
+    for exclude_sides in side_combinations:
+      placement = self._try_placement_with_context_preferences(
+        include_left="left" not in exclude_sides,
+        include_right="right" not in exclude_sides,
+        include_top="top" not in exclude_sides,
+        include_bottom="bottom" not in exclude_sides,
+      )
+
+      if placement is None:
+        continue
+
+      # Check if this placement has any missing context quadrants
+      new_missing = self._find_missing_context_quadrants(placement)
+
+      if not new_missing:
+        # Found a valid placement!
+        return placement
+
+      # If allow_expansion and fewer missing quadrants, try expansion
+      if allow_expansion and len(new_missing) < len(missing):
+        expanded = self._expand_to_cover_missing(placement, new_missing)
+        if expanded is not None:
+          return expanded
+
+    # Last resort: try placements that sacrifice context to avoid missing quadrants
+    # This may create seams but is better than not being able to generate at all
+    best_placement = self._try_seam_tolerant_placement(problem_sides)
+    if best_placement is not None:
+      return best_placement
+
+    return None
+
+  def _try_seam_tolerant_placement(
+    self, problem_sides: set[str]
+  ) -> TemplatePlacement | None:
+    """
+    Try to find a placement that avoids missing context quadrants,
+    even if it might create seams with generated neighbors.
+
+    This is a last resort when no seam-free placement exists.
+    """
+    margin_x = TEMPLATE_SIZE - self.region.width
+    margin_y = TEMPLATE_SIZE - self.region.height
+
+    # Determine which sides have generated content
+    has_left_gen = self._has_generated_context("left")
+    has_right_gen = self._has_generated_context("right")
+    has_top_gen = self._has_generated_context("top")
+    has_bottom_gen = self._has_generated_context("bottom")
+
+    # For each problem side, we want to position to EXCLUDE that side's context
+    # even if it means creating a seam
+
+    # Try different positions that avoid problem sides
+    positions_to_try = []
+
+    # If left is problematic, push infill to left (exclude left context)
+    if "left" in problem_sides:
+      # Position infill at left, include right context if available
+      infill_x = 0
+      if has_top_gen and "top" not in problem_sides:
+        infill_y = margin_y  # Include top
+      elif has_bottom_gen and "bottom" not in problem_sides:
+        infill_y = 0  # Include bottom
+      else:
+        infill_y = 0
+      positions_to_try.append((infill_x, infill_y))
+
+    # If right is problematic, push infill to right (exclude right context)
+    if "right" in problem_sides:
+      infill_x = margin_x
+      if has_top_gen and "top" not in problem_sides:
+        infill_y = margin_y
+      elif has_bottom_gen and "bottom" not in problem_sides:
+        infill_y = 0
+      else:
+        infill_y = 0
+      positions_to_try.append((infill_x, infill_y))
+
+    # If top is problematic, push infill to top (exclude top context)
+    if "top" in problem_sides:
+      infill_y = 0
+      if has_right_gen and "right" not in problem_sides:
+        infill_x = 0  # Include right
+      elif has_left_gen and "left" not in problem_sides:
+        infill_x = margin_x  # Include left
+      else:
+        infill_x = 0
+      positions_to_try.append((infill_x, infill_y))
+
+    # If bottom is problematic, push infill to bottom
+    if "bottom" in problem_sides:
+      infill_y = margin_y
+      if has_right_gen and "right" not in problem_sides:
+        infill_x = 0
+      elif has_left_gen and "left" not in problem_sides:
+        infill_x = margin_x
+      else:
+        infill_x = 0
+      positions_to_try.append((infill_x, infill_y))
+
+    # Also try all four corners to maximize options
+    corners = [
+      (0, 0),  # Top-left
+      (margin_x, 0),  # Top-right
+      (0, margin_y),  # Bottom-left
+      (margin_x, margin_y),  # Bottom-right
+    ]
+    positions_to_try.extend(corners)
+
+    # Try each position
+    for infill_x, infill_y in positions_to_try:
+      world_offset_x = self.region.x - infill_x
+      world_offset_y = self.region.y - infill_y
+
+      placement = TemplatePlacement(
+        infill_x=infill_x,
+        infill_y=infill_y,
+        world_offset_x=world_offset_x,
+        world_offset_y=world_offset_y,
+      )
+      placement._infill_width = self.region.width
+      placement._infill_height = self.region.height
+
+      # Check for missing context quadrants (skip seam check)
+      missing = self._find_missing_context_quadrants(placement)
+
+      if not missing:
+        # Found a valid placement (may have seams but no missing context)
+        return placement
+
+    return None
 
   def _has_generated_context(self, side: str) -> bool:
     """Check if there are generated pixels adjacent to the infill region on the given side."""

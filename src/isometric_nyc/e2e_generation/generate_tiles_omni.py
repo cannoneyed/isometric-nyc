@@ -23,7 +23,7 @@ JSON File Format:
   ]
 
 The script will:
-- Process entries with status "pending"
+- Process entries with status "pending" or "error" (retries errors)
 - Update status to "done" on success or "error" on failure
 - Save progress after each entry so it can resume if interrupted
 """
@@ -163,7 +163,7 @@ def process_quadrants_json(
   Process a JSON file of quadrant entries.
 
   The script will:
-  - Process entries with status "pending"
+  - Process entries with status "pending" or "error" (retries errors)
   - Update status to "done" on success or "error" on failure
   - Save progress after each entry
 
@@ -183,13 +183,35 @@ def process_quadrants_json(
     print(f"❌ Error loading JSON file: {e}")
     return 1
 
-  # Count pending entries
+  # Find entries to process: "pending" or "error" status
   pending_entries = [e for e in entries if e.get("status") == "pending"]
+  error_entries = [e for e in entries if e.get("status") == "error"]
+
+  # Find the first error entry to retry (if any)
+  first_error_idx = None
+  for i, entry in enumerate(entries):
+    if entry.get("status") == "error":
+      first_error_idx = i
+      break
+
+  # Determine what to process
+  if first_error_idx is not None:
+    # Reset the error entry to pending so it gets retried
+    print(f"🔄 Found error entry at index {first_error_idx}, will retry it")
+    entries[first_error_idx]["status"] = "pending"
+    if "error" in entries[first_error_idx]:
+      del entries[first_error_idx]["error"]
+    save_quadrants_json(json_path, entries)
+    # Recalculate pending entries
+    pending_entries = [e for e in entries if e.get("status") == "pending"]
+
   if not pending_entries:
     print("✅ No pending entries to process")
     return 0
 
   print(f"📋 Found {len(pending_entries)} pending entries out of {len(entries)} total")
+  if error_entries:
+    print(f"   (including {len(error_entries)} retried error entries)")
 
   # Connect to database
   db_path = generation_dir / "quadrants.db"
