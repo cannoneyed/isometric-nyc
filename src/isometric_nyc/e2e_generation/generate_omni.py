@@ -56,6 +56,7 @@ load_dotenv()
 # Oxen API configuration
 OMNI_MODEL_ID = "cannoneyed-gentle-gold-antlion"
 OMNI_WATER_MODEL_ID = "cannoneyed-quiet-green-lamprey"
+OMNI_WATER_V2_MODEL_ID = "cannoneyed-rural-rose-dingo"
 
 GCS_BUCKET_NAME = "isometric-nyc-infills"
 
@@ -143,13 +144,13 @@ def call_oxen_api(image_url: str, api_key: str) -> str:
   )
 
   payload = {
-    "model": OMNI_WATER_MODEL_ID,
+    "model": OMNI_WATER_V2_MODEL_ID,
     "input_image": image_url,
     "prompt": prompt,
     "num_inference_steps": 28,
   }
 
-  print(f"   🤖 Calling Oxen API with model {OMNI_WATER_MODEL_ID}...")
+  print(f"   🤖 Calling Oxen API with model {OMNI_WATER_V2_MODEL_ID}...")
   response = requests.post(endpoint, headers=headers, json=payload, timeout=300)
   response.raise_for_status()
 
@@ -324,12 +325,12 @@ def run_generation_for_quadrants(
   update_status("validating", "Checking API key...")
 
   # Check for API key
-  api_key = os.getenv("OXEN_OMNI_v04_WATER_API_KEY")
+  api_key = os.getenv("OXEN_OMNI_v04_WATER_V2_API_KEY")
   if not api_key:
-    update_status("error", "OXEN_OMNI_v04_WATER_API_KEY not set")
+    update_status("error", "OXEN_OMNI_v04_WATER_V2_API_KEY not set")
     return {
       "success": False,
-      "error": "OXEN_OMNI_v04_WATER_API_KEY environment variable not set",
+      "error": "OXEN_OMNI_v04_WATER_V2_API_KEY environment variable not set",
     }
 
   # Create helper functions for validation
