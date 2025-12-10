@@ -880,6 +880,10 @@ def validate_quadrant_selection(
   This is a convenience function for the common case of selecting
   whole quadrants for infill.
 
+  Special handling for full tiles (2x2):
+  - If some quadrants already have generations, reduce to just the missing ones
+  - The generated quadrants become context for the missing ones
+
   Args:
     quadrants: List of (qx, qy) quadrant positions to infill
     has_generation: Callable to check if a quadrant has generation
@@ -922,9 +926,31 @@ def validate_quadrant_selection(
       None,
     )
 
-  # For full tiles, check that there are no generated neighbors
+  # For full tiles (2x2), check if some quadrants are already generated
+  # If so, reduce the selection to just the non-generated quadrants
   if region.is_full_tile():
-    # Check all edges for generated neighbors
+    # Check which quadrants already have generations
+    generated_quadrants = [q for q in quadrants if has_generation(q[0], q[1])]
+    non_generated_quadrants = [q for q in quadrants if not has_generation(q[0], q[1])]
+
+    if len(generated_quadrants) == 4:
+      # All quadrants already generated - nothing to do
+      return False, "All quadrants already have generations", None
+
+    if len(generated_quadrants) > 0:
+      # Some quadrants are generated - reduce selection to just the missing ones
+      # The generated quadrants will serve as context
+      print(
+        f"   📋 {len(generated_quadrants)} of 4 quadrants already generated, "
+        f"will generate remaining {len(non_generated_quadrants)}"
+      )
+
+      # Recursively validate the reduced selection
+      return validate_quadrant_selection(
+        non_generated_quadrants, has_generation, allow_expansion
+      )
+
+    # No quadrants generated yet - check for external neighbors
     has_any_gen_neighbor = False
     for qx, qy in quadrants:
       # Check all 4 sides of each edge quadrant

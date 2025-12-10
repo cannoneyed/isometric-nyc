@@ -22,6 +22,7 @@ Keyboard shortcuts:
 """
 
 import argparse
+import hashlib
 import sqlite3
 import threading
 import time
@@ -63,6 +64,14 @@ generation_state = {
   "error": None,
   "started_at": None,
 }
+
+# Generation queue for multiple requests
+generation_queue: list[
+  dict
+] = []  # List of {"quadrants": [...], "type": "generate"|"render"}
+queue_lock = threading.Lock()
+queue_worker_thread: threading.Thread | None = None
+queue_worker_running = False
 
 # Will be set by main()
 GENERATION_DIR: Path | None = None
@@ -170,7 +179,18 @@ def tile(x: str, y: str):
   if data is None:
     return Response("Not found", status=404)
 
-  return Response(data, mimetype="image/png")
+  # Generate ETag from content hash for caching
+  etag = hashlib.md5(data).hexdigest()
+
+  # Check if client has cached version
+  if_none_match = request.headers.get("If-None-Match")
+  if if_none_match and if_none_match == etag:
+    return Response(status=304)  # Not Modified
+
+  response = Response(data, mimetype="image/png")
+  response.headers["ETag"] = etag
+  response.headers["Cache-Control"] = "public, max-age=3600"  # Cache for 1 hour
+  return response
 
 
 # =============================================================================
@@ -219,24 +239,180 @@ def run_generation(
   )
 
 
+def process_queue_item(item: dict) -> dict:
+  """Process a single queue item (generate or render)."""
+  global generation_state
+
+  quadrants = item["quadrants"]
+  item_type = item["type"]
+
+  # Convert to list of tuples
+  selected_quadrants = [(q[0], q[1]) for q in quadrants]
+
+  # Initialize generation state
+  generation_state["is_generating"] = True
+  generation_state["quadrants"] = selected_quadrants
+  generation_state["status"] = "starting" if item_type == "generate" else "rendering"
+  generation_state["message"] = f"Starting {item_type}..."
+  generation_state["error"] = None
+  generation_state["started_at"] = time.time()
+
+  print(f"\n{'=' * 60}")
+  print(
+    f"{'🎯' if item_type == 'generate' else '🎨'} {item_type.title()} request from queue: {selected_quadrants}"
+  )
+  print(f"{'=' * 60}")
+
+  conn = get_db_connection()
+  try:
+    config = get_generation_config(conn)
+
+    if item_type == "generate":
+      result = run_generation(conn, config, selected_quadrants)
+      if result["success"]:
+        print(f"✅ Generation complete: {result['message']}")
+        generation_state["status"] = "complete"
+        generation_state["message"] = result["message"]
+      else:
+        print(f"❌ Generation failed: {result['error']}")
+        generation_state["status"] = "error"
+        generation_state["error"] = result["error"]
+      return result
+    else:  # render
+      # Ensure web server is running
+      update_generation_state("rendering", "Starting web server...")
+      ensure_web_server_running()
+
+      rendered_count = 0
+      total = len(selected_quadrants)
+
+      for i, (qx, qy) in enumerate(selected_quadrants):
+        update_generation_state(
+          "rendering", f"Rendering quadrant ({qx}, {qy})... ({i + 1}/{total})"
+        )
+        print(f"   🎨 Rendering quadrant ({qx}, {qy})...")
+
+        try:
+          render_bytes = render_quadrant(conn, config, qx, qy, WEB_SERVER_PORT)
+          if render_bytes:
+            rendered_count += 1
+            print(f"      ✓ Rendered quadrant ({qx}, {qy})")
+          else:
+            print(f"      ⚠️ No render output for ({qx}, {qy})")
+        except Exception as e:
+          print(f"      ❌ Failed to render ({qx}, {qy}): {e}")
+          traceback.print_exc()
+
+      update_generation_state("complete", f"Rendered {rendered_count} quadrant(s)")
+      print(f"✅ Render complete: {rendered_count}/{total} quadrants")
+
+      return {
+        "success": True,
+        "message": f"Rendered {rendered_count} quadrant{'s' if rendered_count != 1 else ''}",
+        "quadrants": selected_quadrants,
+      }
+
+  except Exception as e:
+    traceback.print_exc()
+    generation_state["status"] = "error"
+    generation_state["error"] = str(e)
+    return {"success": False, "error": str(e)}
+  finally:
+    conn.close()
+
+
+def queue_worker():
+  """Background worker that processes the generation queue."""
+  global generation_state, queue_worker_running
+
+  print("🔄 Queue worker started")
+
+  while queue_worker_running:
+    item = None
+
+    # Get next item from queue
+    with queue_lock:
+      if generation_queue:
+        item = generation_queue.pop(0)
+
+    if item is None:
+      # No items in queue, wait a bit and check again
+      time.sleep(0.5)
+      continue
+
+    # Acquire the generation lock and process the item
+    with generation_lock:
+      try:
+        process_queue_item(item)
+      finally:
+        generation_state["is_generating"] = False
+
+    # Small delay between items
+    time.sleep(0.5)
+
+  print("🛑 Queue worker stopped")
+
+
+def start_queue_worker():
+  """Start the queue worker thread if not already running."""
+  global queue_worker_thread, queue_worker_running
+
+  if queue_worker_thread is not None and queue_worker_thread.is_alive():
+    return  # Already running
+
+  queue_worker_running = True
+  queue_worker_thread = threading.Thread(target=queue_worker, daemon=True)
+  queue_worker_thread.start()
+
+
+def stop_queue_worker():
+  """Stop the queue worker thread."""
+  global queue_worker_running
+  queue_worker_running = False
+
+
+def add_to_queue(quadrants: list[tuple[int, int]], item_type: str) -> dict:
+  """Add a generation/render request to the queue."""
+  with queue_lock:
+    generation_queue.append(
+      {
+        "quadrants": quadrants,
+        "type": item_type,
+      }
+    )
+    queue_position = len(generation_queue)
+
+  # Ensure the queue worker is running
+  start_queue_worker()
+
+  return {
+    "success": True,
+    "queued": True,
+    "position": queue_position,
+    "message": f"Added to queue at position {queue_position}",
+  }
+
+
 @app.route("/api/status")
 def api_status():
-  """API endpoint to check generation status."""
-  return jsonify(generation_state)
+  """API endpoint to check generation status including queue info."""
+  with queue_lock:
+    queue_info = [
+      {"quadrants": item["quadrants"], "type": item["type"]}
+      for item in generation_queue
+    ]
+  return jsonify(
+    {
+      **generation_state,
+      "queue": queue_info,
+      "queue_length": len(queue_info),
+    }
+  )
 
 
 @app.route("/api/delete", methods=["POST"])
 def api_delete():
   """API endpoint to delete generation data for selected quadrants."""
-  # Check if already generating
-  if generation_state.get("is_generating"):
-    return jsonify(
-      {
-        "success": False,
-        "error": "Cannot delete while generation is in progress.",
-      }
-    )
-
   data = request.get_json()
   if not data or "quadrants" not in data:
     return jsonify({"success": False, "error": "No quadrants specified"})
@@ -285,51 +461,47 @@ def api_render():
   """API endpoint to render tiles for selected quadrants."""
   global generation_state
 
-  # Check if already generating/rendering
-  if not generation_lock.acquire(blocking=False):
+  # Parse request
+  data = request.get_json()
+  if not data or "quadrants" not in data:
     return jsonify(
       {
         "success": False,
-        "error": "Operation already in progress. Please wait.",
-        "status": generation_state,
+        "error": "Missing 'quadrants' in request body",
       }
-    ), 429
+    ), 400
+
+  quadrants = data["quadrants"]
+  if not isinstance(quadrants, list) or len(quadrants) == 0:
+    return jsonify(
+      {
+        "success": False,
+        "error": "quadrants must be a non-empty list",
+      }
+    ), 400
+
+  # Convert to list of tuples
+  selected_quadrants = []
+  for q in quadrants:
+    if isinstance(q, list) and len(q) == 2:
+      selected_quadrants.append((int(q[0]), int(q[1])))
+    elif isinstance(q, dict) and "x" in q and "y" in q:
+      selected_quadrants.append((int(q["x"]), int(q["y"])))
+    else:
+      return jsonify(
+        {
+          "success": False,
+          "error": f"Invalid quadrant format: {q}",
+        }
+      ), 400
+
+  # Check if already generating/rendering - if so, add to queue
+  if not generation_lock.acquire(blocking=False):
+    # Add to queue instead of rejecting
+    result = add_to_queue(selected_quadrants, "render")
+    return jsonify(result), 202  # 202 Accepted
 
   try:
-    # Parse request
-    data = request.get_json()
-    if not data or "quadrants" not in data:
-      return jsonify(
-        {
-          "success": False,
-          "error": "Missing 'quadrants' in request body",
-        }
-      ), 400
-
-    quadrants = data["quadrants"]
-    if not isinstance(quadrants, list) or len(quadrants) == 0:
-      return jsonify(
-        {
-          "success": False,
-          "error": "quadrants must be a non-empty list",
-        }
-      ), 400
-
-    # Convert to list of tuples
-    selected_quadrants = []
-    for q in quadrants:
-      if isinstance(q, list) and len(q) == 2:
-        selected_quadrants.append((int(q[0]), int(q[1])))
-      elif isinstance(q, dict) and "x" in q and "y" in q:
-        selected_quadrants.append((int(q["x"]), int(q["y"])))
-      else:
-        return jsonify(
-          {
-            "success": False,
-            "error": f"Invalid quadrant format: {q}",
-          }
-        ), 400
-
     # Initialize generation state (reuse for rendering)
     generation_state["is_generating"] = True
     generation_state["quadrants"] = selected_quadrants
@@ -405,51 +577,47 @@ def api_generate():
   """API endpoint to generate tiles for selected quadrants."""
   global generation_state
 
-  # Check if already generating
-  if not generation_lock.acquire(blocking=False):
+  # Parse request
+  data = request.get_json()
+  if not data or "quadrants" not in data:
     return jsonify(
       {
         "success": False,
-        "error": "Generation already in progress. Please wait.",
-        "status": generation_state,
+        "error": "Missing 'quadrants' in request body",
       }
-    ), 429
+    ), 400
+
+  quadrants = data["quadrants"]
+  if not isinstance(quadrants, list) or len(quadrants) == 0:
+    return jsonify(
+      {
+        "success": False,
+        "error": "quadrants must be a non-empty list",
+      }
+    ), 400
+
+  # Convert to list of tuples
+  selected_quadrants = []
+  for q in quadrants:
+    if isinstance(q, list) and len(q) == 2:
+      selected_quadrants.append((int(q[0]), int(q[1])))
+    elif isinstance(q, dict) and "x" in q and "y" in q:
+      selected_quadrants.append((int(q["x"]), int(q["y"])))
+    else:
+      return jsonify(
+        {
+          "success": False,
+          "error": f"Invalid quadrant format: {q}",
+        }
+      ), 400
+
+  # Check if already generating - if so, add to queue
+  if not generation_lock.acquire(blocking=False):
+    # Add to queue instead of rejecting
+    result = add_to_queue(selected_quadrants, "generate")
+    return jsonify(result), 202  # 202 Accepted
 
   try:
-    # Parse request
-    data = request.get_json()
-    if not data or "quadrants" not in data:
-      return jsonify(
-        {
-          "success": False,
-          "error": "Missing 'quadrants' in request body",
-        }
-      ), 400
-
-    quadrants = data["quadrants"]
-    if not isinstance(quadrants, list) or len(quadrants) == 0:
-      return jsonify(
-        {
-          "success": False,
-          "error": "quadrants must be a non-empty list",
-        }
-      ), 400
-
-    # Convert to list of tuples
-    selected_quadrants = []
-    for q in quadrants:
-      if isinstance(q, list) and len(q) == 2:
-        selected_quadrants.append((int(q[0]), int(q[1])))
-      elif isinstance(q, dict) and "x" in q and "y" in q:
-        selected_quadrants.append((int(q["x"]), int(q["y"])))
-      else:
-        return jsonify(
-          {
-            "success": False,
-            "error": f"Invalid quadrant format: {q}",
-          }
-        ), 400
-
     # Initialize generation state
     generation_state["is_generating"] = True
     generation_state["quadrants"] = selected_quadrants
@@ -561,9 +729,13 @@ def main():
   try:
     app.run(host=args.host, port=args.port, debug=True, use_reloader=False)
   finally:
+    # Clean up queue worker
+    print("\n🛑 Stopping queue worker...")
+    stop_queue_worker()
+
     # Clean up web server on exit
     if WEB_SERVER_PROCESS is not None:
-      print("\n🛑 Stopping web server...")
+      print("🛑 Stopping web server...")
       WEB_SERVER_PROCESS.terminate()
       WEB_SERVER_PROCESS.wait()
 

@@ -256,14 +256,40 @@ body {
   background: rgba(168, 85, 247, 0.2);
 }
 
-/* Disable selection while generating */
-body.generating .tile.selectable {
-  cursor: not-allowed;
+/* Queued tiles (in queue, waiting to be generated) */
+.tile.queued {
+  outline: 3px dashed #c084fc !important;
+  outline-offset: -3px;
+  z-index: 9;
+  animation: pulse-queue 1.5s ease-in-out infinite;
+  /* Fallback: box-shadow for browsers that don't render dashed outlines well */
+  box-shadow: inset 0 0 0 3px rgba(192, 132, 252, 0.5);
 }
 
-body.generating .tool-btn {
-  opacity: 0.5;
-  pointer-events: none;
+@keyframes pulse-queue {
+  0%,
+  100% {
+    outline-color: #c084fc;
+    box-shadow: inset 0 0 0 3px rgba(192, 132, 252, 0.5);
+  }
+  50% {
+    outline-color: #8b5cf6;
+    box-shadow: inset 0 0 0 3px rgba(139, 92, 246, 0.7);
+  }
+}
+
+.grid-container.show-lines .tile.queued {
+  outline-color: #c084fc;
+}
+
+.tile.placeholder.queued {
+  background: rgba(168, 85, 247, 0.3) !important;
+}
+
+/* Allow selection while generating - only disable clicking on locked/queued tiles */
+body.generating .tile.locked.selectable,
+body.generating .tile.queued.selectable {
+  cursor: not-allowed;
 }
 
 /* Selection status bar */
@@ -410,11 +436,11 @@ body.generating .tool-btn {
 /* Toast notification system */
 .toast-container {
   position: fixed;
-  top: 100px;
+  bottom: 15px;
   right: 15px;
   z-index: 1000;
   display: flex;
-  flex-direction: column;
+  flex-direction: column-reverse;
   gap: 8px;
   max-width: 320px;
 }
@@ -517,6 +543,7 @@ body.generating .tool-btn {
 /* Loading spinner for generate button */
 .generate-btn.loading {
   background: #666;
+  color: #fff;
   cursor: wait;
 }
 

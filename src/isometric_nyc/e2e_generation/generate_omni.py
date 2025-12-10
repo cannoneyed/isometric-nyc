@@ -139,7 +139,7 @@ def call_oxen_api(image_url: str, api_key: str) -> str:
   prompt = (
     "Fill in the outlined section with the missing pixels corresponding to "
     "the <isometric nyc pixel art> style, removing the border and exactly "
-    "following the shape/style/structure of the surrounding image (if present). ENSURE THAT ALL WATER PIXELS ARE THE COLOR #467BA5"
+    "following the shape/style/structure of the surrounding image (if present)."
   )
 
   payload = {

@@ -3,6 +3,7 @@ const config = JSON.parse(document.getElementById("app-config").dataset.config);
 
 // Locked quadrants storage key
 const LOCKED_QUADRANTS_KEY = "generatingQuadrants";
+const QUEUED_QUADRANTS_KEY = "queuedQuadrants";
 
 function getLockedQuadrants() {
   try {
@@ -21,27 +22,66 @@ function clearLockedQuadrants() {
   localStorage.removeItem(LOCKED_QUADRANTS_KEY);
 }
 
+function getQueuedQuadrants() {
+  try {
+    const stored = localStorage.getItem(QUEUED_QUADRANTS_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+}
+
+function setQueuedQuadrants(quadrants) {
+  localStorage.setItem(QUEUED_QUADRANTS_KEY, JSON.stringify(quadrants));
+}
+
+function clearQueuedQuadrants() {
+  localStorage.removeItem(QUEUED_QUADRANTS_KEY);
+}
+
 function applyLockedStyles() {
   const locked = getLockedQuadrants();
-  if (locked.length === 0) return;
+  const queued = getQueuedQuadrants();
 
-  // Add generating class to body
-  document.body.classList.add("generating");
+  console.log("applyLockedStyles - locked:", locked, "queued:", queued);
 
-  // Apply locked style to matching tiles
+  if (locked.length === 0 && queued.length === 0) {
+    console.log("applyLockedStyles - nothing to apply, early return");
+    return;
+  }
+
+  // Add generating class to body only if actively generating
+  if (locked.length > 0) {
+    document.body.classList.add("generating");
+  }
+
+  // Apply locked/queued style to matching tiles
   document.querySelectorAll(".tile").forEach((tile) => {
     const [qx, qy] = tile.dataset.coords.split(",").map(Number);
     const isLocked = locked.some(([lx, ly]) => lx === qx && ly === qy);
+    const isQueued = queued.some(([lx, ly]) => lx === qx && ly === qy);
+
     if (isLocked) {
       tile.classList.add("locked");
+      tile.classList.remove("queued");
+    } else if (isQueued) {
+      console.log("Applying queued style to tile:", qx, qy);
+      tile.classList.add("queued");
+      tile.classList.remove("locked");
     }
   });
 }
 
 function removeLockedStyles() {
+  console.log("removeLockedStyles called");
   document.body.classList.remove("generating");
   document.querySelectorAll(".tile.locked").forEach((tile) => {
+    console.log("Removing locked from tile:", tile.dataset.coords);
     tile.classList.remove("locked");
+  });
+  document.querySelectorAll(".tile.queued").forEach((tile) => {
+    console.log("Removing queued from tile:", tile.dataset.coords);
+    tile.classList.remove("queued");
   });
 }
 
@@ -135,10 +175,6 @@ document.addEventListener("keydown", (e) => {
     case "Escape":
       if (selectToolActive) toggleSelectTool();
       break;
-    case "s":
-    case "S":
-      if (!isGenerating) toggleSelectTool();
-      break;
   }
 });
 
@@ -173,25 +209,63 @@ function updateSelectionStatus() {
 
   // Check if we're generating/rendering
   const locked = getLockedQuadrants();
+  const queued = getQueuedQuadrants();
   const isProcessing = isGenerating || isRendering;
+
+  console.log(
+    "updateSelectionStatus - locked:",
+    locked,
+    "queued:",
+    queued,
+    "isProcessing:",
+    isProcessing
+  );
+
+  let statusParts = [];
+
+  // Show current processing status
   if (locked.length > 0 && isProcessing) {
-    const action = isRendering ? "rendering" : "generating";
+    const action = isRendering ? "Rendering" : "Generating";
     const coordsStr = locked.map(([x, y]) => `(${x},${y})`).join(" ");
-    countEl.textContent = `${action} ${coordsStr}`;
+    statusParts.push(`${action} ${coordsStr}`);
+  }
+
+  // Show queue count
+  if (queued.length > 0) {
+    const queueCoords = queued.map(([x, y]) => `(${x},${y})`).join(" ");
+    statusParts.push(`📋 Queue: ${queued.length} - ${queueCoords}`);
+  }
+
+  // Show selection count
+  if (count > 0) {
+    statusParts.push(`${count} selected`);
+  }
+
+  let statusText;
+  if (statusParts.length > 0) {
+    statusText = statusParts.join(" • ");
+  } else {
+    statusText = "0 quadrants selected";
+  }
+
+  countEl.textContent = statusText;
+
+  // Update status bar styling
+  if (locked.length > 0 || queued.length > 0) {
     if (limitEl) limitEl.style.display = "none";
     statusEl.classList.remove("empty");
     statusEl.classList.add("generating");
   } else {
-    countEl.textContent = `${count} quadrant${count !== 1 ? "s" : ""} selected`;
     if (limitEl) limitEl.style.display = "";
     statusEl.classList.toggle("empty", count === 0);
     statusEl.classList.remove("generating");
   }
 
-  deselectBtn.disabled = count === 0 || isProcessing;
-  deleteBtn.disabled = count === 0 || isProcessing;
-  renderBtn.disabled = count === 0 || isProcessing;
-  generateBtn.disabled = count === 0 || isProcessing;
+  // Enable buttons for selection (can add to queue even during processing)
+  deselectBtn.disabled = count === 0;
+  deleteBtn.disabled = count === 0;
+  renderBtn.disabled = count === 0;
+  generateBtn.disabled = count === 0;
 }
 
 // Toast notification system
@@ -239,14 +313,6 @@ let isRendering = false;
 
 async function deleteSelected() {
   if (selectedQuadrants.size === 0) return;
-  if (isGenerating || isRendering) {
-    showToast(
-      "info",
-      "Operation in progress",
-      "Cannot delete while generating or rendering."
-    );
-    return;
-  }
 
   const coords = Array.from(selectedQuadrants).map((s) => {
     const [x, y] = s.split(",").map(Number);
@@ -284,14 +350,6 @@ async function deleteSelected() {
 
 async function generateSelected() {
   if (selectedQuadrants.size === 0) return;
-  if (isGenerating || isRendering) {
-    showToast(
-      "info",
-      "Operation in progress",
-      "Please wait for the current operation to complete."
-    );
-    return;
-  }
 
   const coords = Array.from(selectedQuadrants).map((s) => {
     const [x, y] = s.split(",").map(Number);
@@ -300,31 +358,81 @@ async function generateSelected() {
 
   console.log("Generate requested for:", coords);
 
-  // Set loading state and lock the quadrants
-  isGenerating = true;
-  setLockedQuadrants(coords);
-  document.body.classList.add("generating");
-
-  // Mark selected tiles as locked (purple)
+  // Clear selection
   document.querySelectorAll(".tile.selected").forEach((tile) => {
     tile.classList.remove("selected");
-    tile.classList.add("locked");
   });
   selectedQuadrants.clear();
-  updateSelectionStatus();
 
-  const generateBtn = document.getElementById("generateBtn");
-  generateBtn.disabled = true;
-  generateBtn.classList.add("loading");
-  generateBtn.innerHTML = 'Generating<span class="spinner"></span>';
-
-  showToast(
-    "loading",
-    "Generating tiles...",
-    `Processing ${coords.length} quadrant${
-      coords.length > 1 ? "s" : ""
-    }. This may take a minute.`
+  // Check if already generating - if so, these will be queued
+  const alreadyGenerating = isGenerating || isRendering;
+  console.log(
+    "generateSelected - alreadyGenerating:",
+    alreadyGenerating,
+    "isGenerating:",
+    isGenerating,
+    "isRendering:",
+    isRendering
   );
+
+  if (alreadyGenerating) {
+    console.log("Adding to queue:", coords);
+    // Add to queued quadrants visually BEFORE the request
+    const currentQueued = getQueuedQuadrants();
+    const newQueued = [...currentQueued, ...coords];
+    setQueuedQuadrants(newQueued);
+    console.log("Queue updated in localStorage:", newQueued);
+
+    // Mark tiles as queued (dashed purple)
+    coords.forEach(([qx, qy]) => {
+      const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+      console.log("Marking tile as queued:", qx, qy, tile);
+      if (tile) {
+        tile.classList.add("queued");
+        console.log("Tile classes after adding queued:", tile.className);
+      }
+    });
+
+    // Show immediate feedback
+    showToast(
+      "info",
+      "Adding to queue...",
+      `Queueing ${coords.length} quadrant(s)`
+    );
+
+    updateSelectionStatus();
+  } else {
+    console.log("Starting new generation (not queued):", coords);
+    // Set loading state BEFORE the request
+    isGenerating = true;
+    setLockedQuadrants(coords);
+    document.body.classList.add("generating");
+
+    // Mark tiles as locked (solid purple)
+    coords.forEach(([qx, qy]) => {
+      const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+      if (tile) {
+        tile.classList.add("locked");
+      }
+    });
+
+    const generateBtn = document.getElementById("generateBtn");
+    generateBtn.classList.add("loading");
+    generateBtn.innerHTML = 'Generating<span class="spinner"></span>';
+
+    updateSelectionStatus();
+
+    showToast(
+      "loading",
+      "Generating tiles...",
+      `Processing ${coords.length} quadrant${
+        coords.length > 1 ? "s" : ""
+      }. This may take a minute.`
+    );
+  }
+
+  // Start polling for status updates
+  startStatusPolling();
 
   try {
     const response = await fetch("/api/generate", {
@@ -337,19 +445,19 @@ async function generateSelected() {
 
     const result = await response.json();
 
-    // If request was accepted, start polling for status
-    // The server will process in background and we poll for updates
-    if (response.status === 429) {
-      // Already generating - start polling
+    // Request was queued (202 Accepted)
+    if (response.status === 202 && result.queued) {
+      console.log("Generation queued at position:", result.position);
+
       showToast(
         "info",
-        "Generation in progress",
-        "Reconnected to existing generation."
+        "Added to queue",
+        `Generation queued at position ${result.position}.`
       );
-      startStatusPolling();
       return;
     }
 
+    // Request completed (200 OK) - generation finished
     if (response.ok && result.success) {
       clearLoadingToasts();
       showToast(
@@ -361,11 +469,26 @@ async function generateSelected() {
           }.`
       );
 
-      // Clear selection and refresh after a short delay
-      deselectAll();
-      setTimeout(() => {
-        window.location.reload();
-      }, 1500);
+      // Check if there are more items in queue from the status
+      const statusResponse = await fetch("/api/status");
+      const status = await statusResponse.json();
+
+      if (status.queue_length > 0) {
+        // More items in queue, reset button but keep polling
+        resetGenerateButton();
+        // Re-apply queued styles
+        if (status.queue && status.queue.length > 0) {
+          const serverQueued = status.queue.flatMap((item) => item.quadrants);
+          setQueuedQuadrants(serverQueued);
+          applyLockedStyles();
+        }
+      } else {
+        // No more items, stop polling and reload
+        stopStatusPolling();
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
+      }
     } else {
       clearLoadingToasts();
       showToast(
@@ -389,14 +512,6 @@ async function generateSelected() {
 
 async function renderSelected() {
   if (selectedQuadrants.size === 0) return;
-  if (isGenerating || isRendering) {
-    showToast(
-      "info",
-      "Operation in progress",
-      "Please wait for the current operation to complete."
-    );
-    return;
-  }
 
   const coords = Array.from(selectedQuadrants).map((s) => {
     const [x, y] = s.split(",").map(Number);
@@ -405,31 +520,73 @@ async function renderSelected() {
 
   console.log("Render requested for:", coords);
 
-  // Set loading state and lock the quadrants
-  isRendering = true;
-  setLockedQuadrants(coords);
-  document.body.classList.add("generating");
-
-  // Mark selected tiles as locked (purple)
+  // Clear selection
   document.querySelectorAll(".tile.selected").forEach((tile) => {
     tile.classList.remove("selected");
-    tile.classList.add("locked");
   });
   selectedQuadrants.clear();
-  updateSelectionStatus();
 
-  const renderBtn = document.getElementById("renderBtn");
-  renderBtn.disabled = true;
-  renderBtn.classList.add("loading");
-  renderBtn.innerHTML = 'Rendering<span class="spinner"></span>';
+  // Check if already generating - if so, these will be queued
+  const alreadyGenerating = isGenerating || isRendering;
+  console.log("renderSelected - alreadyGenerating:", alreadyGenerating);
 
-  showToast(
-    "loading",
-    "Rendering tiles...",
-    `Processing ${coords.length} quadrant${
-      coords.length > 1 ? "s" : ""
-    }. This may take a moment.`
-  );
+  if (alreadyGenerating) {
+    console.log("Adding render to queue:", coords);
+    // Add to queued quadrants visually BEFORE the request
+    const currentQueued = getQueuedQuadrants();
+    const newQueued = [...currentQueued, ...coords];
+    console.log("Queue updated:", newQueued);
+    setQueuedQuadrants(newQueued);
+
+    // Mark tiles as queued (dashed purple)
+    coords.forEach(([qx, qy]) => {
+      const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+      console.log("Marking tile as queued (render):", qx, qy, tile);
+      if (tile) {
+        tile.classList.add("queued");
+        console.log("Tile classes after adding queued:", tile.className);
+      }
+    });
+
+    // Show immediate feedback
+    showToast(
+      "info",
+      "Adding to queue...",
+      `Queueing ${coords.length} quadrant(s) for render`
+    );
+
+    updateSelectionStatus();
+  } else {
+    // Set loading state BEFORE the request
+    isRendering = true;
+    setLockedQuadrants(coords);
+    document.body.classList.add("generating");
+
+    // Mark tiles as locked (solid purple)
+    coords.forEach(([qx, qy]) => {
+      const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+      if (tile) {
+        tile.classList.add("locked");
+      }
+    });
+
+    const renderBtn = document.getElementById("renderBtn");
+    renderBtn.classList.add("loading");
+    renderBtn.innerHTML = 'Rendering<span class="spinner"></span>';
+
+    updateSelectionStatus();
+
+    showToast(
+      "loading",
+      "Rendering tiles...",
+      `Processing ${coords.length} quadrant${
+        coords.length > 1 ? "s" : ""
+      }. This may take a moment.`
+    );
+  }
+
+  // Start polling for status updates
+  startStatusPolling();
 
   try {
     const response = await fetch("/api/render", {
@@ -442,18 +599,19 @@ async function renderSelected() {
 
     const result = await response.json();
 
-    // If request was accepted, start polling for status
-    if (response.status === 429) {
-      // Already rendering - start polling
+    // Request was queued (202 Accepted)
+    if (response.status === 202 && result.queued) {
+      console.log("Render queued at position:", result.position);
+
       showToast(
         "info",
-        "Render in progress",
-        "Reconnected to existing render operation."
+        "Added to queue",
+        `Render queued at position ${result.position}.`
       );
-      startStatusPolling();
       return;
     }
 
+    // Request completed (200 OK) - render finished
     if (response.ok && result.success) {
       clearLoadingToasts();
       showToast(
@@ -465,11 +623,26 @@ async function renderSelected() {
           }.`
       );
 
-      // Clear selection and refresh after a short delay
-      deselectAll();
-      setTimeout(() => {
-        window.location.reload();
-      }, 1500);
+      // Check if there are more items in queue from the status
+      const statusResponse = await fetch("/api/status");
+      const status = await statusResponse.json();
+
+      if (status.queue_length > 0) {
+        // More items in queue, reset button but keep polling
+        resetRenderButton();
+        // Re-apply queued styles
+        if (status.queue && status.queue.length > 0) {
+          const serverQueued = status.queue.flatMap((item) => item.quadrants);
+          setQueuedQuadrants(serverQueued);
+          applyLockedStyles();
+        }
+      } else {
+        // No more items, stop polling and reload
+        stopStatusPolling();
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
+      }
     } else {
       clearLoadingToasts();
       showToast(
@@ -502,9 +675,21 @@ function deselectAll() {
 
 function toggleTileSelection(tileEl, qx, qy) {
   if (!selectToolActive) return;
-  if (isGenerating || isRendering) return; // Can't select while generating/rendering
 
+  // Check if this tile is currently being generated or in the queue
   const key = `${qx},${qy}`;
+  const locked = getLockedQuadrants();
+  const queued = getQueuedQuadrants();
+  const isLockedOrQueued =
+    locked.some(([lx, ly]) => lx === qx && ly === qy) ||
+    queued.some(([lx, ly]) => lx === qx && ly === qy);
+  if (isLockedOrQueued) {
+    console.log(
+      `Cannot select quadrant (${qx}, ${qy}) - currently generating or in queue`
+    );
+    return;
+  }
+
   if (selectedQuadrants.has(key)) {
     selectedQuadrants.delete(key);
     tileEl.classList.remove("selected");
@@ -563,12 +748,39 @@ async function checkGenerationStatus() {
     const response = await fetch("/api/status");
     const status = await response.json();
 
+    console.log("Status poll:", status);
+
+    // Sync locked quadrants from server (currently processing)
+    if (
+      status.is_generating &&
+      status.quadrants &&
+      status.quadrants.length > 0
+    ) {
+      setLockedQuadrants(status.quadrants);
+    } else if (!status.is_generating) {
+      clearLockedQuadrants();
+    }
+
+    // Sync queue state from server
+    // MERGE with local state to avoid losing items in transit
+    if (status.queue && status.queue.length > 0) {
+      const serverQueued = status.queue.flatMap((item) => item.quadrants);
+      setQueuedQuadrants(serverQueued);
+    } else if (status.status === "idle" && !status.is_generating) {
+      // Only clear queue when truly idle (no race condition with pending requests)
+      clearQueuedQuadrants();
+    }
+    // If generating but queue is empty, keep local queue (items may be in transit)
+
+    // Always re-apply styles to sync with server state
+    removeLockedStyles();
+    applyLockedStyles();
+
     if (status.is_generating) {
       // Update UI to show generation/render in progress
       setProcessingUI(status);
     } else {
-      // Operation finished
-      stopStatusPolling();
+      // Current operation finished
 
       const isRenderOp = status.status === "rendering" || isRendering;
       const opName = isRenderOp ? "Render" : "Generation";
@@ -576,17 +788,64 @@ async function checkGenerationStatus() {
       if (status.status === "complete") {
         clearLoadingToasts();
         showToast("success", `${opName} complete!`, status.message);
-        setTimeout(() => window.location.reload(), 1500);
+
+        // Clear the locked state for the completed operation
+        clearLockedQuadrants();
+
+        // Check if there are more items in the queue
+        if (status.queue_length > 0) {
+          showToast(
+            "info",
+            "Processing queue",
+            `${status.queue_length} more item(s) in queue...`
+          );
+          // Keep button in loading state - next queue item will start processing
+          // The next status poll will update UI when new item starts
+        } else {
+          // No more items, stop polling and reload
+          stopStatusPolling();
+          setTimeout(() => window.location.reload(), 1500);
+        }
       } else if (status.status === "error" && status.error) {
         clearLoadingToasts();
         showToast("error", `${opName} failed`, status.error);
-        if (isRendering) {
-          resetRenderButton();
-        } else {
-          resetGenerateButton();
+
+        // Clear locked state
+        clearLockedQuadrants();
+        removeLockedStyles();
+
+        const generateBtn = document.getElementById("generateBtn");
+        const renderBtn = document.getElementById("renderBtn");
+        generateBtn.classList.remove("loading");
+        generateBtn.innerHTML = "Generate";
+        renderBtn.classList.remove("loading");
+        renderBtn.innerHTML = "Render";
+        isGenerating = false;
+        isRendering = false;
+
+        // Continue polling if there are more items in queue
+        if (status.queue_length === 0) {
+          stopStatusPolling();
         }
+      } else if (status.status === "idle" && status.queue_length === 0) {
+        // Idle with no queue - fully clean up
+        stopStatusPolling();
+        clearLockedQuadrants();
+        clearQueuedQuadrants();
+        removeLockedStyles();
+
+        const generateBtn = document.getElementById("generateBtn");
+        const renderBtn = document.getElementById("renderBtn");
+        generateBtn.classList.remove("loading");
+        generateBtn.innerHTML = "Generate";
+        renderBtn.classList.remove("loading");
+        renderBtn.innerHTML = "Render";
+        isGenerating = false;
+        isRendering = false;
       }
     }
+
+    updateSelectionStatus();
   } catch (error) {
     console.error("Status check failed:", error);
   }
@@ -598,56 +857,37 @@ function setProcessingUI(status) {
   const generateBtn = document.getElementById("generateBtn");
   const renderBtn = document.getElementById("renderBtn");
 
+  // Sync locked quadrants from server
+  if (status.quadrants && status.quadrants.length > 0) {
+    setLockedQuadrants(status.quadrants);
+  }
+
+  // Apply locked/queued styles to tiles
+  applyLockedStyles();
+
   if (isRenderOp) {
-    if (!renderBtn.classList.contains("loading")) {
-      renderBtn.disabled = true;
-      renderBtn.classList.add("loading");
-      renderBtn.innerHTML = 'Rendering<span class="spinner"></span>';
-      isRendering = true;
-
-      // Disable generate button too
-      generateBtn.disabled = true;
-
-      // Apply locked styles to tiles
-      applyLockedStyles();
-
-      // Update selection status to show rendering message
-      updateSelectionStatus();
-
-      // Show toast if not already showing
-      if (document.querySelectorAll(".toast.loading").length === 0) {
-        showToast(
-          "loading",
-          "Render in progress...",
-          status.message || "Please wait..."
-        );
-      }
-    }
+    renderBtn.classList.add("loading");
+    renderBtn.innerHTML = 'Rendering<span class="spinner"></span>';
+    isRendering = true;
+    isGenerating = false;
   } else {
-    if (!generateBtn.classList.contains("loading")) {
-      generateBtn.disabled = true;
-      generateBtn.classList.add("loading");
-      generateBtn.innerHTML = 'Generating<span class="spinner"></span>';
-      isGenerating = true;
+    generateBtn.classList.add("loading");
+    generateBtn.innerHTML = 'Generating<span class="spinner"></span>';
+    isGenerating = true;
+    isRendering = false;
+  }
 
-      // Disable render button too
-      renderBtn.disabled = true;
+  // Add generating class to body
+  document.body.classList.add("generating");
 
-      // Apply locked styles to tiles
-      applyLockedStyles();
-
-      // Update selection status to show generating message
-      updateSelectionStatus();
-
-      // Show toast if not already showing
-      if (document.querySelectorAll(".toast.loading").length === 0) {
-        showToast(
-          "loading",
-          "Generation in progress...",
-          status.message || "Please wait..."
-        );
-      }
-    }
+  // Show toast if not already showing
+  if (document.querySelectorAll(".toast.loading").length === 0) {
+    const opName = isRenderOp ? "Render" : "Generation";
+    showToast(
+      "loading",
+      `${opName} in progress...`,
+      status.message || "Please wait..."
+    );
   }
 
   // Update the loading toast message
@@ -691,6 +931,14 @@ function resetRenderButton() {
     const response = await fetch("/api/status");
     const status = await response.json();
 
+    // Sync queue state from server
+    if (status.queue && status.queue.length > 0) {
+      const serverQueued = status.queue.flatMap((item) => item.quadrants);
+      setQueuedQuadrants(serverQueued);
+    } else {
+      clearQueuedQuadrants();
+    }
+
     if (status.is_generating) {
       const opName = status.status === "rendering" ? "Render" : "Generation";
       console.log(`${opName} in progress, restoring UI state...`);
@@ -702,11 +950,19 @@ function resetRenderButton() {
         }
       }
       setProcessingUI(status);
+      applyLockedStyles();
+      startStatusPolling();
+    } else if (status.queue_length > 0) {
+      // Not currently generating but have items in queue
+      console.log(`${status.queue_length} items in queue, starting polling...`);
+      applyLockedStyles();
       startStatusPolling();
     } else {
-      // Not generating/rendering - clear any stale locked state
+      // Not generating/rendering and no queue - clear any stale locked state
       clearLockedQuadrants();
     }
+
+    updateSelectionStatus();
   } catch (error) {
     console.error("Initial status check failed:", error);
   }

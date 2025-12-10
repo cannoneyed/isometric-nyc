@@ -14,7 +14,6 @@ All render pixels are outlined with a 1px solid red border.
 Usage:
   uv run python src/isometric_nyc/synthetic_data/create_omni_dataset.py
   uv run python src/isometric_nyc/synthetic_data/create_omni_dataset.py --dry-run
-  uv run python src/isometric_nyc/synthetic_data/create_omni_dataset.py --test-only
 """
 
 import argparse
@@ -434,85 +433,6 @@ def assign_generation_types(
   return assignments
 
 
-def get_test_types() -> List[str]:
-  """Get one example of each generation type for testing."""
-  return [
-    TYPE_FULL,
-    TYPE_QUADRANT_TL,
-    TYPE_QUADRANT_TR,
-    TYPE_QUADRANT_BL,
-    TYPE_QUADRANT_BR,
-    TYPE_HALF_LEFT,
-    TYPE_HALF_RIGHT,
-    TYPE_HALF_TOP,
-    TYPE_HALF_BOTTOM,
-    TYPE_MIDDLE_VERTICAL,
-    TYPE_MIDDLE_HORIZONTAL,
-    TYPE_STRIP_VERTICAL,
-    TYPE_STRIP_HORIZONTAL,
-    TYPE_RECT_INFILL,
-  ]
-
-
-def create_test_examples(test_dir: Path, rng: random.Random) -> List[dict]:
-  """
-  Create test examples showing each variant type.
-
-  Returns CSV row data.
-  """
-  gen_dir = test_dir / "generations"
-  render_dir = test_dir / "renders"
-  output_dir = test_dir / "omni"
-
-  if not gen_dir.exists() or not render_dir.exists():
-    print(f"⚠️  Test directory missing generations or renders: {test_dir}")
-    return []
-
-  output_dir.mkdir(exist_ok=True)
-
-  # Get test image pairs
-  test_pairs = []
-  for gen_path in sorted(gen_dir.glob("*.png")):
-    render_path = render_dir / gen_path.name
-    if render_path.exists():
-      test_pairs.append((gen_path.stem, gen_path, render_path))
-
-  if not test_pairs:
-    print("⚠️  No test image pairs found")
-    return []
-
-  test_types = get_test_types()
-  csv_rows: List[dict] = []
-
-  print(f"\n📋 Creating {len(test_types)} test examples...")
-
-  for i, gen_type in enumerate(test_types):
-    # Cycle through available test pairs
-    image_num, gen_path, render_path = test_pairs[i % len(test_pairs)]
-
-    img_gen = Image.open(gen_path).convert("RGB")
-    img_render = Image.open(render_path).convert("RGB")
-
-    omni_img = create_omni_image(img_gen, img_render, gen_type, rng)
-
-    # Save with type suffix
-    output_filename = f"{image_num}_{gen_type}.png"
-    output_path = output_dir / output_filename
-    omni_img.save(output_path)
-
-    csv_rows.append(
-      {
-        "omni": f"test/omni/{output_filename}",
-        "generation": f"test/generations/{image_num}.png",
-        "prompt": PROMPT,
-      }
-    )
-
-    print(f"   ✓ {output_filename}")
-
-  return csv_rows
-
-
 def main() -> None:
   parser = argparse.ArgumentParser(
     description="Create omni generation dataset combining all strategies"
@@ -546,12 +466,6 @@ def main() -> None:
     action="store_true",
     help="Print what would be done without creating files",
   )
-  parser.add_argument(
-    "--test-only",
-    action="store_true",
-    help="Only create test examples, skip main dataset",
-  )
-
   args = parser.parse_args()
 
   # Set random seed
@@ -565,15 +479,13 @@ def main() -> None:
   else:
     output_dir = dataset_dir / "omni"
 
-  test_dir = dataset_dir / "test"
-
   if not dataset_dir.exists():
     print(f"❌ Dataset directory not found: {dataset_dir}")
     sys.exit(1)
 
   # Get image pairs
   pairs = get_image_pairs(dataset_dir)
-  if not pairs and not args.test_only:
+  if not pairs:
     print("❌ No valid image pairs found in dataset")
     sys.exit(1)
 
@@ -581,10 +493,9 @@ def main() -> None:
   print("🖼️  CREATING OMNI GENERATION DATASET")
   print(f"   Dataset: {dataset_dir}")
   print(f"   Output: {output_dir}")
-  if not args.test_only:
-    print(f"   Images: {len(pairs)}")
-    print(f"   Variants per image: {args.variants}")
-    print(f"   Total examples: ~{len(pairs) * args.variants}")
+  print(f"   Images: {len(pairs)}")
+  print(f"   Variants per image: {args.variants}")
+  print(f"   Total examples: ~{len(pairs) * args.variants}")
   print("=" * 60)
 
   # Show distribution
@@ -617,29 +528,6 @@ def main() -> None:
           suffix = VARIANT_SUFFIXES[j]
           print(f"      {image_num}_{suffix}.png -> {gen_type}")
 
-    print("\nTest types:")
-    for t in get_test_types():
-      print(f"   - {t}")
-
-    sys.exit(0)
-
-  # Create test examples first
-  test_csv_rows: List[dict] = []
-  if test_dir.exists():
-    test_csv_rows = create_test_examples(test_dir, rng)
-  else:
-    print(f"⚠️  Test directory not found: {test_dir}")
-
-  if args.test_only:
-    if test_csv_rows:
-      # Write test CSV
-      test_csv_path = dataset_dir / "omni_test.csv"
-      with open(test_csv_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["omni", "generation", "prompt"])
-        writer.writeheader()
-        writer.writerows(test_csv_rows)
-      print(f"\n✅ Test CSV saved to: {test_csv_path}")
-    print("\n✨ TEST EXAMPLES COMPLETE")
     sys.exit(0)
 
   # Create output directory
@@ -690,20 +578,16 @@ def main() -> None:
     except Exception as e:
       print(f"❌ Error processing {image_num}: {e}")
 
-  # Combine with test CSV rows
-  all_csv_rows = csv_rows + test_csv_rows
-
   # Write CSV file
   csv_path = dataset_dir / "omni_v04.csv"
   with open(csv_path, "w", newline="") as f:
     writer = csv.DictWriter(f, fieldnames=["omni", "generation", "prompt"])
     writer.writeheader()
-    writer.writerows(all_csv_rows)
+    writer.writerows(csv_rows)
 
   print("\n" + "=" * 60)
   print("✨ OMNI DATASET COMPLETE")
   print(f"   Created {created_count} omni images")
-  print(f"   Test examples: {len(test_csv_rows)}")
   print(f"   CSV saved to: {csv_path}")
   print("=" * 60)
 
