@@ -1,0 +1,50 @@
+[
+  {
+    "quadrants": "(-12,0),(-11,0),(-12,1),(-11,1)",
+    "status": "done"
+  },
+  {
+    "quadrants": "(-12,3),(-11,3),(-12,4),(-11,4)",
+    "status": "done"
+  },
+  {
+    "quadrants": "(-12,6),(-11,6),(-12,7),(-11,7)",
+    "status": "done"
+  },
+  {
+    "quadrants": "(-12,-1),(-11,-1)",
+    "status": "done"
+  },
+  {
+    "quadrants": "(-12,2),(-11,2)",
+    "status": "done"
+  },
+  {
+    "quadrants": "(-12,5),(-11,5)",
+    "status": "done"
+  },
+  {
+    "quadrants": "(-10,0),(-10,1)",
+    "status": "done"
+  },
+  {
+    "quadrants": "(-10,3),(-10,4)",
+    "status": "done"
+  },
+  {
+    "quadrants": "(-10,6),(-10,7)",
+    "status": "done"
+  },
+  {
+    "quadrants": "(-10,-1)",
+    "status": "done"
+  },
+  {
+    "quadrants": "(-10,2)",
+    "status": "done"
+  },
+  {
+    "quadrants": "(-10,5)",
+    "status": "done"
+  }
+]

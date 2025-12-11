@@ -45,17 +45,14 @@ function applyLockedStyles() {
 
   console.log("applyLockedStyles - locked:", locked, "queued:", queued);
 
-  if (locked.length === 0 && queued.length === 0) {
-    console.log("applyLockedStyles - nothing to apply, early return");
-    return;
-  }
-
   // Add generating class to body only if actively generating
   if (locked.length > 0) {
     document.body.classList.add("generating");
+  } else {
+    document.body.classList.remove("generating");
   }
 
-  // Apply locked/queued style to matching tiles
+  // Apply locked/queued style to matching tiles, and REMOVE from non-matching tiles
   document.querySelectorAll(".tile").forEach((tile) => {
     const [qx, qy] = tile.dataset.coords.split(",").map(Number);
     const isLocked = locked.some(([lx, ly]) => lx === qx && ly === qy);
@@ -68,6 +65,10 @@ function applyLockedStyles() {
       console.log("Applying queued style to tile:", qx, qy);
       tile.classList.add("queued");
       tile.classList.remove("locked");
+    } else {
+      // Neither locked nor queued - remove both classes
+      tile.classList.remove("locked");
+      tile.classList.remove("queued");
     }
   });
 }
@@ -172,8 +173,18 @@ document.addEventListener("keydown", (e) => {
     case "S":
       toggleSelectTool();
       break;
+    case "w":
+    case "W":
+      toggleFixWaterTool();
+      break;
+    case "f":
+    case "F":
+      toggleWaterFillTool();
+      break;
     case "Escape":
       if (selectToolActive) toggleSelectTool();
+      if (fixWaterToolActive) cancelWaterFix();
+      if (waterFillToolActive) cancelWaterFill();
       break;
   }
 });
@@ -184,6 +195,11 @@ const selectedQuadrants = new Set();
 const MAX_SELECTION = 4;
 
 function toggleSelectTool() {
+  // Deactivate fix water tool if active
+  if (fixWaterToolActive) {
+    cancelWaterFix();
+  }
+
   selectToolActive = !selectToolActive;
   const btn = document.getElementById("selectTool");
   const tiles = document.querySelectorAll(".tile");
@@ -194,6 +210,349 @@ function toggleSelectTool() {
   } else {
     btn.classList.remove("active");
     tiles.forEach((tile) => tile.classList.remove("selectable"));
+  }
+}
+
+// Fix water tool state
+let fixWaterToolActive = false;
+let fixWaterTargetColor = null;
+let fixWaterQuadrant = null;
+
+function toggleFixWaterTool() {
+  // Deactivate select tool if active
+  if (selectToolActive) {
+    toggleSelectTool();
+  }
+
+  fixWaterToolActive = !fixWaterToolActive;
+  const btn = document.getElementById("fixWaterTool");
+  const tiles = document.querySelectorAll(".tile");
+  const selectionStatus = document.getElementById("selectionStatus");
+  const waterFixStatus = document.getElementById("waterFixStatus");
+
+  if (fixWaterToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => {
+      // Only make tiles with images selectable
+      if (tile.querySelector("img")) {
+        tile.classList.add("fix-water-selectable");
+      }
+    });
+    // Show water fix status bar, hide selection status
+    selectionStatus.style.display = "none";
+    waterFixStatus.style.display = "flex";
+    // Reset state
+    resetWaterFixState();
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => {
+      tile.classList.remove("fix-water-selectable");
+      tile.classList.remove("water-fix-selected");
+    });
+    // Hide water fix status bar, show selection status
+    selectionStatus.style.display = "flex";
+    waterFixStatus.style.display = "none";
+  }
+}
+
+function resetWaterFixState() {
+  fixWaterTargetColor = null;
+  fixWaterQuadrant = null;
+  document.getElementById("targetColorSwatch").style.background = "#333";
+  document.getElementById("targetColorSwatch").classList.remove("has-color");
+  document.getElementById("targetColorHex").textContent =
+    "Click a quadrant to pick color";
+  document.getElementById("waterFixQuadrant").textContent = "";
+  // Reset button state
+  const btn = document.getElementById("applyWaterFixBtn");
+  btn.disabled = true;
+  btn.classList.remove("loading");
+  btn.textContent = "Apply Fix";
+  document.querySelectorAll(".tile.water-fix-selected").forEach((tile) => {
+    tile.classList.remove("water-fix-selected");
+  });
+}
+
+function cancelWaterFix() {
+  if (fixWaterToolActive) {
+    toggleFixWaterTool();
+  }
+}
+
+function rgbToHex(r, g, b) {
+  return (
+    "#" +
+    [r, g, b]
+      .map((x) => {
+        const hex = x.toString(16);
+        return hex.length === 1 ? "0" + hex : hex;
+      })
+      .join("")
+      .toUpperCase()
+  );
+}
+
+function getPixelColorFromImage(img, x, y) {
+  // Create an off-screen canvas
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+
+  // Get the pixel data at the clicked position
+  const pixelData = ctx.getImageData(x, y, 1, 1).data;
+
+  return {
+    r: pixelData[0],
+    g: pixelData[1],
+    b: pixelData[2],
+    a: pixelData[3],
+  };
+}
+
+function handleFixWaterClick(tileEl, e) {
+  if (!fixWaterToolActive) return;
+
+  const img = tileEl.querySelector("img");
+  if (!img) {
+    showToast("error", "No image", "This quadrant has no generation to fix");
+    return;
+  }
+
+  // Get coordinates
+  const coords = tileEl.dataset.coords.split(",").map(Number);
+  const [qx, qy] = coords;
+
+  // Calculate click position relative to the image
+  const rect = img.getBoundingClientRect();
+  const clickX = e.clientX - rect.left;
+  const clickY = e.clientY - rect.top;
+
+  // Scale to natural image dimensions
+  const scaleX = img.naturalWidth / rect.width;
+  const scaleY = img.naturalHeight / rect.height;
+  const imgX = Math.floor(clickX * scaleX);
+  const imgY = Math.floor(clickY * scaleY);
+
+  // Ensure we're within bounds
+  if (
+    imgX < 0 ||
+    imgX >= img.naturalWidth ||
+    imgY < 0 ||
+    imgY >= img.naturalHeight
+  ) {
+    console.log("Click outside image bounds");
+    return;
+  }
+
+  try {
+    // Get the pixel color
+    const color = getPixelColorFromImage(img, imgX, imgY);
+    const hex = rgbToHex(color.r, color.g, color.b);
+
+    console.log(
+      `Picked color at (${imgX}, ${imgY}) in quadrant (${qx}, ${qy}): RGB(${color.r}, ${color.g}, ${color.b}) = ${hex}`
+    );
+
+    // Update state
+    fixWaterTargetColor = hex;
+    fixWaterQuadrant = { x: qx, y: qy };
+
+    // Update UI
+    document.getElementById("targetColorSwatch").style.background = hex;
+    document.getElementById("targetColorSwatch").classList.add("has-color");
+    document.getElementById(
+      "targetColorHex"
+    ).textContent = `${hex} — RGB(${color.r}, ${color.g}, ${color.b})`;
+    document.getElementById(
+      "waterFixQuadrant"
+    ).textContent = `Quadrant (${qx}, ${qy})`;
+    document.getElementById("applyWaterFixBtn").disabled = false;
+
+    // Update selected tile visual
+    document.querySelectorAll(".tile.water-fix-selected").forEach((tile) => {
+      tile.classList.remove("water-fix-selected");
+    });
+    tileEl.classList.add("water-fix-selected");
+
+    showToast("info", "Color picked", `Target color: ${hex} at (${qx}, ${qy})`);
+  } catch (error) {
+    console.error("Error picking color:", error);
+    showToast(
+      "error",
+      "Error picking color",
+      "Could not read pixel color. Try again."
+    );
+  }
+}
+
+async function applyWaterFix() {
+  if (!fixWaterTargetColor || !fixWaterQuadrant) {
+    showToast("error", "No color selected", "Pick a color first");
+    return;
+  }
+
+  // Default replacement color - a nice blue water color
+  const replacementColor = "#2A4A5F";
+
+  const btn = document.getElementById("applyWaterFixBtn");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  btn.textContent = "Applying...";
+
+  showToast(
+    "loading",
+    "Applying water fix...",
+    `Replacing ${fixWaterTargetColor} in (${fixWaterQuadrant.x}, ${fixWaterQuadrant.y})`
+  );
+
+  try {
+    const response = await fetch("/api/fix-water", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        x: fixWaterQuadrant.x,
+        y: fixWaterQuadrant.y,
+        target_color: fixWaterTargetColor,
+        replacement_color: replacementColor,
+      }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    if (result.success) {
+      showToast(
+        "success",
+        "Water fix applied!",
+        result.message || "Color replaced successfully"
+      );
+
+      // Refresh the specific tile image immediately with cache-busting
+      const { x, y } = fixWaterQuadrant;
+      const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+      if (tile) {
+        const img = tile.querySelector("img");
+        if (img) {
+          // Add timestamp to bust browser cache
+          const currentSrc = new URL(img.src);
+          currentSrc.searchParams.set("_t", Date.now());
+          img.src = currentSrc.toString();
+        }
+      }
+
+      // Reset the tool after a short delay
+      setTimeout(() => {
+        cancelWaterFix();
+      }, 1000);
+    } else {
+      showToast("error", "Water fix failed", result.error || "Unknown error");
+      btn.disabled = false;
+      btn.classList.remove("loading");
+      btn.textContent = "Apply Fix";
+    }
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Water fix error:", error);
+    showToast("error", "Request failed", error.message);
+    btn.disabled = false;
+    btn.classList.remove("loading");
+    btn.textContent = "Apply Fix";
+  }
+}
+
+// Water Fill tool - fills entire quadrant with water color
+let waterFillToolActive = false;
+
+function toggleWaterFillTool() {
+  // Deactivate other tools
+  if (selectToolActive) {
+    toggleSelectTool();
+  }
+  if (fixWaterToolActive) {
+    cancelWaterFix();
+  }
+
+  waterFillToolActive = !waterFillToolActive;
+  const btn = document.getElementById("waterFillTool");
+  const tiles = document.querySelectorAll(".tile");
+  const selectionStatus = document.getElementById("selectionStatus");
+  const waterFillStatus = document.getElementById("waterFillStatus");
+
+  if (waterFillToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => {
+      tile.classList.add("water-fill-selectable");
+    });
+    // Show water fill status bar, hide selection status
+    selectionStatus.style.display = "none";
+    waterFillStatus.style.display = "flex";
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => {
+      tile.classList.remove("water-fill-selectable");
+    });
+    // Hide water fill status bar, show selection status
+    selectionStatus.style.display = "flex";
+    waterFillStatus.style.display = "none";
+  }
+}
+
+function cancelWaterFill() {
+  if (waterFillToolActive) {
+    toggleWaterFillTool();
+  }
+}
+
+async function handleWaterFillClick(tileEl) {
+  if (!waterFillToolActive) return;
+
+  const coords = tileEl.dataset.coords.split(",").map(Number);
+  const [qx, qy] = coords;
+
+  // Confirm action
+  if (!confirm(`Fill quadrant (${qx}, ${qy}) entirely with water color?`)) {
+    return;
+  }
+
+  const instruction = document.getElementById("waterFillInstruction");
+  instruction.textContent = `Filling (${qx}, ${qy})...`;
+
+  showToast("loading", "Filling with water...", `Processing quadrant (${qx}, ${qy})`);
+
+  try {
+    const response = await fetch("/api/water-fill", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ x: qx, y: qy }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    if (result.success) {
+      showToast("success", "Water fill complete!", result.message);
+
+      // Refresh the tile image
+      const img = tileEl.querySelector("img");
+      if (img) {
+        const currentSrc = new URL(img.src);
+        currentSrc.searchParams.set("_t", Date.now());
+        img.src = currentSrc.toString();
+      }
+
+      instruction.textContent = "Click a quadrant to fill with water";
+    } else {
+      showToast("error", "Water fill failed", result.error || "Unknown error");
+      instruction.textContent = "Click a quadrant to fill with water";
+    }
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Water fill error:", error);
+    showToast("error", "Request failed", error.message);
+    instruction.textContent = "Click a quadrant to fill with water";
   }
 }
 
@@ -716,6 +1075,23 @@ function toggleTileSelection(tileEl, qx, qy) {
 // Setup tile click handlers
 document.querySelectorAll(".tile").forEach((tile) => {
   tile.addEventListener("click", (e) => {
+    // Handle fix water tool clicks
+    if (fixWaterToolActive) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleFixWaterClick(tile, e);
+      return;
+    }
+
+    // Handle water fill tool clicks
+    if (waterFillToolActive) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleWaterFillClick(tile);
+      return;
+    }
+
+    // Handle select tool clicks
     if (!selectToolActive) return;
     e.preventDefault();
     e.stopPropagation();
@@ -765,7 +1141,18 @@ async function checkGenerationStatus() {
     // MERGE with local state to avoid losing items in transit
     if (status.queue && status.queue.length > 0) {
       const serverQueued = status.queue.flatMap((item) => item.quadrants);
-      setQueuedQuadrants(serverQueued);
+      // Actually merge: keep local items that aren't currently being generated
+      const localQueued = getQueuedQuadrants();
+      const locked = getLockedQuadrants();
+      // Keep local items not in server queue and not currently locked (generating)
+      const localOnly = localQueued.filter(
+        ([lx, ly]) =>
+          !serverQueued.some(([sx, sy]) => sx === lx && sy === ly) &&
+          !locked.some(([gx, gy]) => gx === lx && gy === ly)
+      );
+      // Merge: server queue + local-only items (that aren't generating)
+      const merged = [...serverQueued, ...localOnly];
+      setQueuedQuadrants(merged);
     } else if (status.status === "idle" && !status.is_generating) {
       // Only clear queue when truly idle (no race condition with pending requests)
       clearQueuedQuadrants();

@@ -1,359 +1,104 @@
 """
-Generate pixel art for a tile using the Oxen.ai model.
+Generate pixel art for a tile using the Oxen.ai omni model.
 
-This script generates pixel art for a tile at a specific (x, y) coordinate.
-It handles:
-1. Rendering quadrants if they don't exist
-2. Stitching renders and neighbor generations for infill
-3. Calling the Oxen API to generate pixel art
-4. Saving generations to the database and filesystem
+This script generates pixel art for quadrants at specific coordinates.
+It uses the generation library from generate_omni.py, same as the web app.
 
 Usage:
-  uv run python src/isometric_nyc/e2e_generation/generate_tile.py <generation_dir> <x> <y>
+  uv run python src/isometric_nyc/e2e_generation/generate_tile_omni.py <generation_dir> <x> <y>
 
-Where x and y are the tile coordinates (tile at position x, y has its top-left
-quadrant at quadrant position (x, y)).
+Where x and y are the quadrant coordinates to generate.
+
+With --target-position, you can specify which quadrant in a 2x2 tile context
+should be generated:
+  uv run python src/isometric_nyc/e2e_generation/generate_tile_omni.py <gen_dir> 0 0 -t br
+
+This generates quadrant (0,0) positioned at bottom-right, using (-1,-1), (0,-1), (-1,0)
+as context quadrants.
 """
 
 import argparse
-import os
 import sqlite3
 from pathlib import Path
-from urllib.parse import urlencode
 
-import requests
-from dotenv import load_dotenv
-from PIL import Image
-from playwright.sync_api import sync_playwright
-
+from isometric_nyc.e2e_generation.generate_omni import run_generation_for_quadrants
 from isometric_nyc.e2e_generation.shared import (
   DEFAULT_WEB_PORT,
   WEB_DIR,
-  check_all_quadrants_generated,
-  check_all_quadrants_rendered,
-  ensure_quadrant_exists,
   get_generation_config,
-  get_quadrant_render,
-  image_to_png_bytes,
-  png_bytes_to_image,
-  save_quadrant_generation,
-  save_quadrant_render,
-  split_tile_into_quadrants,
   start_web_server,
-  upload_to_gcs,
 )
 
-# Oxen API Model Constants
-OMNI_MODEL_ID = "cannoneyed-gentle-gold-antlion"
-
-
-def call_oxen_api(
-  image_url: str,
-  api_key: str,
-) -> str:
-  """
-  Call the Oxen API to generate pixel art.
-
-  Args:
-    image_url: Public URL of the input image
-    api_key: Oxen API key
-
-  Returns:
-    URL of the generated image
-  """
-  endpoint = "https://hub.oxen.ai/api/images/edit"
-
-  headers = {
-    "Authorization": f"Bearer {api_key}",
-    "Content-Type": "application/json",
-  }
-
-  # We're experimenting with using *only* the omni model
-  model = OMNI_MODEL_ID
-  prompt = "Fill in the outlined section with the missing pixels corresponding to the <isometric nyc pixel art> style, removing the border and exactly following the shape/style/structure of the surrounding image (if present)."
-
-  payload = {
-    "model": model,
-    "input_image": image_url,
-    "prompt": prompt,
-    "num_inference_steps": 28,
-  }
-
-  print("   🤖 Calling Oxen API...")
-  print(f"      Model: {payload['model']}")
-  print(f"      Prompt: {payload['prompt']}")
-  print(f"      Image: {image_url}")
-
-  response = requests.post(endpoint, headers=headers, json=payload, timeout=300)
-  response.raise_for_status()
-
-  result = response.json()
-
-  if "images" in result and len(result["images"]) > 0:
-    return result["images"][0]["url"]
-  elif "url" in result:
-    return result["url"]
-  elif "image_url" in result:
-    return result["image_url"]
-  elif "output" in result:
-    return result["output"]
-  else:
-    raise ValueError(f"Unexpected API response format: {result}")
-
-
-def download_image(url: str, output_path: Path) -> None:
-  """Download an image from a URL and save it."""
-  print("   📥 Downloading generated image...")
-
-  response = requests.get(url, timeout=120)
-  response.raise_for_status()
-
-  with open(output_path, "wb") as f:
-    f.write(response.content)
-
-
 # =============================================================================
-# Rendering Logic
-# =============================================================================
-def render_tile_quadrants(
-  conn: sqlite3.Connection,
-  config: dict,
-  x: int,
-  y: int,
-  renders_dir: Path,
-  port: int,
-) -> bool:
-  """
-  Render a tile and save its 4 quadrants to the database.
-
-  Args:
-    conn: Database connection
-    config: Generation config
-    x: Tile x coordinate (top-left quadrant x)
-    y: Tile y coordinate (top-left quadrant y)
-    renders_dir: Directory to save renders
-    port: Web server port
-
-  Returns:
-    True if successful
-  """
-  # Ensure the top-left quadrant exists
-  quadrant = ensure_quadrant_exists(conn, config, x, y)
-
-  print(f"   🎨 Rendering tile at ({x}, {y})...")
-  print(f"      Anchor: {quadrant['lat']:.6f}, {quadrant['lng']:.6f}")
-
-  # Build URL for rendering
-  params = {
-    "export": "true",
-    "lat": quadrant["lat"],
-    "lon": quadrant["lng"],
-    "width": config["width_px"],
-    "height": config["height_px"],
-    "azimuth": config["camera_azimuth_degrees"],
-    "elevation": config["camera_elevation_degrees"],
-    "view_height": config.get("view_height_meters", 200),
-  }
-  query_string = urlencode(params)
-  url = f"http://localhost:{port}/?{query_string}"
-
-  # Render using Playwright
-  output_path = renders_dir / f"render_{x}_{y}.png"
-
-  with sync_playwright() as p:
-    browser = p.chromium.launch(
-      headless=True,
-      args=[
-        "--enable-webgl",
-        "--use-gl=angle",
-        "--ignore-gpu-blocklist",
-      ],
-    )
-
-    context = browser.new_context(
-      viewport={"width": config["width_px"], "height": config["height_px"]},
-      device_scale_factor=1,
-    )
-    page = context.new_page()
-
-    page.goto(url, wait_until="networkidle")
-
-    try:
-      page.wait_for_function("window.TILES_LOADED === true", timeout=60000)
-    except Exception:
-      print("      ⚠️  Timeout waiting for tiles, continuing anyway...")
-
-    page.screenshot(path=str(output_path))
-
-    page.close()
-    context.close()
-    browser.close()
-
-  print(f"      ✓ Saved full tile to {output_path.name}")
-
-  # Split into quadrants and save to database
-  tile_image = Image.open(output_path)
-  quadrant_images = split_tile_into_quadrants(tile_image)
-
-  for (dx, dy), quad_img in quadrant_images.items():
-    qx, qy = x + dx, y + dy
-    png_bytes = image_to_png_bytes(quad_img)
-
-    if save_quadrant_render(conn, config, qx, qy, png_bytes):
-      print(f"      ✓ Saved quadrant ({qx}, {qy}) to DB")
-    else:
-      print(f"      ⚠️  Failed to save quadrant ({qx}, {qy})")
-
-  return True
-
-
-# =============================================================================
-# Infill Image Creation
+# Target Position Utilities
 # =============================================================================
 
-
-def get_quadrant_generation_local(
-  conn: sqlite3.Connection, x: int, y: int
-) -> bytes | None:
-  """Get the generation bytes for a quadrant at position (x, y)."""
-  cursor = conn.cursor()
-  cursor.execute(
-    "SELECT generation FROM quadrants WHERE quadrant_x = ? AND quadrant_y = ?",
-    (x, y),
-  )
-  row = cursor.fetchone()
-  return row[0] if row and row[0] else None
+# Mapping from position name to (dx, dy) offset within tile
+TARGET_POSITION_OFFSETS = {
+  "tl": (0, 0),  # top-left
+  "tr": (1, 0),  # top-right
+  "bl": (0, 1),  # bottom-left
+  "br": (1, 1),  # bottom-right
+}
 
 
-def create_infill_image(
-  conn: sqlite3.Connection, x: int, y: int
-) -> tuple[Image.Image, list[tuple[int, int]]]:
+def parse_target_position(position: str) -> tuple[int, int]:
   """
-  Create an infill image for a tile at (x, y).
-
-  The infill image is a 2x2 tile (same size as output) where:
-  - Quadrants that already have generations use those generations
-  - Quadrants that need generation use renders
-  - A 1px red border is drawn around quadrants using renders
-
-  Due to 50% tile overlap, some quadrants in the current tile may already
-  have generations from previously generated tiles.
+  Parse a target position string into (dx, dy) offset within the tile.
 
   Args:
-    conn: Database connection
-    x: Tile x coordinate (top-left quadrant x)
-    y: Tile y coordinate (top-left quadrant y)
+    position: One of "tl", "tr", "bl", "br"
 
   Returns:
-    Tuple of (infill_image, render_positions) where render_positions is a list
-    of (dx, dy) positions that are using renders (need generation).
+    Tuple of (dx, dy) offset where dx=0 is left, dx=1 is right,
+    dy=0 is top, dy=1 is bottom.
+
+  Raises:
+    ValueError: If position is invalid
   """
-  # Get dimensions from one of the renders
-  sample_render = get_quadrant_render(conn, x, y)
-  if sample_render is None:
-    raise ValueError(f"Missing render for quadrant ({x}, {y})")
-  sample_img = png_bytes_to_image(sample_render)
-  quad_w, quad_h = sample_img.size
-
-  # Create tile-sized infill image
-  infill = Image.new("RGBA", (quad_w * 2, quad_h * 2))
-
-  # Track which positions are using renders (need generation)
-  render_positions = []
-
-  # For each quadrant in the tile
-  for dx in range(2):
-    for dy in range(2):
-      qx, qy = x + dx, y + dy
-      pos_x = dx * quad_w
-      pos_y = dy * quad_h
-
-      # Check if this quadrant already has a generation
-      gen_bytes = get_quadrant_generation_local(conn, qx, qy)
-
-      if gen_bytes is not None:
-        # Use the existing generation
-        img = png_bytes_to_image(gen_bytes)
-        infill.paste(img, (pos_x, pos_y))
-        print(f"      ({qx}, {qy}): using existing generation")
-      else:
-        # Use the render
-        render_bytes = get_quadrant_render(conn, qx, qy)
-        if render_bytes is None:
-          raise ValueError(f"Missing render for quadrant ({qx}, {qy})")
-        img = png_bytes_to_image(render_bytes)
-        infill.paste(img, (pos_x, pos_y))
-        render_positions.append((dx, dy))
-        print(f"      ({qx}, {qy}): using render (needs generation)")
-
-  return infill, render_positions
+  position = position.lower().strip()
+  if position not in TARGET_POSITION_OFFSETS:
+    valid = ", ".join(TARGET_POSITION_OFFSETS.keys())
+    raise ValueError(f"Invalid target position '{position}'. Must be one of: {valid}")
+  return TARGET_POSITION_OFFSETS[position]
 
 
-def draw_red_border(
-  image: Image.Image,
-  render_positions: list[tuple[int, int]],
-  quad_w: int,
-  quad_h: int,
-  border_width: int = 1,
-) -> Image.Image:
+def calculate_tile_anchor(
+  target_x: int, target_y: int, target_position: str
+) -> tuple[int, int]:
   """
-  Draw a red border around the quadrants that need generation.
+  Calculate the tile anchor (top-left quadrant) given a target quadrant and its position.
+
+  For example, if target is (0, 0) and target_position is "br" (bottom-right),
+  then the tile anchor is (-1, -1) because:
+  - Tile contains: (-1, -1), (0, -1), (-1, 0), (0, 0)
+  - Target (0, 0) is at offset (1, 1) from anchor (-1, -1)
 
   Args:
-    image: The infill image to draw on
-    render_positions: List of (dx, dy) positions that need generation
-    quad_w: Width of each quadrant
-    quad_h: Height of each quadrant
-    border_width: Width of the border in pixels
+    target_x: X coordinate of the target quadrant
+    target_y: Y coordinate of the target quadrant
+    target_position: Position of target within tile ("tl", "tr", "bl", "br")
 
   Returns:
-    Image with red border drawn
+    Tuple of (anchor_x, anchor_y) for the tile's top-left quadrant
   """
-  if not render_positions:
-    return image
+  dx, dy = parse_target_position(target_position)
+  return (target_x - dx, target_y - dy)
 
-  # Convert to RGBA if needed
-  if image.mode != "RGBA":
-    image = image.convert("RGBA")
 
-  # Create a copy to draw on
-  result = image.copy()
+def get_tile_quadrants(anchor_x: int, anchor_y: int) -> list[tuple[int, int]]:
+  """
+  Get all 4 quadrant coordinates for a tile anchored at (anchor_x, anchor_y).
 
-  # Find the bounding box of all render positions
-  min_dx = min(p[0] for p in render_positions)
-  max_dx = max(p[0] for p in render_positions)
-  min_dy = min(p[1] for p in render_positions)
-  max_dy = max(p[1] for p in render_positions)
-
-  # Calculate pixel coordinates of the bounding box
-  left = min_dx * quad_w
-  right = (max_dx + 1) * quad_w
-  top = min_dy * quad_h
-  bottom = (max_dy + 1) * quad_h
-
-  # Draw red border (1px lines)
-  red = (255, 0, 0, 255)
-
-  # Draw each border line
-  for i in range(border_width):
-    # Top edge
-    for px in range(left, right):
-      if 0 <= top + i < result.height:
-        result.putpixel((px, top + i), red)
-    # Bottom edge
-    for px in range(left, right):
-      if 0 <= bottom - 1 - i < result.height:
-        result.putpixel((px, bottom - 1 - i), red)
-    # Left edge
-    for py in range(top, bottom):
-      if 0 <= left + i < result.width:
-        result.putpixel((left + i, py), red)
-    # Right edge
-    for py in range(top, bottom):
-      if 0 <= right - 1 - i < result.width:
-        result.putpixel((right - 1 - i, py), red)
-
-  return result
+  Returns:
+    List of (x, y) tuples for TL, TR, BL, BR quadrants
+  """
+  return [
+    (anchor_x, anchor_y),  # TL
+    (anchor_x + 1, anchor_y),  # TR
+    (anchor_x, anchor_y + 1),  # BL
+    (anchor_x + 1, anchor_y + 1),  # BR
+  ]
 
 
 # =============================================================================
@@ -361,49 +106,30 @@ def draw_red_border(
 # =============================================================================
 
 
-def generate_tile(
+def generate_tile_omni(
   generation_dir: Path,
   x: int,
   y: int,
   port: int = DEFAULT_WEB_PORT,
-  bucket_name: str = "isometric-nyc-infills",
-  overwrite: bool = False,
-  debug: bool = False,
-) -> Path | None:
+  target_position: str | None = None,
+) -> bool:
   """
-  Generate pixel art for a tile at position (x, y).
-
-  Steps:
-  1. Check if renders exist for all 4 quadrants; render if needed
-  2. Check if generations already exist; skip if not overwriting
-  3. Create infill image (generated quadrants + renders with red border)
-  4. Upload to GCS and call Oxen API (unless debug mode)
-  5. Save generation to database and filesystem
+  Generate pixel art for quadrant(s) using the omni model.
 
   Args:
     generation_dir: Path to the generation directory
-    x: Tile x coordinate
-    y: Tile y coordinate
-    port: Web server port
-    bucket_name: GCS bucket for uploads
-    overwrite: If True, regenerate even if generations exist
-    debug: If True, skip model inference and just save the infill
+    x: Quadrant x coordinate (or target x if target_position is specified)
+    y: Quadrant y coordinate (or target y if target_position is specified)
+    port: Web server port for rendering
+    target_position: Position of target quadrant within the 2x2 tile.
+      One of "tl" (top-left), "tr" (top-right), "bl" (bottom-left), "br" (bottom-right).
+      If None (default), generates all 4 quadrants in the tile starting at (x, y).
+      If specified, (x, y) is the target quadrant to generate, positioned within
+      the 2x2 tile context.
 
   Returns:
-    Path to the generated/infill image, or None if skipped
+    True if generation succeeded, False otherwise
   """
-  load_dotenv()
-
-  if not debug:
-    api_key = os.getenv("OXEN_OMNI_v04_API_KEY")
-    if not api_key:
-      raise ValueError(
-        "OXEN_OMNI_v04_API_KEY environment variable not set. "
-        "Please add it to your .env file."
-      )
-  else:
-    api_key = None
-
   db_path = generation_dir / "quadrants.db"
   if not db_path.exists():
     raise FileNotFoundError(f"Database not found: {db_path}")
@@ -413,105 +139,55 @@ def generate_tile(
   try:
     config = get_generation_config(conn)
 
-    # Create directories
-    renders_dir = generation_dir / "renders"
-    renders_dir.mkdir(exist_ok=True)
-    infills_dir = generation_dir / "infills"
-    infills_dir.mkdir(exist_ok=True)
-    generations_dir = generation_dir / "generations"
-    generations_dir.mkdir(exist_ok=True)
+    # Determine which quadrants to generate
+    if target_position is not None:
+      # Generate only the target quadrant, using surrounding context
+      tile_x, tile_y = calculate_tile_anchor(x, y, target_position)
+      quadrants_to_generate = [(x, y)]
 
-    print(f"\n{'=' * 60}")
-    print(f"🎯 Generating tile at ({x}, {y})" + (" [DEBUG MODE]" if debug else ""))
-    print(f"{'=' * 60}")
-
-    # Step 1: Ensure all quadrants are rendered
-    print("\n📋 Step 1: Checking renders...")
-    if not check_all_quadrants_rendered(conn, x, y):
-      print("   Some quadrants need rendering...")
-      render_tile_quadrants(conn, config, x, y, renders_dir, port)
-    else:
-      print("   ✓ All quadrants already rendered")
-
-    # Step 2: Check if we should skip (not in debug mode)
-    if not debug and not overwrite and check_all_quadrants_generated(conn, x, y):
-      print("\n⏭️  Skipping - all quadrants already generated (use --overwrite)")
-      return None
-
-    # Step 3: Create infill image
-    print("\n📋 Step 2: Creating infill image...")
-    print("   Checking quadrant status:")
-    infill_image, render_positions = create_infill_image(conn, x, y)
-
-    # Get quadrant dimensions for border drawing
-    sample_render = get_quadrant_render(conn, x, y)
-    sample_img = png_bytes_to_image(sample_render)
-    quad_w, quad_h = sample_img.size
-
-    # Draw red border around the render (non-generated) portion
-    if render_positions:
-      print(
-        f"\n   Drawing red border around {len(render_positions)} render quadrant(s)"
-      )
-      infill_image = draw_red_border(
-        infill_image, render_positions, quad_w, quad_h, border_width=1
-      )
-
-    # Save infill image to disk
-    infill_path = infills_dir / f"infill_{x}_{y}.png"
-    infill_image.save(infill_path)
-    print(f"   ✓ Saved infill to {infill_path.name}")
-
-    # If debug mode, stop here
-    if debug:
       print(f"\n{'=' * 60}")
-      print("🔍 DEBUG MODE - Skipping model inference")
-      print(f"   Infill saved to: {infill_path}")
+      print(f"🎯 Generating quadrant ({x}, {y}) at position '{target_position}'")
+      print(f"   Tile anchor: ({tile_x}, {tile_y})")
+      print("   Context quadrants: ", end="")
+      tile_quads = get_tile_quadrants(tile_x, tile_y)
+      for qx, qy in tile_quads:
+        is_target = (qx, qy) == (x, y)
+        marker = " [TARGET]" if is_target else ""
+        print(f"({qx},{qy}){marker}", end=" ")
+      print()
       print(f"{'=' * 60}")
-      return infill_path
+    else:
+      # Generate all 4 quadrants in the tile (default behavior)
+      quadrants_to_generate = get_tile_quadrants(x, y)
 
-    # Step 4: Upload and generate
-    print("\n📋 Step 3: Generating pixel art...")
-    image_url = upload_to_gcs(infill_path, bucket_name)
+      print(f"\n{'=' * 60}")
+      print(f"🎯 Generating tile at ({x}, {y})")
+      print(f"   Quadrants: {quadrants_to_generate}")
+      print(f"{'=' * 60}")
 
-    generated_url = call_oxen_api(
-      image_url=image_url,
-      api_key=api_key,
+    # Create status callback for progress updates
+    def status_callback(status: str, message: str) -> None:
+      print(f"   [{status}] {message}")
+
+    # Run generation using the shared library
+    result = run_generation_for_quadrants(
+      conn=conn,
+      config=config,
+      selected_quadrants=quadrants_to_generate,
+      port=port,
+      status_callback=status_callback,
     )
 
-    # Download result
-    generation_path = generations_dir / f"{x}_{y}.png"
-    download_image(generated_url, generation_path)
-    print(f"   ✓ Downloaded generation to {generation_path.name}")
-
-    # Step 5: Extract quadrants and save to database
-    print("\n📋 Step 4: Saving to database...")
-    generation_image = Image.open(generation_path)
-
-    # Split into quadrants and save (only the ones that needed generation)
-    quadrant_images = split_tile_into_quadrants(generation_image)
-
-    for (dx, dy), quad_img in quadrant_images.items():
-      # Only save quadrants that were using renders (needed generation)
-      if (dx, dy) in render_positions:
-        qx, qy = x + dx, y + dy
-        png_bytes = image_to_png_bytes(quad_img)
-
-        if save_quadrant_generation(conn, config, qx, qy, png_bytes):
-          print(f"   ✓ Saved generation for quadrant ({qx}, {qy})")
-        else:
-          print(f"   ⚠️  Failed to save generation for quadrant ({qx}, {qy})")
-      else:
-        qx, qy = x + dx, y + dy
-        print(f"   ⏭️  Skipping quadrant ({qx}, {qy}) - already had generation")
-
-    print(f"\n{'=' * 60}")
-    print("✅ Generation complete!")
-    print(f"   Infill: {infill_path}")
-    print(f"   Generation: {generation_path}")
-    print(f"{'=' * 60}")
-
-    return generation_path
+    if result["success"]:
+      print(f"\n{'=' * 60}")
+      print(f"✅ Generation complete: {result['message']}")
+      print(f"{'=' * 60}")
+      return True
+    else:
+      print(f"\n{'=' * 60}")
+      print(f"❌ Generation failed: {result['error']}")
+      print(f"{'=' * 60}")
+      return False
 
   finally:
     conn.close()
@@ -519,7 +195,7 @@ def generate_tile(
 
 def main():
   parser = argparse.ArgumentParser(
-    description="Generate pixel art for a tile using the Oxen API."
+    description="Generate pixel art for a tile using the Oxen API (omni model)."
   )
   parser.add_argument(
     "generation_dir",
@@ -529,12 +205,12 @@ def main():
   parser.add_argument(
     "x",
     type=int,
-    help="Tile x coordinate",
+    help="Quadrant x coordinate (tile anchor x, or target x if --target-position is used)",
   )
   parser.add_argument(
     "y",
     type=int,
-    help="Tile y coordinate",
+    help="Quadrant y coordinate (tile anchor y, or target y if --target-position is used)",
   )
   parser.add_argument(
     "--port",
@@ -543,24 +219,21 @@ def main():
     help=f"Web server port (default: {DEFAULT_WEB_PORT})",
   )
   parser.add_argument(
-    "--bucket",
-    default="isometric-nyc-infills",
-    help="GCS bucket name for uploading images",
-  )
-  parser.add_argument(
     "--no-start-server",
     action="store_true",
     help="Don't start web server (assume it's already running)",
   )
   parser.add_argument(
-    "--overwrite",
-    action="store_true",
-    help="Regenerate even if generations already exist",
-  )
-  parser.add_argument(
-    "--debug",
-    action="store_true",
-    help="Debug mode: skip model inference and just save the infill image",
+    "--target-position",
+    "-t",
+    choices=["tl", "tr", "bl", "br"],
+    help=(
+      "Position of target quadrant (x,y) within the 2x2 tile context. "
+      "tl=top-left, tr=top-right, bl=bottom-left, br=bottom-right. "
+      "If specified, (x,y) is the target to generate and surrounding quadrants "
+      "provide context. If not specified, (x,y) is the tile anchor and all "
+      "4 quadrants are generated."
+    ),
   )
 
   args = parser.parse_args()
@@ -581,16 +254,14 @@ def main():
     if not args.no_start_server:
       web_server = start_web_server(WEB_DIR, args.port)
 
-    result = generate_tile(
+    success = generate_tile_omni(
       generation_dir,
       args.x,
       args.y,
       args.port,
-      args.bucket,
-      args.overwrite,
-      args.debug,
+      args.target_position,
     )
-    return 0 if result else 1
+    return 0 if success else 1
 
   except FileNotFoundError as e:
     print(f"❌ Error: {e}")

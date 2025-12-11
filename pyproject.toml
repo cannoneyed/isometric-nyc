@@ -54,6 +54,7 @@ ignore = ["E501"]
 
 [dependency-groups]
 dev = [
+    "pytest>=9.0.2",
     "ruff>=0.14.5",
 ]
 

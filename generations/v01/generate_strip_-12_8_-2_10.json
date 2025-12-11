@@ -1,0 +1,59 @@
+[
+  {
+    "quadrants": "(-12,9),(-11,9),(-12,10),(-11,10)",
+    "status": "done"
+  },
+  {
+    "quadrants": "(-9,9),(-8,9),(-9,10),(-8,10)",
+    "status": "done"
+  },
+  {
+    "quadrants": "(-6,9),(-5,9),(-6,10),(-5,10)",
+    "status": "done"
+  },
+  {
+    "quadrants": "(-3,9),(-2,9),(-3,10),(-2,10)",
+    "status": "error",
+    "error": "Full tile (2x2) selection cannot have generated neighbors (would create seams)"
+  },
+  {
+    "quadrants": "(-10,9),(-10,10)",
+    "status": "pending"
+  },
+  {
+    "quadrants": "(-7,9),(-7,10)",
+    "status": "pending"
+  },
+  {
+    "quadrants": "(-4,9),(-4,10)",
+    "status": "pending"
+  },
+  {
+    "quadrants": "(-12,8),(-11,8)",
+    "status": "pending"
+  },
+  {
+    "quadrants": "(-9,8),(-8,8)",
+    "status": "pending"
+  },
+  {
+    "quadrants": "(-6,8),(-5,8)",
+    "status": "pending"
+  },
+  {
+    "quadrants": "(-3,8),(-2,8)",
+    "status": "pending"
+  },
+  {
+    "quadrants": "(-10,8)",
+    "status": "pending"
+  },
+  {
+    "quadrants": "(-7,8)",
+    "status": "pending"
+  },
+  {
+    "quadrants": "(-4,8)",
+    "status": "pending"
+  }
+]

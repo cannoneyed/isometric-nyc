@@ -115,13 +115,12 @@ def parse_quadrant_list(s: str) -> list[tuple[int, int]]:
 # =============================================================================
 
 
-def call_oxen_api(image_url: str, api_key: str) -> str:
+def call_oxen_api(image_url: str) -> str:
   """
   Call the Oxen API to generate pixel art.
 
   Args:
       image_url: Public URL of the input template image
-      api_key: Oxen API key
 
   Returns:
       URL of the generated image
@@ -131,6 +130,9 @@ def call_oxen_api(image_url: str, api_key: str) -> str:
       ValueError: If the response format is unexpected
   """
   endpoint = "https://hub.oxen.ai/api/images/edit"
+
+  model_id = OMNI_WATER_V2_MODEL_ID
+  api_key = os.getenv("OXEN_OMNI_v04_WATER_V2_API_KEY")
 
   headers = {
     "Authorization": f"Bearer {api_key}",
@@ -144,13 +146,13 @@ def call_oxen_api(image_url: str, api_key: str) -> str:
   )
 
   payload = {
-    "model": OMNI_WATER_V2_MODEL_ID,
+    "model": model_id,
     "input_image": image_url,
     "prompt": prompt,
     "num_inference_steps": 28,
   }
 
-  print(f"   🤖 Calling Oxen API with model {OMNI_WATER_V2_MODEL_ID}...")
+  print(f"   🤖 Calling Oxen API with model {model_id}...")
   response = requests.post(endpoint, headers=headers, json=payload, timeout=300)
   response.raise_for_status()
 
@@ -324,15 +326,6 @@ def run_generation_for_quadrants(
 
   update_status("validating", "Checking API key...")
 
-  # Check for API key
-  api_key = os.getenv("OXEN_OMNI_v04_WATER_V2_API_KEY")
-  if not api_key:
-    update_status("error", "OXEN_OMNI_v04_WATER_V2_API_KEY not set")
-    return {
-      "success": False,
-      "error": "OXEN_OMNI_v04_WATER_V2_API_KEY environment variable not set",
-    }
-
   # Create helper functions for validation
   def has_generation_in_db(qx: int, qy: int) -> bool:
     gen = shared_get_quadrant_generation(conn, qx, qy)
@@ -417,7 +410,7 @@ def run_generation_for_quadrants(
 
     update_status("generating", "Calling AI model (this may take a minute)...")
     print("🤖 Calling Oxen API...")
-    generated_url = call_oxen_api(image_url, api_key)
+    generated_url = call_oxen_api(image_url)
 
     update_status("saving", "Downloading and saving results...")
     print("📥 Downloading generated image...")

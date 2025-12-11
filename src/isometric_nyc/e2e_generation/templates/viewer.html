@@ -108,6 +108,44 @@
               </svg>
               Select
             </button>
+            <button
+              id="fixWaterTool"
+              class="tool-btn"
+              onclick="toggleFixWaterTool()"
+              title="Fix water color (W)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+              </svg>
+              Fix Water
+            </button>
+            <button
+              id="waterFillTool"
+              class="tool-btn"
+              onclick="toggleWaterFillTool()"
+              title="Fill quadrant with water (F)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                <path d="M12 8v8"></path>
+                <path d="M8 12h8"></path>
+              </svg>
+              Water Fill
+            </button>
           </div>
         </div>
         <div class="toolbar-info">
@@ -149,6 +187,43 @@
           disabled
         >
           Generate
+        </button>
+      </div>
+      <div class="water-fix-status" id="waterFixStatus" style="display: none">
+        <span class="water-fix-label">Target Color:</span>
+        <span class="color-swatch" id="targetColorSwatch"></span>
+        <span class="color-hex" id="targetColorHex"
+          >Click a quadrant to pick color</span
+        >
+        <span class="water-fix-quadrant" id="waterFixQuadrant"></span>
+        <button
+          id="applyWaterFixBtn"
+          class="apply-water-fix-btn"
+          onclick="applyWaterFix()"
+          disabled
+        >
+          Apply Fix
+        </button>
+        <button
+          id="cancelWaterFixBtn"
+          class="cancel-water-fix-btn"
+          onclick="cancelWaterFix()"
+        >
+          Cancel
+        </button>
+      </div>
+      <div class="water-fill-status" id="waterFillStatus" style="display: none">
+        <span class="water-fill-label">Water Fill:</span>
+        <span class="color-swatch water-color-preview"></span>
+        <span class="water-fill-instruction" id="waterFillInstruction"
+          >Click a quadrant to fill with water</span
+        >
+        <button
+          id="cancelWaterFillBtn"
+          class="cancel-water-fix-btn"
+          onclick="cancelWaterFill()"
+        >
+          Cancel
         </button>
       </div>
     </div>

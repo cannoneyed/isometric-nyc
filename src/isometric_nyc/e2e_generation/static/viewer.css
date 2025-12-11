@@ -564,3 +564,145 @@ body.generating .tile.queued.selectable {
     transform: rotate(360deg);
   }
 }
+
+/* Water fix tool styles */
+.water-fix-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: #60a5fa;
+  margin-top: 8px;
+}
+
+.water-fix-label {
+  color: #93c5fd;
+  font-weight: 500;
+}
+
+.color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3), inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+  background: #333;
+}
+
+.color-swatch.has-color {
+  cursor: pointer;
+}
+
+.color-hex {
+  font-family: "SF Mono", "Monaco", "Inconsolata", monospace;
+  font-size: 0.75rem;
+  color: #93c5fd;
+  min-width: 180px;
+}
+
+.water-fix-quadrant {
+  color: #60a5fa;
+  font-size: 0.7rem;
+}
+
+.apply-water-fix-btn {
+  padding: 4px 12px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+  margin-left: auto;
+}
+
+.apply-water-fix-btn:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.apply-water-fix-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+.apply-water-fix-btn.loading {
+  background: #666;
+  cursor: wait;
+}
+
+.cancel-water-fix-btn {
+  padding: 4px 8px;
+  background: #4b5563;
+  color: #d1d5db;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  transition: all 0.2s;
+}
+
+.cancel-water-fix-btn:hover {
+  background: #6b7280;
+}
+
+/* Fix water tool active state */
+.tile.fix-water-selectable {
+  cursor: crosshair;
+}
+
+.tile.fix-water-selectable:hover {
+  outline: 2px solid #3b82f6;
+  outline-offset: -2px;
+}
+
+.tile.water-fix-selected {
+  outline: 3px solid #3b82f6;
+  outline-offset: -3px;
+  z-index: 10;
+}
+
+/* Water fill tool styles */
+.water-fill-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: rgba(74, 99, 114, 0.15);
+  border: 1px solid rgba(74, 99, 114, 0.4);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: #7ba3b8;
+  margin-top: 8px;
+}
+
+.water-fill-label {
+  color: #93c5fd;
+  font-weight: 500;
+}
+
+.water-color-preview {
+  background: #4A6372 !important;
+}
+
+.water-fill-instruction {
+  color: #7ba3b8;
+}
+
+.tile.water-fill-selectable {
+  cursor: pointer;
+}
+
+.tile.water-fill-selectable:hover {
+  outline: 2px solid #4A6372;
+  outline-offset: -2px;
+}
