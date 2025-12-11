@@ -163,7 +163,11 @@ map_data/**/*.zip
 # Exported view images
 exports/
 
+# Web app tiles
+src/app/public/tiles/
+
 # Infill template images
 **/infill_*.png
+
 # Temporary generated images
 generations/**/*.png

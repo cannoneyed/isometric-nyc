@@ -1,4 +1,4 @@
-import type { ViewState } from '../App';
+import type { ViewState } from "../App";
 
 interface TileInfoProps {
   hoveredTile: { x: number; y: number } | null;
@@ -13,7 +13,7 @@ export function TileInfo({ hoveredTile, viewState }: TileInfoProps) {
   const worldY = hoveredTile ? hoveredTile.y * 512 : 0;
 
   return (
-    <div className={`panel tile-info ${isVisible ? 'visible' : ''}`}>
+    <div className={`panel tile-info ${isVisible ? "visible" : ""}`}>
       <div className="panel-header">
         <span className="panel-title">Tile Info</span>
       </div>
@@ -21,22 +21,28 @@ export function TileInfo({ hoveredTile, viewState }: TileInfoProps) {
       <div className="tile-coords">
         <div className="coord">
           <span className="coord-label">X</span>
-          <span className="coord-value">{hoveredTile?.x ?? '—'}</span>
+          <span className="coord-value">{hoveredTile?.x ?? "—"}</span>
         </div>
         <div className="coord">
           <span className="coord-label">Y</span>
-          <span className="coord-value">{hoveredTile?.y ?? '—'}</span>
+          <span className="coord-value">{hoveredTile?.y ?? "—"}</span>
         </div>
       </div>
 
       {hoveredTile && (
-        <div style={{ marginTop: 12, fontSize: 10, color: 'var(--color-text-muted)' }}>
+        <div
+          style={{
+            marginTop: 12,
+            fontSize: 10,
+            color: "var(--color-text-muted)",
+          }}
+        >
           World: ({worldX}, {worldY})
           <br />
-          View center: ({Math.round(viewState.target[0])}, {Math.round(viewState.target[1])})
+          View center: ({Math.round(viewState.target[0])},{" "}
+          {Math.round(viewState.target[1])})
         </div>
       )}
     </div>
   );
 }
-

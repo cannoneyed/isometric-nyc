@@ -14,7 +14,8 @@ export function ControlPanel({
   // Convert light direction to azimuth/elevation for UI
   const [lx, ly, lz] = lightDirection;
   const azimuth = Math.atan2(ly, lx) * (180 / Math.PI);
-  const elevation = Math.atan2(lz, Math.sqrt(lx * lx + ly * ly)) * (180 / Math.PI);
+  const elevation =
+    Math.atan2(lz, Math.sqrt(lx * lx + ly * ly)) * (180 / Math.PI);
 
   const handleAzimuthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const az = parseFloat(e.target.value) * (Math.PI / 180);
@@ -117,4 +118,3 @@ export function ControlPanel({
     </div>
   );
 }
-

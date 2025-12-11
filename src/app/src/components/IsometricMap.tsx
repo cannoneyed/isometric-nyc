@@ -1,9 +1,9 @@
-import { useMemo, useCallback } from 'react';
-import DeckGL from '@deck.gl/react';
-import { OrthographicView } from '@deck.gl/core';
-import { TileLayer } from '@deck.gl/geo-layers';
-import { BitmapLayer } from '@deck.gl/layers';
-import type { ViewState } from '../App';
+import { useMemo, useCallback } from "react";
+import DeckGL from "@deck.gl/react";
+import { OrthographicView } from "@deck.gl/core";
+import { TileLayer } from "@deck.gl/geo-layers";
+import { BitmapLayer } from "@deck.gl/layers";
+import type { ViewState } from "../App";
 
 interface TileConfig {
   gridWidth: number;
@@ -49,96 +49,99 @@ export function IsometricMap({
 
     return [
       new TileLayer({
-        id: 'isometric-tiles',
-        // Data fetching
-        getTileData: ({ index }: { index: { x: number; y: number; z: number } }) => {
+        id: "isometric-tiles",
+        // Data fetching - return the image URL directly
+        // TileLayer will handle loading it
+        getTileData: ({
+          index,
+        }: {
+          index: { x: number; y: number; z: number };
+        }) => {
           const { x, y, z } = index;
-          
+
           // Calculate actual tile coordinates
           // At zoom 0, we show the base tiles (0-19, 0-19)
           // At higher zooms, we subdivide
           const scale = Math.pow(2, z);
           const baseTileX = Math.floor(x / scale);
           const baseTileY = Math.floor(y / scale);
-          
+
           // Bounds check - only load tiles that exist
-          if (baseTileX < 0 || baseTileX >= tileConfig.gridWidth ||
-              baseTileY < 0 || baseTileY >= tileConfig.gridHeight) {
+          if (
+            baseTileX < 0 ||
+            baseTileX >= tileConfig.gridWidth ||
+            baseTileY < 0 ||
+            baseTileY >= tileConfig.gridHeight
+          ) {
             return Promise.resolve(null);
           }
 
-          // For now, always use z=0 (base tiles)
-          // In production, we'd have a proper tile pyramid
-          const url = tileUrlPattern
-            .replace('{z}', '0')
-            .replace('{x}', String(baseTileX))
-            .replace('{y}', String(baseTileY));
+          // Flip Y coordinate: deck.gl has (0,0) at bottom-left,
+          // but our tiles have (0,0) at top-left (image convention)
+          const flippedY = tileConfig.gridHeight - 1 - baseTileY;
 
-          return fetch(url)
-            .then((response) => {
-              if (!response.ok) {
-                // Return null for missing tiles (404)
-                return null;
-              }
-              return response.blob();
-            })
-            .then((blob) => {
-              if (!blob) return null;
-              return createImageBitmap(blob);
-            })
-            .catch(() => null);
+          // For now, always use z=0 (native resolution tiles)
+          // z=0 = max zoom in, higher z = more zoomed out
+          const url = tileUrlPattern
+            .replace("{z}", "0")
+            .replace("{x}_{y}", `${baseTileX}_${flippedY}`);
+
+          // Return the URL string - BitmapLayer will load the image
+          return Promise.resolve(url);
         },
 
         // Tile bounds calculation
         tileSize,
-        
+
         // Extent of the tileset
         extent: [extent.minX, extent.minY, extent.maxX, extent.maxY],
 
         // Min/max zoom levels
         minZoom: 0,
         maxZoom: 0, // We only have base tiles for now
-        
+
         // Refinement strategy - keep parent tiles visible while loading
-        refinementStrategy: 'best-available',
-        
+        refinementStrategy: "best-available",
+
         // Cache settings
         maxCacheSize: 200,
         maxCacheByteSize: 512 * 1024 * 1024, // 512MB
 
         // Render each tile as a BitmapLayer
-        renderSubLayers: (props: {
-          id: string;
-          data: ImageBitmap | null;
-          tile: {
-            index: { x: number; y: number; z: number };
-            bbox: { left: number; bottom: number; right: number; top: number };
-          };
-        }) => {
-          const { data, tile } = props;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        renderSubLayers: (props: any) => {
+          // Destructure to exclude 'data' from being spread to BitmapLayer
+          // BitmapLayer expects 'data' to be an array, not a string URL
+          const { data, tile, ...layerProps } = props;
           const { left, bottom, right, top } = tile.bbox;
+
+          // Flip the image vertically by swapping top and bottom in bounds
+          // This corrects for image Y-axis (top-down) vs deck.gl Y-axis (bottom-up)
+          const bounds: [number, number, number, number] = [
+            left,
+            top,
+            right,
+            bottom,
+          ];
 
           if (!data) {
             // No image data - render a placeholder
             return new BitmapLayer({
-              ...props,
-              id: `${props.id}-placeholder`,
+              ...layerProps,
               image: createPlaceholderImage(tile.index.x, tile.index.y),
-              bounds: [left, bottom, right, top],
-              pickable: true,
+              bounds,
             });
           }
 
+          // data is the image URL
           return new BitmapLayer({
-            ...props,
-            id: `${props.id}-bitmap`,
+            ...layerProps,
             image: data,
-            bounds: [left, bottom, right, top],
-            pickable: true,
+            bounds,
             // Pixel-perfect rendering (no interpolation)
             textureParameters: {
-              minFilter: 'nearest',
-              magFilter: 'nearest',
+              minFilter: "nearest",
+              magFilter: "nearest",
             },
           });
         },
@@ -159,13 +162,16 @@ export function IsometricMap({
   const handleViewStateChange = useCallback(
     (params: { viewState: ViewState }) => {
       const newViewState = { ...params.viewState };
-      
+
       // Constrain zoom
-      newViewState.zoom = Math.max(minZoom, Math.min(maxZoom, newViewState.zoom));
-      
+      newViewState.zoom = Math.max(
+        minZoom,
+        Math.min(maxZoom, newViewState.zoom)
+      );
+
       // Optionally constrain pan to keep map in view
       // (disabled for now to allow free exploration)
-      
+
       onViewStateChange({ viewState: newViewState });
     },
     [maxZoom, minZoom, onViewStateChange]
@@ -174,10 +180,12 @@ export function IsometricMap({
   return (
     <div className="map-container">
       <DeckGL
-        views={new OrthographicView({
-          id: 'ortho',
-          flipY: false, // Y increases upward
-        })}
+        views={
+          new OrthographicView({
+            id: "ortho",
+            flipY: false, // Y increases upward
+          })
+        }
         viewState={viewState}
         onViewStateChange={handleViewStateChange}
         layers={layers}
@@ -191,7 +199,7 @@ export function IsometricMap({
           keyboard: true,
           inertia: 300,
         }}
-        getCursor={() => 'grab'}
+        getCursor={() => "grab"}
       />
     </div>
   );
@@ -200,19 +208,19 @@ export function IsometricMap({
 // Create a placeholder image for missing tiles
 function createPlaceholderImage(x: number, y: number): HTMLCanvasElement {
   const size = 512;
-  const canvas = document.createElement('canvas');
+  const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
+  const ctx = canvas.getContext("2d")!;
 
   // Background - subtle grid pattern
-  ctx.fillStyle = '#1a1e2e';
+  ctx.fillStyle = "#1a1e2e";
   ctx.fillRect(0, 0, size, size);
 
   // Grid lines
-  ctx.strokeStyle = '#232838';
+  ctx.strokeStyle = "#232838";
   ctx.lineWidth = 1;
-  
+
   // Isometric grid pattern
   const gridSize = 32;
   for (let i = 0; i <= size; i += gridSize) {
@@ -220,7 +228,7 @@ function createPlaceholderImage(x: number, y: number): HTMLCanvasElement {
     ctx.moveTo(i, 0);
     ctx.lineTo(i, size);
     ctx.stroke();
-    
+
     ctx.beginPath();
     ctx.moveTo(0, i);
     ctx.lineTo(size, i);
@@ -228,14 +236,14 @@ function createPlaceholderImage(x: number, y: number): HTMLCanvasElement {
   }
 
   // Diamond pattern overlay (isometric feel)
-  ctx.strokeStyle = 'rgba(123, 104, 238, 0.1)';
+  ctx.strokeStyle = "rgba(123, 104, 238, 0.1)";
   ctx.lineWidth = 1;
   for (let i = -size; i <= size * 2; i += 64) {
     ctx.beginPath();
     ctx.moveTo(i, 0);
     ctx.lineTo(i + size, size);
     ctx.stroke();
-    
+
     ctx.beginPath();
     ctx.moveTo(i + size, 0);
     ctx.lineTo(i, size);
@@ -243,17 +251,16 @@ function createPlaceholderImage(x: number, y: number): HTMLCanvasElement {
   }
 
   // Tile coordinates label
-  ctx.fillStyle = '#5a5958';
+  ctx.fillStyle = "#5a5958";
   ctx.font = '500 24px "Azeret Mono", monospace';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
   ctx.fillText(`${x}, ${y}`, size / 2, size / 2);
 
   // Border
-  ctx.strokeStyle = 'rgba(255, 107, 53, 0.2)';
+  ctx.strokeStyle = "rgba(255, 107, 53, 0.2)";
   ctx.lineWidth = 2;
   ctx.strokeRect(1, 1, size - 2, size - 2);
 
   return canvas;
 }
-

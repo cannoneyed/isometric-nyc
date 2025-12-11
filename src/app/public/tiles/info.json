@@ -2,6 +2,8 @@
   "gridSize": 20,
   "tileSize": 512,
   "totalTiles": 400,
-  "generated": "2025-12-11T14:57:37.138Z",
+  "generated": "2025-12-11T15:37:39.775Z",
+  "urlPattern": "{z}/{x}_{y}.png",
+  "zoomConvention": "z=0 is native resolution (max zoom in), higher z = more zoomed out",
   "note": "Placeholder tiles are generated client-side when images are missing"
 }

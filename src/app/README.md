@@ -1,6 +1,7 @@
 # Isometric NYC Viewer
 
-A high-performance tiled map viewer for exploring isometric pixel art of New York City.
+A high-performance tiled map viewer for exploring isometric pixel art of New
+York City.
 
 ## Tech Stack
 
@@ -32,7 +33,8 @@ The app will open at http://localhost:3000
 
 - **Tile-based rendering** - Efficiently loads only visible tiles
 - **Smooth pan & zoom** - Hardware-accelerated WebGL rendering
-- **Orthographic projection** - Flat 2D view perfect for pixel art (no perspective distortion)
+- **Orthographic projection** - Flat 2D view perfect for pixel art (no
+  perspective distortion)
 - **Placeholder tiles** - Visual grid while actual tiles load
 - **Light controls** - UI for future shader-based lighting effects
 
@@ -42,21 +44,34 @@ The viewer is configured for a 20×20 grid of 512×512 pixel tiles:
 
 ```
 /public/tiles/
-  0/              # Zoom level 0 (base tiles)
-    {x}/{y}.png   # Tile at coordinate (x, y)
+  0/              # Zoom level 0 = native resolution (max zoom in)
+    0_0.png       # Tile at coordinate (0, 0)
+    0_1.png       # Tile at coordinate (0, 1)
+    ...
+    19_19.png     # Tile at coordinate (19, 19)
+  1/              # Zoom level 1 = 2x zoomed out (10×10 grid)
+  2/              # Zoom level 2 = 4x zoomed out (5×5 grid)
   info.json       # Tile metadata
 ```
 
-To add your own tiles, place PNG images at `public/tiles/0/{x}/{y}.png` where:
+**Zoom level convention:**
+
+- `z=0` — Native pixel resolution (maximum zoom in), full 20×20 grid
+- `z=1` — 2× zoomed out, 10×10 grid
+- `z=2` — 4× zoomed out, 5×5 grid
+- etc.
+
+To add your own tiles, place PNG images at `public/tiles/0/{x}_{y}.png` where:
+
 - `x` ranges from 0 to 19
 - `y` ranges from 0 to 19
 
 ## Controls
 
-| Action | Description |
-|--------|-------------|
-| **Scroll** | Zoom in/out |
-| **Drag** | Pan the view |
+| Action           | Description   |
+| ---------------- | ------------- |
+| **Scroll**       | Zoom in/out   |
+| **Drag**         | Pan the view  |
 | **Double-click** | Zoom to point |
 
 ## Architecture
@@ -79,4 +94,3 @@ src/
 - [ ] Custom shaders for dynamic lighting
 - [ ] Tile pyramid generation for multi-zoom levels
 - [ ] Export/import from SQLite tile database
-
