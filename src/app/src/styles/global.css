@@ -1,0 +1,405 @@
+/* ============================================
+   ISOMETRIC NYC - GLOBAL STYLES
+   A retro-futuristic pixel art aesthetic
+   ============================================ */
+
+:root {
+  /* Color palette - inspired by night cityscapes */
+  --color-bg-deep: #0a0c14;
+  --color-bg: #12151f;
+  --color-bg-elevated: #1a1e2e;
+  --color-bg-surface: #232838;
+  
+  /* Accent colors - neon city vibes */
+  --color-accent-primary: #ff6b35;
+  --color-accent-secondary: #00d4aa;
+  --color-accent-tertiary: #7b68ee;
+  --color-accent-warning: #ffd23f;
+  
+  /* Text */
+  --color-text-primary: #e8e6e3;
+  --color-text-secondary: #8b8a88;
+  --color-text-muted: #5a5958;
+  
+  /* Borders & lines */
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-accent: rgba(255, 107, 53, 0.3);
+  
+  /* Fonts */
+  --font-mono: 'Azeret Mono', 'SF Mono', 'Fira Code', monospace;
+  --font-display: 'Crimson Pro', Georgia, serif;
+  
+  /* Spacing */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  
+  /* Sizing */
+  --panel-width: 280px;
+  --header-height: 60px;
+  
+  /* Effects */
+  --blur-amount: 12px;
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms ease;
+  
+  /* Shadows */
+  --shadow-subtle: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-elevated: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --glow-accent: 0 0 20px rgba(255, 107, 53, 0.3);
+}
+
+/* Reset & base */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+  background: var(--color-bg-deep);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  height: 100%;
+}
+
+/* Main app container */
+.app {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: 
+    radial-gradient(ellipse at 30% 20%, rgba(123, 104, 238, 0.05) 0%, transparent 50%),
+    radial-gradient(ellipse at 70% 80%, rgba(255, 107, 53, 0.03) 0%, transparent 50%),
+    var(--color-bg-deep);
+}
+
+/* Header */
+.header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--header-height);
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: 0 var(--space-lg);
+  background: linear-gradient(
+    to bottom,
+    rgba(10, 12, 20, 0.95) 0%,
+    rgba(10, 12, 20, 0.8) 70%,
+    transparent 100%
+  );
+  backdrop-filter: blur(var(--blur-amount));
+  z-index: 100;
+  pointer-events: none;
+}
+
+.header h1 {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 600;
+  font-style: italic;
+  letter-spacing: -0.02em;
+  color: var(--color-text-primary);
+  text-shadow: 0 0 30px rgba(255, 107, 53, 0.4);
+}
+
+.header .subtitle {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--color-accent-secondary);
+  opacity: 0.8;
+}
+
+/* Panel base styles */
+.panel {
+  position: fixed;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: var(--space-lg);
+  box-shadow: var(--shadow-elevated);
+  backdrop-filter: blur(var(--blur-amount));
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-md);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.panel-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--color-text-secondary);
+}
+
+/* Control Panel */
+.control-panel {
+  bottom: var(--space-lg);
+  left: var(--space-lg);
+  width: var(--panel-width);
+}
+
+.control-group {
+  margin-bottom: var(--space-md);
+}
+
+.control-group:last-child {
+  margin-bottom: 0;
+}
+
+.control-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-xs);
+}
+
+.control-value {
+  font-weight: 500;
+  color: var(--color-accent-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sliders */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--color-bg-surface);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+input[type="range"]:hover {
+  background: var(--color-border-accent);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  background: var(--color-accent-primary);
+  border-radius: 50%;
+  border: 2px solid var(--color-bg-elevated);
+  box-shadow: var(--glow-accent);
+  cursor: grab;
+  transition: var(--transition-fast);
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+input[type="range"]::-webkit-slider-thumb:active {
+  cursor: grabbing;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  background: var(--color-accent-primary);
+  border-radius: 50%;
+  border: 2px solid var(--color-bg-elevated);
+  box-shadow: var(--glow-accent);
+  cursor: grab;
+}
+
+/* Stats display */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-sm);
+}
+
+.stat-item {
+  background: var(--color-bg);
+  border-radius: 8px;
+  padding: var(--space-sm) var(--space-md);
+}
+
+.stat-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-text-muted);
+  margin-bottom: 2px;
+}
+
+.stat-value {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-value.accent {
+  color: var(--color-accent-secondary);
+}
+
+/* Tile Info Panel */
+.tile-info {
+  bottom: var(--space-lg);
+  right: var(--space-lg);
+  min-width: 200px;
+  transition: var(--transition-normal);
+  opacity: 0;
+  transform: translateY(10px);
+  pointer-events: none;
+}
+
+.tile-info.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.tile-coords {
+  display: flex;
+  gap: var(--space-lg);
+  margin-top: var(--space-sm);
+}
+
+.coord {
+  display: flex;
+  flex-direction: column;
+}
+
+.coord-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-text-muted);
+}
+
+.coord-value {
+  font-size: 24px;
+  font-weight: 500;
+  color: var(--color-accent-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Map canvas container */
+.map-container {
+  position: absolute;
+  inset: 0;
+}
+
+/* Keyboard shortcut hints */
+.shortcuts {
+  margin-top: var(--space-md);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--color-border);
+}
+
+.shortcut {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: 10px;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-xs);
+}
+
+.shortcut:last-child {
+  margin-bottom: 0;
+}
+
+.key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+/* Animations */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: var(--glow-accent);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(255, 107, 53, 0.5);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.panel {
+  animation: fade-in 0.4s ease-out;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-bg-surface);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Focus states */
+:focus-visible {
+  outline: 2px solid var(--color-accent-primary);
+  outline-offset: 2px;
+}
+
+/* Selection */
+::selection {
+  background: rgba(255, 107, 53, 0.3);
+  color: var(--color-text-primary);
+}
+

@@ -551,8 +551,8 @@ def api_fix_water():
 @app.route("/api/water-fill", methods=["POST"])
 def api_water_fill():
   """API endpoint to fill an entire quadrant with the water color."""
+
   from PIL import Image
-  import io
 
   from isometric_nyc.e2e_generation.shared import (
     get_quadrant_generation,

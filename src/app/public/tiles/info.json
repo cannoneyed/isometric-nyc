@@ -1,0 +1,7 @@
+{
+  "gridSize": 20,
+  "tileSize": 512,
+  "totalTiles": 400,
+  "generated": "2025-12-11T14:57:37.138Z",
+  "note": "Placeholder tiles are generated client-side when images are missing"
+}

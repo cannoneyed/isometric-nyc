@@ -691,7 +691,7 @@ body.generating .tile.queued.selectable {
 }
 
 .water-color-preview {
-  background: #4A6372 !important;
+  background: #4a6372 !important;
 }
 
 .water-fill-instruction {
@@ -703,6 +703,6 @@ body.generating .tile.queued.selectable {
 }
 
 .tile.water-fill-selectable:hover {
-  outline: 2px solid #4A6372;
+  outline: 2px solid #4a6372;
   outline-offset: -2px;
 }

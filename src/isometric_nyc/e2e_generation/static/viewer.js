@@ -520,7 +520,11 @@ async function handleWaterFillClick(tileEl) {
   const instruction = document.getElementById("waterFillInstruction");
   instruction.textContent = `Filling (${qx}, ${qy})...`;
 
-  showToast("loading", "Filling with water...", `Processing quadrant (${qx}, ${qy})`);
+  showToast(
+    "loading",
+    "Filling with water...",
+    `Processing quadrant (${qx}, ${qy})`
+  );
 
   try {
     const response = await fetch("/api/water-fill", {
