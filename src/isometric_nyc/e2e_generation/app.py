@@ -17,7 +17,8 @@ Keyboard shortcuts:
   Arrow keys - Navigate the grid
   L          - Toggle lines
   C          - Toggle coords
-  G          - Toggle render/generation mode
+  R          - Toggle render/generation mode
+  G          - Generate selected quadrants
   S          - Toggle select tool
 """
 

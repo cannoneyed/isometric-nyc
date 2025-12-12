@@ -165,9 +165,13 @@ document.addEventListener("keydown", (e) => {
     case "C":
       document.getElementById("showCoords").click();
       break;
+    case "d":
+    case "D":
+      document.getElementById("showRender").click();
+      break;
     case "g":
     case "G":
-      document.getElementById("showRender").click();
+      generateSelected();
       break;
     case "s":
     case "S":
@@ -595,8 +599,7 @@ function updateSelectionStatus() {
 
   // Show queue count
   if (queued.length > 0) {
-    const queueCoords = queued.map(([x, y]) => `(${x},${y})`).join(" ");
-    statusParts.push(`📋 Queue: ${queued.length} - ${queueCoords}`);
+    statusParts.push(`📋 Queued: ${queued.length}`);
   }
 
   // Show selection count

@@ -1,9 +1,9 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap");
 
 :root {
   /* Water-inspired color palette */
   --water-deep: #1a2a35;
-  --water-mid: #4A6372;
+  --water-mid: #4a6372;
   --water-light: #6b8a9a;
   --foam-color: #c8dce4;
   --bg-dark: #0d1419;
@@ -13,8 +13,8 @@
   --accent: #5b9ab8;
   --grid-gap: 2px;
   --tile-size: 512px;
-  
-  font-family: 'JetBrains Mono', monospace;
+
+  font-family: "JetBrains Mono", monospace;
   line-height: 1.5;
   font-weight: 400;
 
@@ -35,8 +35,11 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: 
-    radial-gradient(ellipse at 50% 0%, rgba(74, 99, 114, 0.15) 0%, transparent 60%),
+  background: radial-gradient(
+      ellipse at 50% 0%,
+      rgba(74, 99, 114, 0.15) 0%,
+      transparent 60%
+    ),
     linear-gradient(180deg, var(--bg-dark) 0%, #0a1015 100%);
 }
 

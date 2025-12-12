@@ -34,20 +34,21 @@ from isometric_nyc.e2e_generation.infill_template import (
   TemplateBuilder,
   validate_quadrant_selection,
 )
-from isometric_nyc.e2e_generation.shared import DEFAULT_WEB_PORT, ensure_quadrant_exists
 from isometric_nyc.e2e_generation.shared import (
-  get_quadrant_generation as shared_get_quadrant_generation,
-)
-from isometric_nyc.e2e_generation.shared import (
-  get_quadrant_render as shared_get_quadrant_render,
-)
-from isometric_nyc.e2e_generation.shared import (
+  DEFAULT_WEB_PORT,
+  ensure_quadrant_exists,
   image_to_png_bytes,
   png_bytes_to_image,
   save_quadrant_generation,
   save_quadrant_render,
   split_tile_into_quadrants,
   upload_to_gcs,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_generation as shared_get_quadrant_generation,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_render as shared_get_quadrant_render,
 )
 
 # Load environment variables
@@ -131,8 +132,8 @@ def call_oxen_api(image_url: str) -> str:
   """
   endpoint = "https://hub.oxen.ai/api/images/edit"
 
-  model_id = OMNI_WATER_V2_MODEL_ID
-  api_key = os.getenv("OXEN_OMNI_v04_WATER_V2_API_KEY")
+  model_id = OMNI_WATER_MODEL_ID
+  api_key = os.getenv("OXEN_OMNI_v04_WATER_API_KEY")
 
   headers = {
     "Authorization": f"Bearer {api_key}",
