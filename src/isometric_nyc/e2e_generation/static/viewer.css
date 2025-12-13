@@ -42,6 +42,11 @@ body {
   margin-left: 12px;
 }
 
+.toolbar-info .selected-quadrants {
+  color: #00d9ff;
+  font-weight: bold;
+}
+
 .controls {
   display: flex;
   gap: 12px;
@@ -241,6 +246,31 @@ body {
   background: rgba(255, 51, 51, 0.15);
 }
 
+/* Flagged tile styles */
+.tile.flagged {
+  position: relative;
+}
+
+.tile.flagged::before {
+  content: "🚩";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 16px;
+  z-index: 20;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+
+.tile.flagged::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px solid #f97316;
+  pointer-events: none;
+  z-index: 5;
+}
+
 /* Locked tiles (during generation) */
 .tile.locked {
   outline: 3px solid #a855f7;
@@ -295,9 +325,9 @@ body.generating .tile.queued.selectable {
 /* Selection status bar */
 .selection-status {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 10px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 10px;
   background: rgba(255, 51, 51, 0.1);
   border: 1px solid rgba(255, 51, 51, 0.3);
   border-radius: 4px;
@@ -306,16 +336,52 @@ body.generating .tile.queued.selectable {
   margin-top: 8px;
 }
 
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.status-row.actions-row {
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  justify-content: flex-end;
+}
+
 .selection-status.empty {
   background: transparent;
   border-color: #333;
   color: #666;
 }
 
+.selection-status.empty .actions-row {
+  border-top-color: rgba(255, 255, 255, 0.05);
+}
+
 .selection-status.generating {
   background: rgba(168, 85, 247, 0.1);
   border-color: rgba(168, 85, 247, 0.4);
   color: #a855f7;
+}
+
+.selection-status.generating .actions-row {
+  border-top-color: rgba(168, 85, 247, 0.2);
+}
+
+/* Clickable coordinate links in status bar */
+.coord-link {
+  color: #00d9ff;
+  text-decoration: none;
+  cursor: pointer;
+  padding: 1px 3px;
+  border-radius: 3px;
+  transition: background-color 0.15s ease;
+}
+
+.coord-link:hover {
+  background-color: rgba(0, 217, 255, 0.2);
+  text-decoration: underline;
 }
 
 .selection-limit {
@@ -363,6 +429,28 @@ body.generating .tile.queued.selectable {
 }
 
 .delete-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+}
+
+.flag-btn {
+  padding: 3px 8px;
+  background: #f97316;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  transition: all 0.2s;
+}
+
+.flag-btn:hover:not(:disabled) {
+  background: #ea580c;
+}
+
+.flag-btn:disabled {
   background: #444;
   color: #666;
   cursor: not-allowed;
@@ -431,6 +519,93 @@ body.generating .tile.queued.selectable {
   color: #666;
   cursor: not-allowed;
   font-weight: normal;
+}
+
+/* Generate Rectangle button */
+.generate-rect-btn {
+  padding: 4px 12px;
+  background: #8b5cf6;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.generate-rect-btn:hover:not(:disabled) {
+  background: #7c3aed;
+}
+
+.generate-rect-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+.generate-rect-btn.loading {
+  background: #666;
+  cursor: wait;
+}
+
+.generate-rect-btn .spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+/* Clear Queue button */
+.clear-queue-btn {
+  padding: 4px 10px;
+  background: #6b7280;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  margin-left: 8px;
+}
+
+.clear-queue-btn:hover {
+  background: #ef4444;
+}
+
+.clear-queue-btn:active {
+  background: #dc2626;
+}
+
+.hard-refresh-btn {
+  padding: 4px 10px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  margin-left: 8px;
+}
+
+.hard-refresh-btn:hover {
+  background: #2563eb;
+}
+
+.hard-refresh-btn:active {
+  background: #1d4ed8;
 }
 
 /* Toast notification system */
@@ -705,4 +880,315 @@ body.generating .tile.queued.selectable {
 .tile.water-fill-selectable:hover {
   outline: 2px solid #4a6372;
   outline-offset: -2px;
+}
+
+/* Model selector styles */
+.model-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.model-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #888;
+  font-size: 0.75rem;
+}
+
+.model-select {
+  padding: 4px 8px;
+  border: 1px solid #333;
+  border-radius: 3px;
+  background: #16213e;
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  min-width: 140px;
+}
+
+.model-select:hover {
+  border-color: #00d9ff;
+}
+
+.model-select:focus {
+  outline: none;
+  border-color: #00d9ff;
+  box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.2);
+}
+
+.model-select option {
+  background: #16213e;
+  color: #fff;
+  padding: 4px;
+}
+
+/* Generate with Prompt button */
+.generate-prompt-btn {
+  background: linear-gradient(135deg, #9b59b6, #8e44ad);
+  color: #fff;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.generate-prompt-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #a569c0, #9b59b6);
+  transform: translateY(-1px);
+}
+
+.generate-prompt-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Prompt Dialog */
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dialog-content {
+  background: #1a1a2e;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 24px;
+  min-width: 400px;
+  max-width: 500px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.dialog-content h3 {
+  margin: 0 0 12px 0;
+  color: #fff;
+  font-size: 18px;
+}
+
+.dialog-description {
+  color: #aaa;
+  font-size: 14px;
+  margin: 0 0 16px 0;
+}
+
+.prompt-input {
+  width: 100%;
+  background: #0f0f1a;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 14px;
+  padding: 12px;
+  resize: vertical;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.prompt-input:focus {
+  outline: none;
+  border-color: #9b59b6;
+  box-shadow: 0 0 0 2px rgba(155, 89, 182, 0.2);
+}
+
+.prompt-input::placeholder {
+  color: #666;
+}
+
+.dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.dialog-cancel-btn {
+  background: #333;
+  color: #fff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+
+.dialog-cancel-btn:hover {
+  background: #444;
+}
+
+.dialog-submit-btn {
+  background: linear-gradient(135deg, #9b59b6, #8e44ad);
+  color: #fff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.dialog-submit-btn:hover {
+  background: linear-gradient(135deg, #a569c0, #9b59b6);
+}
+
+/* Queue Overlays - show pending generations as grouped rectangles */
+.queue-overlay {
+  position: absolute;
+  border: 3px dashed #c084fc;
+  border-radius: 4px;
+  pointer-events: auto;
+  z-index: 20;
+  animation: pulse-queue-overlay 1.5s ease-in-out infinite;
+  box-sizing: border-box;
+}
+
+/* Processing overlay - solid border, different color */
+.queue-overlay.processing {
+  border-style: solid;
+  border-color: #a855f7;
+  animation: pulse-processing-overlay 1s ease-in-out infinite;
+}
+
+@keyframes pulse-queue-overlay {
+  0%,
+  100% {
+    border-color: #c084fc;
+    box-shadow: 0 0 12px rgba(192, 132, 252, 0.3);
+  }
+  50% {
+    border-color: #8b5cf6;
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.5);
+  }
+}
+
+@keyframes pulse-processing-overlay {
+  0%,
+  100% {
+    border-color: #a855f7;
+    box-shadow: 0 0 16px rgba(168, 85, 247, 0.4);
+  }
+  50% {
+    border-color: #c084fc;
+    box-shadow: 0 0 24px rgba(192, 132, 252, 0.7);
+  }
+}
+
+.queue-overlay:hover {
+  border-color: #a855f7;
+  box-shadow: 0 0 16px rgba(168, 85, 247, 0.6);
+}
+
+/* Queue position badge */
+.queue-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  min-width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #8b5cf6, #a855f7);
+  color: white;
+  font-size: 12px;
+  font-weight: bold;
+  font-family: "SF Mono", "Monaco", monospace;
+  border-radius: 6px;
+  padding: 0 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 1;
+}
+
+/* Processing badge - with spinner */
+.queue-badge.processing {
+  background: linear-gradient(135deg, #10b981, #059669);
+  min-width: 28px;
+  height: 28px;
+}
+
+/* Spinner animation for processing badge */
+.processing-spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Model label below badge */
+.queue-model-label {
+  position: absolute;
+  top: 34px;
+  left: 6px;
+  font-size: 9px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(139, 92, 246, 0.8);
+  padding: 2px 6px;
+  border-radius: 3px;
+  max-width: calc(100% - 40px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Cancel button - visible on hover */
+.queue-cancel-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(220, 38, 38, 0.9);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.queue-overlay:hover .queue-cancel-btn {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.queue-cancel-btn:hover {
+  background: #dc2626;
+  transform: scale(1.1);
+}
+
+.queue-cancel-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Make grid position relative for overlay positioning */
+.grid {
+  position: relative;
 }

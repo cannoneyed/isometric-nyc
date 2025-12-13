@@ -20,7 +20,7 @@
     <script
       id="app-config"
       type="application/json"
-      data-config='{"x": {{ x }}, "y": {{ y }}, "nx": {{ nx }}, "ny": {{ ny }}, "size_px": {{ size_px }}}'
+      data-config='{"x": {{ x }}, "y": {{ y }}, "nx": {{ nx }}, "ny": {{ ny }}, "size_px": {{ size_px }}, "models": {{ models_config | safe }}, "default_model_id": "{{ default_model_id }}"}'
     ></script>
 
     <!-- Toast notification container -->
@@ -87,6 +87,14 @@
               Renders</label
             >
           </div>
+          <div class="toggle-group model-group">
+            <label class="model-label"
+              >Model:
+              <select id="modelSelect" class="model-select">
+                <!-- Populated by JavaScript -->
+              </select>
+            </label>
+          </div>
           <div class="toggle-group tools-group">
             <span class="tools-label">Tools:</span>
             <button
@@ -150,44 +158,92 @@
         </div>
         <div class="toolbar-info">
           <span>({{ x }}, {{ y }}) → ({{ x + nx - 1 }}, {{ y + ny - 1 }})</span>
+          <span id="selectedQuadrantsDisplay" class="selected-quadrants"></span>
           <span>{{ generation_dir }}</span>
         </div>
       </div>
       <div class="selection-status" id="selectionStatus">
-        <span id="selectionCount">0 quadrants selected</span>
-        <span class="selection-limit">(max 4)</span>
-        <button
-          id="deselectAllBtn"
-          class="deselect-btn"
-          onclick="deselectAll()"
-          disabled
-        >
-          Deselect All
-        </button>
-        <button
-          id="deleteBtn"
-          class="delete-btn"
-          onclick="deleteSelected()"
-          disabled
-        >
-          Delete
-        </button>
-        <button
-          id="renderBtn"
-          class="render-btn"
-          onclick="renderSelected()"
-          disabled
-        >
-          Render
-        </button>
-        <button
-          id="generateBtn"
-          class="generate-btn"
-          onclick="generateSelected()"
-          disabled
-        >
-          Generate
-        </button>
+        <div class="status-row">
+          <span id="selectionCount">0 quadrants selected</span>
+          <span class="selection-limit">(max 4)</span>
+          <button
+            id="deselectAllBtn"
+            class="deselect-btn"
+            onclick="deselectAll()"
+            disabled
+          >
+            Deselect All
+          </button>
+          <button
+            id="deleteBtn"
+            class="delete-btn"
+            onclick="deleteSelected()"
+            disabled
+          >
+            Delete
+          </button>
+          <button
+            id="flagBtn"
+            class="flag-btn"
+            onclick="flagSelected()"
+            disabled
+            title="Flag selected quadrants for review"
+          >
+            🚩 Flag
+          </button>
+        </div>
+        <div class="status-row actions-row">
+          <button
+            id="renderBtn"
+            class="render-btn"
+            onclick="renderSelected()"
+            disabled
+          >
+            Render
+          </button>
+          <button
+            id="generateBtn"
+            class="generate-btn"
+            onclick="generateSelected()"
+            disabled
+          >
+            Generate
+          </button>
+          <button
+            id="generateWithPromptBtn"
+            class="generate-prompt-btn"
+            onclick="showPromptDialog()"
+            disabled
+            title="Generate with additional prompt text"
+          >
+            + Prompt
+          </button>
+          <button
+            id="generateRectBtn"
+            class="generate-rect-btn"
+            onclick="generateRectangle()"
+            disabled
+            title="Select exactly 2 quadrants to define rectangle corners"
+          >
+            Generate Rectangle
+          </button>
+          <button
+            id="clearQueueBtn"
+            class="clear-queue-btn"
+            onclick="clearQueue()"
+            title="Clear all pending items from the generation queue"
+          >
+            Clear Queue
+          </button>
+          <button
+            id="hardRefreshBtn"
+            class="hard-refresh-btn"
+            onclick="hardRefresh()"
+            title="Clear image cache and reload page"
+          >
+            ↻ Refresh
+          </button>
+        </div>
       </div>
       <div class="water-fix-status" id="waterFixStatus" style="display: none">
         <span class="water-fix-label">Target Color:</span>
@@ -235,9 +291,11 @@
       <div class="grid">
         {% for dy in range(ny) %} {% for dx in range(nx) %} {% set qx = x + dx
         %} {% set qy = y + dy %} {% set has_gen = tiles.get((dx, dy), False) %}
+        {% set is_flagged = flagged_tiles.get((dx, dy), False) %}
         <div
-          class="tile {% if not has_gen %}placeholder{% endif %}"
+          class="tile {% if not has_gen %}placeholder{% endif %}{% if is_flagged %} flagged{% endif %}"
           data-coords="{{ qx }},{{ qy }}"
+          data-flagged="{{ 'true' if is_flagged else 'false' }}"
         >
           <span class="coords">({{ qx }}, {{ qy }})</span>
           {% if has_gen %}
@@ -248,6 +306,30 @@
           {% endif %}
         </div>
         {% endfor %} {% endfor %}
+      </div>
+    </div>
+
+    <!-- Prompt Dialog -->
+    <div id="promptDialog" class="dialog-overlay" style="display: none">
+      <div class="dialog-content">
+        <h3>Generate with Prompt</h3>
+        <p class="dialog-description">
+          Add additional instructions for the generation:
+        </p>
+        <textarea
+          id="promptInput"
+          class="prompt-input"
+          placeholder="e.g., 'Add more trees' or 'Make the water darker'"
+          rows="3"
+        ></textarea>
+        <div class="dialog-buttons">
+          <button class="dialog-cancel-btn" onclick="hidePromptDialog()">
+            Cancel
+          </button>
+          <button class="dialog-submit-btn" onclick="submitPromptGeneration()">
+            Generate
+          </button>
+        </div>
       </div>
     </div>
 

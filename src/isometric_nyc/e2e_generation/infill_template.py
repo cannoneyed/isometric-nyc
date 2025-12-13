@@ -780,13 +780,32 @@ class TemplateBuilder:
         if (qx, qy) in infill_quadrants:
           # Use render for infill quadrants
           quad_img = self.get_render(qx, qy)
+          source_type = "render"
           if quad_img is None:
             continue
         else:
           # Use generation for context quadrants
           quad_img = self.get_generation(qx, qy)
+          source_type = "generation"
           if quad_img is None:
             continue
+
+        # Check quadrant image size and fix if needed
+        img_w, img_h = quad_img.size
+        expected_size = (QUADRANT_SIZE, QUADRANT_SIZE)
+
+        if (img_w, img_h) != expected_size:
+          # Resize to expected size
+          print(
+            f"   ⚠️ Quadrant ({qx}, {qy}) [{source_type}]: "
+            f"RESIZING {quad_img.size} -> {expected_size}"
+          )
+          quad_img = quad_img.resize(expected_size, Image.Resampling.LANCZOS)
+        else:
+          print(
+            f"   📦 Quadrant ({qx}, {qy}) [{source_type}]: "
+            f"size={quad_img.size}, template_pos=({template_x}, {template_y})"
+          )
 
         if quad_img.mode != "RGBA":
           quad_img = quad_img.convert("RGBA")

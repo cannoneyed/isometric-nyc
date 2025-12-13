@@ -1,0 +1,26 @@
+{
+  "models": [
+    {
+      "name": "Omni v1",
+      "model_id": "cannoneyed-quiet-green-lamprey",
+      "api_key_env": "OXEN_OMNI_v04_WATER_API_KEY",
+      "endpoint": "https://hub.oxen.ai/api/images/edit",
+      "num_inference_steps": 28
+    },
+    {
+      "name": "Omni v2",
+      "model_id": "cannoneyed-rural-rose-dingo",
+      "api_key_env": "OXEN_OMNI_v04_WATER_V2_API_KEY",
+      "endpoint": "https://hub.oxen.ai/api/images/edit",
+      "num_inference_steps": 28
+    },
+    {
+      "name": "Omni (Original)",
+      "model_id": "cannoneyed-gentle-gold-antlion",
+      "api_key_env": "OXEN_OMNI_v04_API_KEY",
+      "endpoint": "https://hub.oxen.ai/api/images/edit",
+      "num_inference_steps": 28
+    }
+  ],
+  "default_model_id": "cannoneyed-quiet-green-lamprey"
+}
