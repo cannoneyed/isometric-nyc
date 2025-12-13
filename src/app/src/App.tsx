@@ -1,19 +1,23 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { IsometricMap } from "./components/IsometricMap";
 import { ControlPanel } from "./components/ControlPanel";
 import { TileInfo } from "./components/TileInfo";
 
-// Configuration for the tile grid
-const TILE_CONFIG = {
-  // Grid dimensions (23x13 from export)
-  gridWidth: 23,
-  gridHeight: 13,
-  // Tile size in pixels (at zoom level 0, 1 pixel = 1 world unit)
-  tileSize: 512,
-  // URL pattern for tiles: {z}/{x}_{y}.png
-  // z=0 is native resolution (max zoom in), higher z = more zoomed out
-  tileUrlPattern: "/tiles/{z}/{x}_{y}.png",
-};
+interface TileConfig {
+  gridWidth: number;
+  gridHeight: number;
+  tileSize: number;
+  tileUrlPattern: string;
+}
+
+interface TileManifest {
+  gridWidth: number;
+  gridHeight: number;
+  tileSize: number;
+  totalTiles: number;
+  generated: string;
+  urlPattern: string;
+}
 
 export interface ViewState {
   target: [number, number, number];
@@ -21,15 +25,48 @@ export interface ViewState {
 }
 
 function App() {
-  const [viewState, setViewState] = useState<ViewState>({
-    // Center on middle of 20x20 grid
-    target: [
-      (TILE_CONFIG.gridWidth * TILE_CONFIG.tileSize) / 2,
-      (TILE_CONFIG.gridHeight * TILE_CONFIG.tileSize) / 2,
-      0,
-    ],
-    zoom: -2, // Start zoomed out to see multiple tiles
-  });
+  const [tileConfig, setTileConfig] = useState<TileConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Load tile manifest on mount
+  useEffect(() => {
+    fetch("/tiles/manifest.json")
+      .then((res) => {
+        if (!res.ok) throw new Error(`Failed to load manifest: ${res.status}`);
+        return res.json() as Promise<TileManifest>;
+      })
+      .then((manifest) => {
+        setTileConfig({
+          gridWidth: manifest.gridWidth,
+          gridHeight: manifest.gridHeight,
+          tileSize: manifest.tileSize,
+          tileUrlPattern: `/tiles/{z}/{x}_{y}.png`,
+        });
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("Failed to load tile manifest:", err);
+        setError(err.message);
+        setLoading(false);
+      });
+  }, []);
+
+  const [viewState, setViewState] = useState<ViewState | null>(null);
+
+  // Initialize view state once tile config is loaded
+  useEffect(() => {
+    if (tileConfig && !viewState) {
+      setViewState({
+        target: [
+          (tileConfig.gridWidth * tileConfig.tileSize) / 2,
+          (tileConfig.gridHeight * tileConfig.tileSize) / 2,
+          0,
+        ],
+        zoom: -2,
+      });
+    }
+  }, [tileConfig, viewState]);
 
   const [lightDirection, setLightDirection] = useState<
     [number, number, number]
@@ -55,18 +92,48 @@ function App() {
 
   // Compute visible tile count for stats
   const visibleTiles = useMemo(() => {
+    if (!viewState || !tileConfig) return 0;
     const scale = Math.pow(2, viewState.zoom);
     const viewportWidth = window.innerWidth / scale;
     const viewportHeight = window.innerHeight / scale;
-    const tilesX = Math.ceil(viewportWidth / TILE_CONFIG.tileSize) + 1;
-    const tilesY = Math.ceil(viewportHeight / TILE_CONFIG.tileSize) + 1;
+    const tilesX = Math.ceil(viewportWidth / tileConfig.tileSize) + 1;
+    const tilesY = Math.ceil(viewportHeight / tileConfig.tileSize) + 1;
     return tilesX * tilesY;
-  }, [viewState.zoom]);
+  }, [viewState, tileConfig]);
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="app loading">
+        <div className="loading-message">Loading tile manifest...</div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error || !tileConfig) {
+    return (
+      <div className="app error">
+        <div className="error-message">
+          Failed to load tiles: {error || "Unknown error"}
+        </div>
+      </div>
+    );
+  }
+
+  // Wait for view state to be initialized
+  if (!viewState) {
+    return (
+      <div className="app loading">
+        <div className="loading-message">Initializing view...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="app">
       <IsometricMap
-        tileConfig={TILE_CONFIG}
+        tileConfig={tileConfig}
         viewState={viewState}
         onViewStateChange={handleViewStateChange}
         lightDirection={lightDirection}

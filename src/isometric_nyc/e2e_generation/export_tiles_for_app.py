@@ -5,9 +5,12 @@ Exports a rectangular region of quadrants to the web app's public/tiles/0/ direc
 normalizing coordinates so the top-left of the region becomes (0, 0).
 
 Usage:
-  uv run python src/isometric_nyc/e2e_generation/export_tiles_for_app.py <generation_dir> --tl X,Y --br X,Y
+  uv run python src/isometric_nyc/e2e_generation/export_tiles_for_app.py <generation_dir> [--tl X,Y --br X,Y]
 
 Examples:
+  # Export ALL quadrants in the database (auto-detect bounds)
+  uv run python src/isometric_nyc/e2e_generation/export_tiles_for_app.py generations/v01
+
   # Export quadrants from (0,0) to (19,19) - a 20x20 grid
   uv run python src/isometric_nyc/e2e_generation/export_tiles_for_app.py generations/v01 --tl 0,0 --br 19,19
 
@@ -22,12 +25,11 @@ Examples:
 """
 
 import argparse
-import io
+import json
 import sqlite3
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
-
-from PIL import Image
 
 
 def parse_coordinate(coord_str: str) -> tuple[int, int]:
@@ -210,12 +212,46 @@ def export_tiles(
     return exported, skipped, missing
 
 
+def write_manifest(
+    output_dir: Path,
+    width: int,
+    height: int,
+    tile_size: int = 512,
+) -> None:
+    """
+    Write a manifest.json file with grid configuration.
+
+    Args:
+        output_dir: Directory containing tiles (e.g., public/tiles/0/).
+        width: Grid width in tiles.
+        height: Grid height in tiles.
+        tile_size: Size of each tile in pixels.
+    """
+    # Write manifest to parent directory (tiles/ not tiles/0/)
+    manifest_path = output_dir.parent / "manifest.json"
+    
+    manifest = {
+        "gridWidth": width,
+        "gridHeight": height,
+        "tileSize": tile_size,
+        "totalTiles": width * height,
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "urlPattern": "{z}/{x}_{y}.png",
+    }
+    
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+    print(f"📝 Wrote manifest: {manifest_path}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Export quadrants from the generation database to the web app's tile directory.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Export ALL tiles in the database (auto-detect bounds)
+  %(prog)s generations/v01
+
   # Export a 20x20 grid
   %(prog)s generations/v01 --tl 0,0 --br 19,19
 
@@ -231,16 +267,18 @@ Examples:
     parser.add_argument(
         "--tl",
         type=parse_coordinate,
-        required=True,
+        required=False,
+        default=None,
         metavar="X,Y",
-        help="Top-left coordinate of the region to export (e.g., '0,0')",
+        help="Top-left coordinate of the region to export (e.g., '0,0'). If omitted, auto-detects from database.",
     )
     parser.add_argument(
         "--br",
         type=parse_coordinate,
-        required=True,
+        required=False,
+        default=None,
         metavar="X,Y",
-        help="Bottom-right coordinate of the region to export (e.g., '19,19')",
+        help="Bottom-right coordinate of the region to export (e.g., '19,19'). If omitted, auto-detects from database.",
     )
     parser.add_argument(
         "--render",
@@ -291,18 +329,30 @@ Examples:
         print(f"❌ Error: Database not found: {db_path}")
         return 1
 
-    tl = args.tl
-    br = args.br
+    # Get database bounds
+    bounds = get_quadrant_bounds(db_path)
+    if not bounds:
+        print("❌ Error: No quadrants found in database")
+        return 1
+    
+    print(f"📊 Database bounds: ({bounds[0]},{bounds[1]}) to ({bounds[2]},{bounds[3]})")
+
+    # Use provided coordinates or auto-detect from database bounds
+    if args.tl is None or args.br is None:
+        if args.tl is not None or args.br is not None:
+            print("❌ Error: Both --tl and --br must be provided together, or neither for auto-detect")
+            return 1
+        tl = (bounds[0], bounds[1])
+        br = (bounds[2], bounds[3])
+        print(f"   Auto-detected range: ({tl[0]},{tl[1]}) to ({br[0]},{br[1]})")
+    else:
+        tl = args.tl
+        br = args.br
 
     # Validate coordinate range
     if tl[0] > br[0] or tl[1] > br[1]:
         print(f"❌ Error: Top-left ({tl[0]},{tl[1]}) must be <= bottom-right ({br[0]},{br[1]})")
         return 1
-
-    # Get database bounds for info
-    bounds = get_quadrant_bounds(db_path)
-    if bounds:
-        print(f"📊 Database bounds: ({bounds[0]},{bounds[1]}) to ({bounds[2]},{bounds[3]})")
     
     # Count available data
     total, available = count_generated_quadrants(db_path, tl, br, use_render=args.render)
@@ -328,6 +378,13 @@ Examples:
         skip_existing=not args.overwrite,
     )
 
+    # Calculate final dimensions
+    width = br[0] - tl[0] + 1
+    height = br[1] - tl[1] + 1
+
+    # Write manifest with grid configuration
+    write_manifest(output_dir, width, height)
+
     # Print summary
     print()
     print("=" * 50)
@@ -338,12 +395,7 @@ Examples:
     if missing > 0:
         print(f"   Missing data: {missing} tiles")
     print(f"   Output: {output_dir}")
-    
-    # Update the web app's tile config hint
-    width = br[0] - tl[0] + 1
-    height = br[1] - tl[1] + 1
-    print()
-    print(f"💡 Update src/app/src/App.tsx gridWidth/gridHeight to: {width}×{height}")
+    print(f"   Grid size: {width}×{height}")
 
     return 0
 
