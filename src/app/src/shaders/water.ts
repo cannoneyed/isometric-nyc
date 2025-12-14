@@ -71,15 +71,27 @@ export const fragmentShaderSource = `
     float pixelWave = floor(combinedWave * 4.0 + 0.5) / 4.0;
     
     // === RIPPLES IN DEEP WATER ===
-    float rippleScale = 60.0;
-    float rippleSpeed = u_waveSpeed * 0.3;
+    // Use multiple overlapping waves at incommensurate frequencies for organic feel
+    float rippleSpeed = u_waveSpeed * 0.25;
     
-    float ripple1 = sin((uv.x + uv.y) * rippleScale + u_time * rippleSpeed);
-    float ripple2 = sin((uv.x - uv.y) * rippleScale * 0.8 + u_time * rippleSpeed * 1.3 + 1.0);
-    float ripple3 = sin(uv.x * rippleScale * 0.6 + u_time * rippleSpeed * 0.7 + 2.5);
+    // Primary ripple layers - different scales and directions
+    float r1 = sin((uv.x * 47.0 + uv.y * 31.0) + u_time * rippleSpeed * 1.0);
+    float r2 = sin((uv.x * 29.0 - uv.y * 43.0) + u_time * rippleSpeed * 0.7 + 1.5);
+    float r3 = sin((uv.x * 17.0 + uv.y * 53.0) + u_time * rippleSpeed * 1.3 + 3.1);
+    float r4 = sin((uv.y * 37.0 - uv.x * 23.0) + u_time * rippleSpeed * 0.9 + 2.2);
     
-    float combinedRipple = (ripple1 + ripple2 * 0.6 + ripple3 * 0.4) / 2.0;
-    float pixelRipple = floor(combinedRipple * 3.0 + 0.5) / 3.0;
+    // Secondary finer detail ripples
+    float r5 = sin((uv.x * 71.0 + uv.y * 67.0) + u_time * rippleSpeed * 1.1 + 0.7) * 0.5;
+    float r6 = sin((uv.x * 83.0 - uv.y * 79.0) + u_time * rippleSpeed * 0.8 + 4.2) * 0.4;
+    
+    // Add some position-based variation to break up repetition
+    float posNoise = sin(uv.x * 11.0) * sin(uv.y * 13.0) * 0.3;
+    
+    // Combine with varying weights
+    float combinedRipple = (r1 + r2 * 0.8 + r3 * 0.6 + r4 * 0.7 + r5 + r6 + posNoise) / 3.5;
+    
+    // Quantize for pixel art look but with more levels for subtlety
+    float pixelRipple = floor(combinedRipple * 5.0 + 0.5) / 5.0;
     
     // Ripples are stronger in deep water
     float deepWaterFactor = smoothstep(0.4, 0.8, maskValue);

@@ -87,21 +87,10 @@ export function IsometricMap({
           index: { x: number; y: number; z: number };
           signal?: AbortSignal;
         }) => {
-          const { x, y, z } = index;
+          const { x, y } = index;
 
-          console.log(
-            `getTileData: x=${x}, y=${y}, z=${z}, gridWidth=${gridWidth}, gridHeight=${gridHeight}`
-          );
-
-          // Always use z=0 tiles, but scale the coordinates for higher z values
-          // At z=0: full resolution, 1 tile = 1 file tile
-          // At z=1: 2x zoom out, but we still use z=0 files
-          // The TileLayer handles the visual scaling
-
-          // For now, always use z=0 tiles
-          // Bounds check against the grid at z=0
+          // Bounds check
           if (x < 0 || x >= gridWidth || y < 0 || y >= gridHeight) {
-            console.log(`Out of bounds: (${x},${y})`);
             return Promise.resolve(null);
           }
 
@@ -110,8 +99,6 @@ export function IsometricMap({
           const flippedY = gridHeight - 1 - y;
 
           const url = `/tiles/0/${x}_${flippedY}.png`;
-
-          console.log(`Fetching: ${url}`);
 
           // Fetch the image
           return fetch(url, { signal })
@@ -136,10 +123,9 @@ export function IsometricMap({
         // Extent of the tileset (in world coordinates)
         extent: [extent.minX, extent.minY, extent.maxX, extent.maxY],
 
-        // Allow any zoom level - we'll always serve z=0 tiles
-        // Setting these helps deck.gl know what tile indices to request
+        // All tiles exist at z=0 only
         minZoom: 0,
-        maxZoom: 8, // High value to allow zooming in
+        maxZoom: 0,
 
         // Refinement strategy
         refinementStrategy: "best-available",
