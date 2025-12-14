@@ -1,8 +1,16 @@
+interface ScanlineSettings {
+  enabled: boolean;
+  count: number;
+  opacity: number;
+}
+
 interface ControlPanelProps {
   zoom: number;
   lightDirection: [number, number, number];
   onLightDirectionChange: (direction: [number, number, number]) => void;
   visibleTiles: number;
+  scanlines: ScanlineSettings;
+  onScanlinesChange: (settings: ScanlineSettings) => void;
 }
 
 export function ControlPanel({
@@ -10,6 +18,8 @@ export function ControlPanel({
   lightDirection,
   onLightDirectionChange,
   visibleTiles,
+  scanlines,
+  onScanlinesChange,
 }: ControlPanelProps) {
   // Convert light direction to azimuth/elevation for UI
   const [lx, ly, lz] = lightDirection;
@@ -99,6 +109,69 @@ export function ControlPanel({
           onChange={handleElevationChange}
         />
       </div>
+
+      {/* Scanline controls */}
+      <div className="control-group" style={{ marginTop: 16 }}>
+        <div className="control-label">
+          <span>Scanlines</span>
+          <label className="toggle-switch">
+            <input
+              type="checkbox"
+              checked={scanlines.enabled}
+              onChange={(e) =>
+                onScanlinesChange({ ...scanlines, enabled: e.target.checked })
+              }
+            />
+            <span className="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      {scanlines.enabled && (
+        <>
+          <div className="control-group">
+            <div className="control-label">
+              <span>Line Density</span>
+              <span className="control-value">{scanlines.count}</span>
+            </div>
+            <input
+              type="range"
+              min="100"
+              max="600"
+              step="50"
+              value={scanlines.count}
+              onChange={(e) =>
+                onScanlinesChange({
+                  ...scanlines,
+                  count: parseInt(e.target.value),
+                })
+              }
+            />
+          </div>
+
+          <div className="control-group">
+            <div className="control-label">
+              <span>Intensity</span>
+              <span className="control-value">
+                {Math.round(scanlines.opacity * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0.1"
+              max="0.6"
+              step="0.05"
+              value={scanlines.opacity}
+              onChange={(e) =>
+                onScanlinesChange({
+                  ...scanlines,
+                  opacity: parseFloat(e.target.value),
+                })
+              }
+            />
+          </div>
+        </>
+      )}
 
       {/* Keyboard shortcuts */}
       <div className="shortcuts">

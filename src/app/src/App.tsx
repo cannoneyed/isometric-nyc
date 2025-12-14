@@ -6,15 +6,21 @@ import { TileInfo } from "./components/TileInfo";
 interface TileConfig {
   gridWidth: number;
   gridHeight: number;
+  originalWidth: number;
+  originalHeight: number;
   tileSize: number;
   tileUrlPattern: string;
+  maxZoomLevel: number;
 }
 
 interface TileManifest {
   gridWidth: number;
   gridHeight: number;
+  originalWidth?: number;
+  originalHeight?: number;
   tileSize: number;
   totalTiles: number;
+  maxZoomLevel: number;
   generated: string;
   urlPattern: string;
 }
@@ -40,8 +46,11 @@ function App() {
         setTileConfig({
           gridWidth: manifest.gridWidth,
           gridHeight: manifest.gridHeight,
+          originalWidth: manifest.originalWidth ?? manifest.gridWidth,
+          originalHeight: manifest.originalHeight ?? manifest.gridHeight,
           tileSize: manifest.tileSize,
           tileUrlPattern: `/tiles/{z}/{x}_{y}.png`,
+          maxZoomLevel: manifest.maxZoomLevel ?? 0,
         });
         setLoading(false);
       })
@@ -55,14 +64,24 @@ function App() {
   const [viewState, setViewState] = useState<ViewState | null>(null);
 
   // Initialize view state once tile config is loaded
+  // Center on the actual content area, not the padded grid
   useEffect(() => {
     if (tileConfig && !viewState) {
+      const { originalWidth, originalHeight, gridHeight, tileSize } =
+        tileConfig;
+
+      // Content is at deck.gl x = 0 to originalWidth-1
+      // Content is at deck.gl y = gridHeight-originalHeight to gridHeight-1 (due to Y-flip)
+      // Center of content:
+      const centerX = (originalWidth / 2) * tileSize;
+      const centerY = (gridHeight - originalHeight / 2) * tileSize;
+
+      console.log(
+        `View init: centering at (${centerX}, ${centerY}), original=${originalWidth}x${originalHeight}, padded=${tileConfig.gridWidth}x${gridHeight}`
+      );
+
       setViewState({
-        target: [
-          (tileConfig.gridWidth * tileConfig.tileSize) / 2,
-          (tileConfig.gridHeight * tileConfig.tileSize) / 2,
-          0,
-        ],
+        target: [centerX, centerY, 0],
         zoom: -2,
       });
     }
@@ -75,6 +94,11 @@ function App() {
     x: number;
     y: number;
   } | null>(null);
+  const [scanlines, setScanlines] = useState({
+    enabled: true,
+    count: 300,
+    opacity: 0.25,
+  });
 
   const handleViewStateChange = useCallback(
     (params: { viewState: ViewState }) => {
@@ -138,6 +162,7 @@ function App() {
         onViewStateChange={handleViewStateChange}
         lightDirection={lightDirection}
         onTileHover={handleTileHover}
+        scanlines={scanlines}
       />
 
       <header className="header">
@@ -150,6 +175,8 @@ function App() {
         lightDirection={lightDirection}
         onLightDirectionChange={setLightDirection}
         visibleTiles={visibleTiles}
+        scanlines={scanlines}
+        onScanlinesChange={setScanlines}
       />
 
       <TileInfo hoveredTile={hoveredTile} viewState={viewState} />

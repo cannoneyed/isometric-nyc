@@ -4,12 +4,20 @@ import { OrthographicView } from "@deck.gl/core";
 import { TileLayer } from "@deck.gl/geo-layers";
 import { BitmapLayer } from "@deck.gl/layers";
 import type { ViewState } from "../App";
+import { ScanlineOverlay } from "./ScanlineOverlay";
 
 interface TileConfig {
   gridWidth: number;
   gridHeight: number;
   tileSize: number;
   tileUrlPattern: string;
+  maxZoomLevel: number;
+}
+
+interface ScanlineSettings {
+  enabled: boolean;
+  count: number;
+  opacity: number;
 }
 
 interface IsometricMapProps {
@@ -18,6 +26,7 @@ interface IsometricMapProps {
   onViewStateChange: (params: { viewState: ViewState }) => void;
   lightDirection: [number, number, number];
   onTileHover: (tile: { x: number; y: number } | null) => void;
+  scanlines?: ScanlineSettings;
 }
 
 export function IsometricMap({
@@ -25,6 +34,7 @@ export function IsometricMap({
   viewState,
   onViewStateChange,
   onTileHover,
+  scanlines = { enabled: true, count: 480, opacity: 0.15 },
 }: IsometricMapProps) {
   // Calculate the total extent of the tile grid
   const extent = useMemo(() => {
@@ -43,64 +53,85 @@ export function IsometricMap({
   const maxZoom = 4; // Up to 16x magnification
   const minZoom = -4; // Down to 1/16x (see full map)
 
-  // Create the tile layer
+  // Create the tile layer - use base tiles and let deck.gl handle zoom
   const layers = useMemo(() => {
-    const { tileSize, tileUrlPattern } = tileConfig;
+    const { tileSize, tileUrlPattern, gridWidth, gridHeight } = tileConfig;
+
+    console.log(
+      `Creating TileLayer: grid=${gridWidth}x${gridHeight}, tileSize=${tileSize}, extent=[0,0,${extent.maxX},${extent.maxY}]`
+    );
 
     return [
       new TileLayer({
         id: "isometric-tiles",
-        // Data fetching - return the image URL directly
-        // TileLayer will handle loading it
+
+        // Use TileLayer's built-in data prop pattern for simpler setup
+        // Data URL pattern with {x}, {y}, {z} placeholders
+        data: tileUrlPattern.replace("{x}_{y}", "{x}_{y}"),
+
+        // Custom getTileData to handle our file structure
         getTileData: ({
           index,
+          signal,
         }: {
           index: { x: number; y: number; z: number };
+          signal?: AbortSignal;
         }) => {
           const { x, y, z } = index;
 
-          // Calculate actual tile coordinates
-          // At zoom 0, we show the base tiles (0-19, 0-19)
-          // At higher zooms, we subdivide
-          const scale = Math.pow(2, z);
-          const baseTileX = Math.floor(x / scale);
-          const baseTileY = Math.floor(y / scale);
+          console.log(
+            `getTileData: x=${x}, y=${y}, z=${z}, gridWidth=${gridWidth}, gridHeight=${gridHeight}`
+          );
 
-          // Bounds check - only load tiles that exist
-          if (
-            baseTileX < 0 ||
-            baseTileX >= tileConfig.gridWidth ||
-            baseTileY < 0 ||
-            baseTileY >= tileConfig.gridHeight
-          ) {
+          // Always use z=0 tiles, but scale the coordinates for higher z values
+          // At z=0: full resolution, 1 tile = 1 file tile
+          // At z=1: 2x zoom out, but we still use z=0 files
+          // The TileLayer handles the visual scaling
+
+          // For now, always use z=0 tiles
+          // Bounds check against the grid at z=0
+          if (x < 0 || x >= gridWidth || y < 0 || y >= gridHeight) {
+            console.log(`Out of bounds: (${x},${y})`);
             return Promise.resolve(null);
           }
 
           // Flip Y coordinate: deck.gl has (0,0) at bottom-left,
           // but our tiles have (0,0) at top-left (image convention)
-          const flippedY = tileConfig.gridHeight - 1 - baseTileY;
+          const flippedY = gridHeight - 1 - y;
 
-          // For now, always use z=0 (native resolution tiles)
-          // z=0 = max zoom in, higher z = more zoomed out
-          const url = tileUrlPattern
-            .replace("{z}", "0")
-            .replace("{x}_{y}", `${baseTileX}_${flippedY}`);
+          const url = `/tiles/0/${x}_${flippedY}.png`;
 
-          // Return the URL string - BitmapLayer will load the image
-          return Promise.resolve(url);
+          console.log(`Fetching: ${url}`);
+
+          // Fetch the image
+          return fetch(url, { signal })
+            .then((response) => {
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+              }
+              return response.blob();
+            })
+            .then((blob) => createImageBitmap(blob))
+            .catch((err) => {
+              if (err.name !== "AbortError") {
+                console.warn(`Failed to load tile ${url}: ${err}`);
+              }
+              return null;
+            });
         },
 
-        // Tile bounds calculation
+        // Tile size in pixels
         tileSize,
 
-        // Extent of the tileset
+        // Extent of the tileset (in world coordinates)
         extent: [extent.minX, extent.minY, extent.maxX, extent.maxY],
 
-        // Min/max zoom levels
+        // Allow any zoom level - we'll always serve z=0 tiles
+        // Setting these helps deck.gl know what tile indices to request
         minZoom: 0,
-        maxZoom: 0, // We only have base tiles for now
+        maxZoom: 8, // High value to allow zooming in
 
-        // Refinement strategy - keep parent tiles visible while loading
+        // Refinement strategy
         refinementStrategy: "best-available",
 
         // Cache settings
@@ -110,13 +141,10 @@ export function IsometricMap({
         // Render each tile as a BitmapLayer
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         renderSubLayers: (props: any) => {
-          // Destructure to exclude 'data' from being spread to BitmapLayer
-          // BitmapLayer expects 'data' to be an array, not a string URL
           const { data, tile, ...layerProps } = props;
           const { left, bottom, right, top } = tile.bbox;
 
           // Flip the image vertically by swapping top and bottom in bounds
-          // This corrects for image Y-axis (top-down) vs deck.gl Y-axis (bottom-up)
           const bounds: [number, number, number, number] = [
             left,
             top,
@@ -133,7 +161,6 @@ export function IsometricMap({
             });
           }
 
-          // data is the image URL
           return new BitmapLayer({
             ...layerProps,
             image: data,
@@ -153,6 +180,11 @@ export function IsometricMap({
           } else {
             onTileHover(null);
           }
+        },
+
+        // Enable update triggers
+        updateTriggers: {
+          getTileData: [tileUrlPattern, gridWidth, gridHeight],
         },
       }),
     ];
@@ -200,6 +232,11 @@ export function IsometricMap({
           inertia: 300,
         }}
         getCursor={() => "grab"}
+      />
+      <ScanlineOverlay
+        enabled={scanlines.enabled}
+        scanlineCount={scanlines.count}
+        scanlineOpacity={scanlines.opacity}
       />
     </div>
   );

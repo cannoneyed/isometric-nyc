@@ -1,5 +1,5 @@
 # Generation view queue count per model ID
-_Exported on 12/13/2025 at 10:57:40 EST from Cursor (2.1.39)_
+_Exported on 12/13/2025 at 22:05:10 EST from Cursor (2.1.39)_
 
 ---
 
@@ -13725,4 +13725,32367 @@ The changes:
 1. **Coordinates are now clickable links** - styled in cyan with a hover effect
 2. **Added `navigateToCoord(x, y)` function** - centers the view on the clicked coordinate
 3. **CSS styling** - links are cyan colored and highlight on hover
+
+---
+
+**User**
+
+can you add a "hard refresh" button that clears the image cache and reloads the page
+
+---
+
+**Cursor**
+
+I'll add a "Hard Refresh" button to the toolbar. Let me add it after the "Clear Queue" button:
+
+```html
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Generated Tiles Viewer</title>
+    <link rel="stylesheet" href="/static/viewer.css" />
+    <style>
+      /* Dynamic grid sizing based on template variables */
+      .grid {
+        grid-template-columns: repeat({{ nx }}, {{ size_px }}px);
+        grid-auto-rows: {{ size_px }}px;
+      }
+      .tile.placeholder {
+        min-width: {{ size_px }}px;
+        min-height: {{ size_px }}px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Config data for JS -->
+    <script
+      id="app-config"
+      type="application/json"
+      data-config='{"x": {{ x }}, "y": {{ y }}, "nx": {{ nx }}, "ny": {{ ny }}, "size_px": {{ size_px }}, "models": {{ models_config | safe }}, "default_model_id": "{{ default_model_id }}"}'
+    ></script>
+
+    <!-- Toast notification container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Fixed toolbar -->
+    <div class="toolbar">
+      <div class="toolbar-row">
+        <div class="controls">
+          <label>X: <input type="number" id="x" value="{{ x }}" /></label>
+          <label>Y: <input type="number" id="y" value="{{ y }}" /></label>
+          <label
+            >NX: <input type="number" id="nx" value="{{ nx }}" min="1" max="20"
+          /></label>
+          <label
+            >NY: <input type="number" id="ny" value="{{ ny }}" min="1" max="20"
+          /></label>
+          <label
+            >Size:
+            <input type="number" id="sizePx" value="{{ size_px }}" step="32"
+          /></label>
+          <button onclick="goTo()">Go</button>
+          <div class="toggle-group">
+            <label
+              ><input
+                type="checkbox"
+                id="showLines"
+                {%
+                if
+                show_lines
+                %}checked{%
+                endif
+                %}
+                onchange="toggleLines()"
+              />
+              Lines</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                id="showCoords"
+                {%
+                if
+                show_coords
+                %}checked{%
+                endif
+                %}
+                onchange="toggleCoords()"
+              />
+              Coords</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                id="showRender"
+                {%
+                if
+                show_render
+                %}checked{%
+                endif
+                %}
+                onchange="toggleRender()"
+              />
+              Renders</label
+            >
+          </div>
+          <div class="toggle-group model-group">
+            <label class="model-label"
+              >Model:
+              <select id="modelSelect" class="model-select">
+                <!-- Populated by JavaScript -->
+              </select>
+            </label>
+          </div>
+          <div class="toggle-group tools-group">
+            <span class="tools-label">Tools:</span>
+            <button
+              id="selectTool"
+              class="tool-btn"
+              onclick="toggleSelectTool()"
+              title="Select quadrants (S)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"></path>
+                <path d="M13 13l6 6"></path>
+              </svg>
+              Select
+            </button>
+            <button
+              id="fixWaterTool"
+              class="tool-btn"
+              onclick="toggleFixWaterTool()"
+              title="Fix water color (W)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+              </svg>
+              Fix Water
+            </button>
+            <button
+              id="waterFillTool"
+              class="tool-btn"
+              onclick="toggleWaterFillTool()"
+              title="Fill quadrant with water (F)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                <path d="M12 8v8"></path>
+                <path d="M8 12h8"></path>
+              </svg>
+              Water Fill
+            </button>
+          </div>
+        </div>
+        <div class="toolbar-info">
+          <span>({{ x }}, {{ y }}) → ({{ x + nx - 1 }}, {{ y + ny - 1 }})</span>
+          <span id="selectedQuadrantsDisplay" class="selected-quadrants"></span>
+          <span>{{ generation_dir }}</span>
+        </div>
+      </div>
+      <div class="selection-status" id="selectionStatus">
+        <span id="selectionCount">0 quadrants selected</span>
+        <span class="selection-limit">(max 4)</span>
+        <button
+          id="deselectAllBtn"
+          class="deselect-btn"
+          onclick="deselectAll()"
+          disabled
+        >
+          Deselect All
+        </button>
+        <button
+          id="deleteBtn"
+          class="delete-btn"
+          onclick="deleteSelected()"
+          disabled
+        >
+          Delete
+        </button>
+        <button
+          id="renderBtn"
+          class="render-btn"
+          onclick="renderSelected()"
+          disabled
+        >
+          Render
+        </button>
+        <button
+          id="generateBtn"
+          class="generate-btn"
+          onclick="generateSelected()"
+          disabled
+        >
+          Generate
+        </button>
+        <button
+          id="generateWithPromptBtn"
+          class="generate-prompt-btn"
+          onclick="showPromptDialog()"
+          disabled
+          title="Generate with additional prompt text"
+        >
+          + Prompt
+        </button>
+        <button
+          id="generateRectBtn"
+          class="generate-rect-btn"
+          onclick="generateRectangle()"
+          disabled
+          title="Select exactly 2 quadrants to define rectangle corners"
+        >
+          Generate Rectangle
+        </button>
+        <button
+          id="clearQueueBtn"
+          class="clear-queue-btn"
+          onclick="clearQueue()"
+          title="Clear all pending items from the generation queue"
+        >
+          Clear Queue
+        </button>
+        <button
+          id="hardRefreshBtn"
+          class="hard-refresh-btn"
+          onclick="hardRefresh()"
+          title="Clear image cache and reload page"
+        >
+          ↻ Refresh
+        </button>
+      </div>
+      <div class="water-fix-status" id="waterFixStatus" style="display: none">
+        <span class="water-fix-label">Target Color:</span>
+        <span class="color-swatch" id="targetColorSwatch"></span>
+        <span class="color-hex" id="targetColorHex"
+          >Click a quadrant to pick color</span
+        >
+        <span class="water-fix-quadrant" id="waterFixQuadrant"></span>
+        <button
+          id="applyWaterFixBtn"
+          class="apply-water-fix-btn"
+          onclick="applyWaterFix()"
+          disabled
+        >
+          Apply Fix
+        </button>
+        <button
+          id="cancelWaterFixBtn"
+          class="cancel-water-fix-btn"
+          onclick="cancelWaterFix()"
+        >
+          Cancel
+        </button>
+      </div>
+      <div class="water-fill-status" id="waterFillStatus" style="display: none">
+        <span class="water-fill-label">Water Fill:</span>
+        <span class="color-swatch water-color-preview"></span>
+        <span class="water-fill-instruction" id="waterFillInstruction"
+          >Click a quadrant to fill with water</span
+        >
+        <button
+          id="cancelWaterFillBtn"
+          class="cancel-water-fix-btn"
+          onclick="cancelWaterFill()"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+
+    <div
+      class="grid-container {% if show_lines %}show-lines{% endif %} {% if show_coords %}show-coords{% endif %}"
+      id="gridContainer"
+    >
+      <div class="grid">
+        {% for dy in range(ny) %} {% for dx in range(nx) %} {% set qx = x + dx
+        %} {% set qy = y + dy %} {% set has_gen = tiles.get((dx, dy), False) %}
+        <div
+          class="tile {% if not has_gen %}placeholder{% endif %}"
+          data-coords="{{ qx }},{{ qy }}"
+        >
+          <span class="coords">({{ qx }}, {{ qy }})</span>
+          {% if has_gen %}
+          <img
+            src="/tile/{{ qx }}/{{ qy }}?render={{ '1' if show_render else '0' }}"
+            alt="Tile {{ qx }},{{ qy }}"
+          />
+          {% endif %}
+        </div>
+        {% endfor %} {% endfor %}
+      </div>
+    </div>
+
+    <!-- Prompt Dialog -->
+    <div id="promptDialog" class="dialog-overlay" style="display: none">
+      <div class="dialog-content">
+        <h3>Generate with Prompt</h3>
+        <p class="dialog-description">
+          Add additional instructions for the generation:
+        </p>
+        <textarea
+          id="promptInput"
+          class="prompt-input"
+          placeholder="e.g., 'Add more trees' or 'Make the water darker'"
+          rows="3"
+        ></textarea>
+        <div class="dialog-buttons">
+          <button class="dialog-cancel-btn" onclick="hidePromptDialog()">
+            Cancel
+          </button>
+          <button class="dialog-submit-btn" onclick="submitPromptGeneration()">
+            Generate
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/viewer.js"></script>
+  </body>
+</html>
+
+```
+
+Now let me add the JavaScript function for the hard refresh:
+
+```javascript
+// Get config from data attributes
+const config = JSON.parse(document.getElementById("app-config").dataset.config);
+
+// LocalStorage keys for persistence
+const STORAGE_KEY_MODEL = "viewer_selected_model";
+const STORAGE_KEY_TOOL = "viewer_selected_tool";
+const STORAGE_KEY_SELECTION = "viewer_selected_quadrants";
+
+// Save selected model ID to localStorage
+function saveSelectedModel(modelId) {
+  try {
+    localStorage.setItem(STORAGE_KEY_MODEL, modelId);
+  } catch (e) {
+    console.warn("Could not save model to localStorage:", e);
+  }
+}
+
+// Get saved model ID from localStorage
+function getSavedModel() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_MODEL);
+  } catch (e) {
+    return null;
+  }
+}
+
+// Save selected tool to localStorage
+function saveSelectedTool(toolName) {
+  try {
+    localStorage.setItem(STORAGE_KEY_TOOL, toolName || "");
+  } catch (e) {
+    console.warn("Could not save tool to localStorage:", e);
+  }
+}
+
+// Get saved tool from localStorage
+function getSavedTool() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_TOOL) || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+// Save selected quadrants to localStorage
+function saveSelectedQuadrants() {
+  try {
+    const quadrantsArray = Array.from(selectedQuadrants);
+    localStorage.setItem(STORAGE_KEY_SELECTION, JSON.stringify(quadrantsArray));
+  } catch (e) {
+    console.warn("Could not save selection to localStorage:", e);
+  }
+}
+
+// Get saved quadrants from localStorage
+function getSavedQuadrants() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_SELECTION);
+    return saved ? JSON.parse(saved) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+// Initialize model selector
+function initModelSelector() {
+  const select = document.getElementById("modelSelect");
+  if (!select || !config.models || config.models.length === 0) {
+    return;
+  }
+
+  // Clear existing options
+  select.innerHTML = "";
+
+  // Check if saved model ID exists in available models
+  const savedModelId = getSavedModel();
+  const savedModelExists =
+    savedModelId && config.models.some((m) => m.model_id === savedModelId);
+
+  // Add options for each model
+  config.models.forEach((model, index) => {
+    const option = document.createElement("option");
+    option.value = model.model_id;
+    option.textContent = model.name;
+
+    // Select saved model if it exists, otherwise use default or first
+    if (savedModelExists && model.model_id === savedModelId) {
+      option.selected = true;
+    } else if (
+      !savedModelExists &&
+      model.model_id === config.default_model_id
+    ) {
+      option.selected = true;
+    } else if (!savedModelExists && !config.default_model_id && index === 0) {
+      option.selected = true;
+    }
+    select.appendChild(option);
+  });
+
+  // Auto-blur after selection and save to localStorage
+  select.addEventListener("change", () => {
+    saveSelectedModel(select.value);
+    select.blur();
+  });
+}
+
+// Get the currently selected model ID
+function getSelectedModelId() {
+  const select = document.getElementById("modelSelect");
+  return select ? select.value : null;
+}
+
+// Get display name for a model ID
+function getModelDisplayName(modelId) {
+  if (!modelId) return null;
+  const configEl = document.getElementById("app-config");
+  if (!configEl) return modelId;
+  try {
+    const config = JSON.parse(configEl.dataset.config);
+    const models = config.models || [];
+    const model = models.find((m) => m.model_id === modelId);
+    return model ? model.name : modelId;
+  } catch {
+    return modelId;
+  }
+}
+
+// Apply locked/queued styles based on server status
+function applyStatusStyles(status) {
+  // Clear all existing locked/queued styles first
+  document.querySelectorAll(".tile.locked, .tile.queued").forEach((tile) => {
+    tile.classList.remove("locked", "queued");
+  });
+
+  // Apply locked style to ALL currently processing quadrants (from all models)
+  const processingQuadrants =
+    status.all_processing_quadrants || status.quadrants || [];
+  const isProcessing = status.is_generating || status.active_model_count > 0;
+
+  if (isProcessing && processingQuadrants.length > 0) {
+    document.body.classList.add("generating");
+    processingQuadrants.forEach(([qx, qy]) => {
+      const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+      if (tile) {
+        tile.classList.add("locked");
+      }
+    });
+  } else if (!isProcessing) {
+    document.body.classList.remove("generating");
+  }
+
+  // Apply queued style to pending queue items AND create overlays
+  // Also create overlays for processing items
+  const processingItems = getProcessingItems(status);
+  updateQueueOverlays(status.queue || [], processingItems);
+}
+
+// Extract currently processing items from status
+function getProcessingItems(status) {
+  const processingItems = [];
+  if (status.queue_by_model) {
+    Object.entries(status.queue_by_model).forEach(([modelId, info]) => {
+      if (info.is_processing && info.current_item) {
+        processingItems.push({
+          ...info.current_item,
+          model_id: modelId,
+          _isProcessing: true,
+        });
+      }
+    });
+  }
+  return processingItems;
+}
+
+// Create/update overlays for pending queue items and processing items
+function updateQueueOverlays(queueItems, processingItems = []) {
+  // Remove existing overlays
+  document.querySelectorAll(".queue-overlay").forEach((el) => el.remove());
+
+  // Also clear queued class from all tiles
+  document.querySelectorAll(".tile.queued").forEach((tile) => {
+    tile.classList.remove("queued");
+  });
+
+  const hasItems =
+    (queueItems && queueItems.length > 0) ||
+    (processingItems && processingItems.length > 0);
+  if (!hasItems) return;
+
+  const grid = document.querySelector(".grid");
+  if (!grid) return;
+
+  // Get grid dimensions from config
+  const gridX = config.x;
+  const gridY = config.y;
+  const sizePx = config.size_px;
+  const showLines = document.getElementById("showLines")?.checked || false;
+  const gap = showLines ? 2 : 0;
+
+  // Helper function to create an overlay for an item
+  function createOverlay(item, options = {}) {
+    const { isProcessing = false, queuePosition = null } = options;
+
+    if (!item.quadrants || item.quadrants.length === 0) return null;
+
+    // Calculate bounding box for this generation
+    const quadrants = item.quadrants;
+    let minCol = Infinity,
+      maxCol = -Infinity;
+    let minRow = Infinity,
+      maxRow = -Infinity;
+
+    // Track which tiles are visible in the current view
+    const visibleQuadrants = [];
+
+    quadrants.forEach(([qx, qy]) => {
+      const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+      if (tile) {
+        visibleQuadrants.push([qx, qy]);
+        const col = qx - gridX;
+        const row = qy - gridY;
+        minCol = Math.min(minCol, col);
+        maxCol = Math.max(maxCol, col);
+        minRow = Math.min(minRow, row);
+        maxRow = Math.max(maxRow, row);
+
+        // Add appropriate class to tile
+        if (isProcessing) {
+          tile.classList.add("locked");
+        } else if (!tile.classList.contains("locked")) {
+          tile.classList.add("queued");
+        }
+      }
+    });
+
+    if (visibleQuadrants.length === 0) return null;
+
+    // Create overlay element
+    const overlay = document.createElement("div");
+    overlay.className = isProcessing
+      ? "queue-overlay processing"
+      : "queue-overlay";
+    overlay.dataset.itemId = item.id;
+
+    // Calculate position and size
+    const left = minCol * (sizePx + gap);
+    const top = minRow * (sizePx + gap);
+    const width = (maxCol - minCol + 1) * sizePx + (maxCol - minCol) * gap;
+    const height = (maxRow - minRow + 1) * sizePx + (maxRow - minRow) * gap;
+
+    overlay.style.left = `${left}px`;
+    overlay.style.top = `${top}px`;
+    overlay.style.width = `${width}px`;
+    overlay.style.height = `${height}px`;
+
+    // Badge: spinner for processing, number for queued
+    const badge = document.createElement("div");
+    badge.className = isProcessing ? "queue-badge processing" : "queue-badge";
+    if (isProcessing) {
+      badge.innerHTML = `<svg class="processing-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+      </svg>`;
+    } else {
+      badge.textContent = queuePosition;
+    }
+    overlay.appendChild(badge);
+
+    // Model name label
+    if (item.model_id) {
+      const modelLabel = document.createElement("div");
+      modelLabel.className = "queue-model-label";
+      modelLabel.textContent =
+        getModelDisplayName(item.model_id) || item.model_id;
+      overlay.appendChild(modelLabel);
+    }
+
+    // Cancel button (visible on hover) - for both processing and queued
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className = "queue-cancel-btn";
+    cancelBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+      <line x1="10" y1="11" x2="10" y2="17"/>
+      <line x1="14" y1="11" x2="14" y2="17"/>
+    </svg>`;
+    cancelBtn.title = isProcessing
+      ? "Cancel this generation (in progress)"
+      : "Cancel this generation";
+    cancelBtn.onclick = (e) => {
+      e.stopPropagation();
+      cancelQueueItem(item.id);
+    };
+    overlay.appendChild(cancelBtn);
+
+    return overlay;
+  }
+
+  // First, create overlays for processing items (with spinner)
+  processingItems.forEach((item) => {
+    const overlay = createOverlay(item, { isProcessing: true });
+    if (overlay) {
+      grid.appendChild(overlay);
+    }
+  });
+
+  // Then, create overlays for queued items (with per-model position numbers)
+  // Track position within each model's queue
+  const modelPositionCounters = {};
+
+  queueItems.forEach((item) => {
+    const modelId = item.model_id || "default";
+    // Initialize or increment the counter for this model
+    if (!modelPositionCounters[modelId]) {
+      modelPositionCounters[modelId] = 1;
+    }
+    const positionInModelQueue = modelPositionCounters[modelId];
+    modelPositionCounters[modelId]++;
+
+    const overlay = createOverlay(item, {
+      queuePosition: positionInModelQueue,
+    });
+    if (overlay) {
+      grid.appendChild(overlay);
+    }
+  });
+}
+
+// Cancel a specific queue item
+async function cancelQueueItem(itemId) {
+  try {
+    const response = await fetch(`/api/queue/cancel/${itemId}`, {
+      method: "POST",
+    });
+    const result = await response.json();
+
+    if (result.success && result.cancelled) {
+      showToast("success", "Cancelled", result.message);
+      // Trigger immediate status update
+      checkGenerationStatus();
+    } else if (result.success && !result.cancelled) {
+      showToast("info", "Not found", result.message);
+    } else {
+      showToast("error", "Error", result.error || "Failed to cancel");
+    }
+  } catch (error) {
+    console.error("Cancel queue item failed:", error);
+    showToast("error", "Error", "Failed to cancel queue item");
+  }
+}
+
+function getParams() {
+  const x = document.getElementById("x").value;
+  const y = document.getElementById("y").value;
+  const nx = document.getElementById("nx").value;
+  const ny = document.getElementById("ny").value;
+  const sizePx = document.getElementById("sizePx").value;
+  const showLines = document.getElementById("showLines").checked ? "1" : "0";
+  const showCoords = document.getElementById("showCoords").checked ? "1" : "0";
+  const showRender = document.getElementById("showRender").checked ? "1" : "0";
+  return { x, y, nx, ny, sizePx, showLines, showCoords, showRender };
+}
+
+function goTo() {
+  const { x, y, nx, ny, sizePx, showLines, showCoords, showRender } =
+    getParams();
+  window.location.href = `?x=${x}&y=${y}&nx=${nx}&ny=${ny}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
+}
+
+function navigate(dx, dy) {
+  const params = getParams();
+  const x = parseInt(params.x) + dx;
+  const y = parseInt(params.y) + dy;
+  window.location.href = `?x=${x}&y=${y}&nx=${params.nx}&ny=${params.ny}&size=${params.sizePx}&lines=${params.showLines}&coords=${params.showCoords}&render=${params.showRender}`;
+}
+
+// Navigate to center the view on a specific coordinate
+function navigateToCoord(targetX, targetY) {
+  const params = getParams();
+  const nx = parseInt(params.nx);
+  const ny = parseInt(params.ny);
+  // Center the target coordinate in the view
+  const x = targetX - Math.floor(nx / 2);
+  const y = targetY - Math.floor(ny / 2);
+  window.location.href = `?x=${x}&y=${y}&nx=${params.nx}&ny=${params.ny}&size=${params.sizePx}&lines=${params.showLines}&coords=${params.showCoords}&render=${params.showRender}`;
+}
+
+// Hard refresh - clear image cache and reload page
+function hardRefresh() {
+  // Add cache-busting timestamp to all tile images to force reload
+  const timestamp = Date.now();
+
+  // Update all tile image sources to bust cache
+  document.querySelectorAll(".tile img").forEach((img) => {
+    const url = new URL(img.src);
+    url.searchParams.set("_t", timestamp);
+    img.src = url.toString();
+  });
+
+  // Also reload the page with cache bypass
+  // The true parameter forces reload from server, not cache
+  window.location.reload(true);
+}
+
+function toggleLines() {
+  const container = document.getElementById("gridContainer");
+  const showLines = document.getElementById("showLines").checked;
+  container.classList.toggle("show-lines", showLines);
+
+  // Update URL without reload
+  const url = new URL(window.location);
+  url.searchParams.set("lines", showLines ? "1" : "0");
+  history.replaceState({}, "", url);
+}
+
+function toggleCoords() {
+  const container = document.getElementById("gridContainer");
+  const showCoords = document.getElementById("showCoords").checked;
+  container.classList.toggle("show-coords", showCoords);
+
+  // Update URL without reload
+  const url = new URL(window.location);
+  url.searchParams.set("coords", showCoords ? "1" : "0");
+  history.replaceState({}, "", url);
+}
+
+function toggleRender() {
+  // This requires a page reload to fetch different data
+  const { x, y, nx, ny, sizePx, showLines, showCoords, showRender } =
+    getParams();
+  window.location.href = `?x=${x}&y=${y}&nx=${nx}&ny=${ny}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
+}
+
+// Keyboard navigation
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+
+  // Ignore keyboard shortcuts when prompt dialog is open
+  const promptDialog = document.getElementById("promptDialog");
+  if (promptDialog && promptDialog.style.display !== "none") return;
+
+  switch (e.key) {
+    case "ArrowLeft":
+      navigate(-1, 0);
+      break;
+    case "ArrowRight":
+      navigate(1, 0);
+      break;
+    case "ArrowUp":
+      navigate(0, -1);
+      break;
+    case "ArrowDown":
+      navigate(0, 1);
+      break;
+    case "l":
+    case "L":
+      document.getElementById("showLines").click();
+      break;
+    case "c":
+    case "C":
+      document.getElementById("showCoords").click();
+      break;
+    case "d":
+    case "D":
+      document.getElementById("showRender").click();
+      break;
+    case "g":
+    case "G":
+      generateSelected();
+      break;
+    case "s":
+    case "S":
+      toggleSelectTool();
+      break;
+    case "w":
+    case "W":
+      toggleFixWaterTool();
+      break;
+    case "f":
+    case "F":
+      toggleWaterFillTool();
+      break;
+    case "Escape":
+      if (selectToolActive) toggleSelectTool();
+      if (fixWaterToolActive) cancelWaterFix();
+      if (waterFillToolActive) cancelWaterFill();
+      break;
+  }
+});
+
+// Select tool state
+let selectToolActive = false;
+const selectedQuadrants = new Set();
+const MAX_SELECTION = 4;
+
+function toggleSelectTool() {
+  // Deactivate other tools if active
+  if (fixWaterToolActive) {
+    cancelWaterFix();
+  }
+  if (waterFillToolActive) {
+    cancelWaterFill();
+  }
+
+  selectToolActive = !selectToolActive;
+  const btn = document.getElementById("selectTool");
+  const tiles = document.querySelectorAll(".tile");
+
+  if (selectToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => tile.classList.add("selectable"));
+    saveSelectedTool("select");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => tile.classList.remove("selectable"));
+    saveSelectedTool("");
+  }
+}
+
+// Fix water tool state
+let fixWaterToolActive = false;
+let fixWaterTargetColor = null;
+let fixWaterQuadrant = null;
+
+function toggleFixWaterTool() {
+  // Deactivate other tools if active
+  if (selectToolActive) {
+    toggleSelectTool();
+  }
+  if (waterFillToolActive) {
+    cancelWaterFill();
+  }
+
+  fixWaterToolActive = !fixWaterToolActive;
+  const btn = document.getElementById("fixWaterTool");
+  const tiles = document.querySelectorAll(".tile");
+  const selectionStatus = document.getElementById("selectionStatus");
+  const waterFixStatus = document.getElementById("waterFixStatus");
+
+  if (fixWaterToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => {
+      // Only make tiles with images selectable
+      if (tile.querySelector("img")) {
+        tile.classList.add("fix-water-selectable");
+      }
+    });
+    // Show water fix status bar, hide selection status
+    selectionStatus.style.display = "none";
+    waterFixStatus.style.display = "flex";
+    // Reset state
+    resetWaterFixState();
+    saveSelectedTool("fixwater");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => {
+      tile.classList.remove("fix-water-selectable");
+      tile.classList.remove("water-fix-selected");
+    });
+    // Hide water fix status bar, show selection status
+    selectionStatus.style.display = "flex";
+    waterFixStatus.style.display = "none";
+    saveSelectedTool("");
+  }
+}
+
+function resetWaterFixState() {
+  fixWaterTargetColor = null;
+  fixWaterQuadrant = null;
+  document.getElementById("targetColorSwatch").style.background = "#333";
+  document.getElementById("targetColorSwatch").classList.remove("has-color");
+  document.getElementById("targetColorHex").textContent =
+    "Click a quadrant to pick color";
+  document.getElementById("waterFixQuadrant").textContent = "";
+  // Reset button state
+  const btn = document.getElementById("applyWaterFixBtn");
+  btn.disabled = true;
+  btn.classList.remove("loading");
+  btn.textContent = "Apply Fix";
+  document.querySelectorAll(".tile.water-fix-selected").forEach((tile) => {
+    tile.classList.remove("water-fix-selected");
+  });
+}
+
+function cancelWaterFix() {
+  if (fixWaterToolActive) {
+    toggleFixWaterTool();
+  }
+}
+
+function rgbToHex(r, g, b) {
+  return (
+    "#" +
+    [r, g, b]
+      .map((x) => {
+        const hex = x.toString(16);
+        return hex.length === 1 ? "0" + hex : hex;
+      })
+      .join("")
+      .toUpperCase()
+  );
+}
+
+function getPixelColorFromImage(img, x, y) {
+  // Create an off-screen canvas
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+
+  // Get the pixel data at the clicked position
+  const pixelData = ctx.getImageData(x, y, 1, 1).data;
+
+  return {
+    r: pixelData[0],
+    g: pixelData[1],
+    b: pixelData[2],
+    a: pixelData[3],
+  };
+}
+
+function handleFixWaterClick(tileEl, e) {
+  if (!fixWaterToolActive) return;
+
+  const img = tileEl.querySelector("img");
+  if (!img) {
+    showToast("error", "No image", "This quadrant has no generation to fix");
+    return;
+  }
+
+  // Get coordinates
+  const coords = tileEl.dataset.coords.split(",").map(Number);
+  const [qx, qy] = coords;
+
+  // Calculate click position relative to the image
+  const rect = img.getBoundingClientRect();
+  const clickX = e.clientX - rect.left;
+  const clickY = e.clientY - rect.top;
+
+  // Scale to natural image dimensions
+  const scaleX = img.naturalWidth / rect.width;
+  const scaleY = img.naturalHeight / rect.height;
+  const imgX = Math.floor(clickX * scaleX);
+  const imgY = Math.floor(clickY * scaleY);
+
+  // Ensure we're within bounds
+  if (
+    imgX < 0 ||
+    imgX >= img.naturalWidth ||
+    imgY < 0 ||
+    imgY >= img.naturalHeight
+  ) {
+    console.log("Click outside image bounds");
+    return;
+  }
+
+  try {
+    // Get the pixel color
+    const color = getPixelColorFromImage(img, imgX, imgY);
+    const hex = rgbToHex(color.r, color.g, color.b);
+
+    console.log(
+      `Picked color at (${imgX}, ${imgY}) in quadrant (${qx}, ${qy}): RGB(${color.r}, ${color.g}, ${color.b}) = ${hex}`
+    );
+
+    // Update state
+    fixWaterTargetColor = hex;
+    fixWaterQuadrant = { x: qx, y: qy };
+
+    // Update UI
+    document.getElementById("targetColorSwatch").style.background = hex;
+    document.getElementById("targetColorSwatch").classList.add("has-color");
+    document.getElementById(
+      "targetColorHex"
+    ).textContent = `${hex} — RGB(${color.r}, ${color.g}, ${color.b})`;
+    document.getElementById(
+      "waterFixQuadrant"
+    ).textContent = `Quadrant (${qx}, ${qy})`;
+    document.getElementById("applyWaterFixBtn").disabled = false;
+
+    // Update selected tile visual
+    document.querySelectorAll(".tile.water-fix-selected").forEach((tile) => {
+      tile.classList.remove("water-fix-selected");
+    });
+    tileEl.classList.add("water-fix-selected");
+
+    showToast("info", "Color picked", `Target color: ${hex} at (${qx}, ${qy})`);
+  } catch (error) {
+    console.error("Error picking color:", error);
+    showToast(
+      "error",
+      "Error picking color",
+      "Could not read pixel color. Try again."
+    );
+  }
+}
+
+async function applyWaterFix() {
+  if (!fixWaterTargetColor || !fixWaterQuadrant) {
+    showToast("error", "No color selected", "Pick a color first");
+    return;
+  }
+
+  // Default replacement color - a nice blue water color
+  const replacementColor = "#2A4A5F";
+
+  const btn = document.getElementById("applyWaterFixBtn");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  btn.textContent = "Applying...";
+
+  showToast(
+    "loading",
+    "Applying water fix...",
+    `Replacing ${fixWaterTargetColor} in (${fixWaterQuadrant.x}, ${fixWaterQuadrant.y})`
+  );
+
+  try {
+    const response = await fetch("/api/fix-water", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        x: fixWaterQuadrant.x,
+        y: fixWaterQuadrant.y,
+        target_color: fixWaterTargetColor,
+        replacement_color: replacementColor,
+      }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    if (result.success) {
+      showToast(
+        "success",
+        "Water fix applied!",
+        result.message || "Color replaced successfully"
+      );
+
+      // Refresh the specific tile image immediately with cache-busting
+      const { x, y } = fixWaterQuadrant;
+      const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+      if (tile) {
+        const img = tile.querySelector("img");
+        if (img) {
+          // Add timestamp to bust browser cache
+          const currentSrc = new URL(img.src);
+          currentSrc.searchParams.set("_t", Date.now());
+          img.src = currentSrc.toString();
+        }
+      }
+
+      // Reset the tool after a short delay
+      setTimeout(() => {
+        cancelWaterFix();
+      }, 1000);
+    } else {
+      showToast("error", "Water fix failed", result.error || "Unknown error");
+      btn.disabled = false;
+      btn.classList.remove("loading");
+      btn.textContent = "Apply Fix";
+    }
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Water fix error:", error);
+    showToast("error", "Request failed", error.message);
+    btn.disabled = false;
+    btn.classList.remove("loading");
+    btn.textContent = "Apply Fix";
+  }
+}
+
+// Water Fill tool - fills entire quadrant with water color
+let waterFillToolActive = false;
+
+function toggleWaterFillTool() {
+  // Deactivate other tools
+  if (selectToolActive) {
+    toggleSelectTool();
+  }
+  if (fixWaterToolActive) {
+    cancelWaterFix();
+  }
+
+  waterFillToolActive = !waterFillToolActive;
+  const btn = document.getElementById("waterFillTool");
+  const tiles = document.querySelectorAll(".tile");
+  const selectionStatus = document.getElementById("selectionStatus");
+  const waterFillStatus = document.getElementById("waterFillStatus");
+
+  if (waterFillToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => {
+      tile.classList.add("water-fill-selectable");
+    });
+    // Show water fill status bar, hide selection status
+    selectionStatus.style.display = "none";
+    waterFillStatus.style.display = "flex";
+    saveSelectedTool("waterfill");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => {
+      tile.classList.remove("water-fill-selectable");
+    });
+    // Hide water fill status bar, show selection status
+    selectionStatus.style.display = "flex";
+    waterFillStatus.style.display = "none";
+    saveSelectedTool("");
+  }
+}
+
+function cancelWaterFill() {
+  if (waterFillToolActive) {
+    toggleWaterFillTool();
+  }
+}
+
+async function handleWaterFillClick(tileEl) {
+  if (!waterFillToolActive) return;
+
+  const coords = tileEl.dataset.coords.split(",").map(Number);
+  const [qx, qy] = coords;
+
+  // Confirm action
+  if (!confirm(`Fill quadrant (${qx}, ${qy}) entirely with water color?`)) {
+    return;
+  }
+
+  const instruction = document.getElementById("waterFillInstruction");
+  instruction.textContent = `Filling (${qx}, ${qy})...`;
+
+  showToast(
+    "loading",
+    "Filling with water...",
+    `Processing quadrant (${qx}, ${qy})`
+  );
+
+  try {
+    const response = await fetch("/api/water-fill", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ x: qx, y: qy }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    if (result.success) {
+      showToast("success", "Water fill complete!", result.message);
+
+      // Refresh the tile image
+      const img = tileEl.querySelector("img");
+      if (img) {
+        const currentSrc = new URL(img.src);
+        currentSrc.searchParams.set("_t", Date.now());
+        img.src = currentSrc.toString();
+      }
+
+      instruction.textContent = "Click a quadrant to fill with water";
+    } else {
+      showToast("error", "Water fill failed", result.error || "Unknown error");
+      instruction.textContent = "Click a quadrant to fill with water";
+    }
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Water fill error:", error);
+    showToast("error", "Request failed", error.message);
+    instruction.textContent = "Click a quadrant to fill with water";
+  }
+}
+
+function updateSelectionStatus(serverStatus = null) {
+  const count = selectedQuadrants.size;
+  const countEl = document.getElementById("selectionCount");
+  const limitEl = document.querySelector(".selection-limit");
+  const statusEl = document.getElementById("selectionStatus");
+  const deselectBtn = document.getElementById("deselectAllBtn");
+  const deleteBtn = document.getElementById("deleteBtn");
+  const renderBtn = document.getElementById("renderBtn");
+  const generateBtn = document.getElementById("generateBtn");
+  const generateRectBtn = document.getElementById("generateRectBtn");
+
+  let statusParts = [];
+
+  // Show current processing status from server
+  if (serverStatus) {
+    // Show all active models generating
+    const activeModels = serverStatus.active_models || [];
+    const processingQuadrants =
+      serverStatus.all_processing_quadrants || serverStatus.quadrants || [];
+
+    if (activeModels.length > 0 && processingQuadrants.length > 0) {
+      // Show which models are actively generating with their queue counts
+      const queueByModel = serverStatus.queue_by_model || {};
+
+      if (activeModels.length === 1) {
+        const modelId = activeModels[0];
+        const modelName = getModelDisplayName(modelId) || modelId || "default";
+        const modelInfo = queueByModel[modelId];
+        const queueCount = modelInfo
+          ? modelInfo.pending_count + (modelInfo.is_processing ? 1 : 0)
+          : 0;
+        // Create clickable coordinate links
+        const coordsHtml = processingQuadrants
+          .map(
+            ([x, y]) =>
+              `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+          )
+          .join(" ");
+        const countStr = queueCount > 0 ? ` [${queueCount}]` : "";
+        statusParts.push({
+          html: `🔄 ${modelName}${countStr}: ${coordsHtml}`,
+        });
+      } else {
+        // Multiple models generating in parallel - show each with queue count and coords
+        const queueByModel = serverStatus.queue_by_model || {};
+        const modelPartsHtml = activeModels.map((modelId) => {
+          const name = getModelDisplayName(modelId) || modelId || "default";
+          const modelInfo = queueByModel[modelId];
+          const queueCount = modelInfo
+            ? modelInfo.pending_count + (modelInfo.is_processing ? 1 : 0)
+            : 0;
+          // Get quadrants for this specific model
+          const modelQuadrants =
+            modelInfo && modelInfo.current_item
+              ? modelInfo.current_item.quadrants || []
+              : [];
+          const coordsHtml =
+            modelQuadrants.length > 0
+              ? " " +
+                modelQuadrants
+                  .map(
+                    ([x, y]) =>
+                      `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+                  )
+                  .join(" ")
+              : "";
+          const countStr = queueCount > 0 ? ` [${queueCount}]` : "";
+          return `${name}${countStr}${coordsHtml}`;
+        });
+        statusParts.push({ html: `🔄 ${modelPartsHtml.join(", ")}` });
+      }
+    } else if (
+      serverStatus.is_generating &&
+      serverStatus.quadrants &&
+      serverStatus.quadrants.length > 0
+    ) {
+      // Fallback to old behavior with clickable coords
+      const action =
+        serverStatus.status === "rendering" ? "Rendering" : "Generating";
+      const coordsHtml = serverStatus.quadrants
+        .map(
+          ([x, y]) =>
+            `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+        )
+        .join(" ");
+      statusParts.push({ html: `${action} ${coordsHtml}` });
+    }
+
+    // Show per-model queue counts (only models with items)
+    if (serverStatus.queue_by_model) {
+      const modelQueues = Object.entries(serverStatus.queue_by_model);
+      const queueParts = modelQueues
+        .map(([modelId, info]) => {
+          const name = getModelDisplayName(modelId) || modelId;
+          const count = info.pending_count + (info.is_processing ? 1 : 0);
+          return { name, count };
+        })
+        .filter(({ count }) => count > 0)
+        .map(({ name, count }) => `${name}: ${count}`);
+
+      if (queueParts.length > 0) {
+        statusParts.push(`📋 ${queueParts.join(", ")}`);
+      }
+    }
+  }
+
+  // Update selection display in toolbar-info (separate from status)
+  const selectedDisplay = document.getElementById("selectedQuadrantsDisplay");
+  if (selectedDisplay) {
+    if (count > 0) {
+      const coordsStr = Array.from(selectedQuadrants)
+        .map((key) => {
+          const [x, y] = key.split(",");
+          return `(${x},${y})`;
+        })
+        .join(" ");
+      selectedDisplay.textContent = `✓ ${coordsStr}`;
+      selectedDisplay.style.display = "";
+    } else {
+      selectedDisplay.textContent = "";
+      selectedDisplay.style.display = "none";
+    }
+  }
+
+  // Build status display - some parts may be HTML objects, others plain strings
+  if (statusParts.length > 0) {
+    const statusHtml = statusParts
+      .map((part) => (typeof part === "object" && part.html ? part.html : part))
+      .join(" • ");
+    countEl.innerHTML = statusHtml;
+
+    // Add click handlers for coordinate links
+    countEl.querySelectorAll(".coord-link").forEach((link) => {
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        const x = parseInt(link.dataset.x, 10);
+        const y = parseInt(link.dataset.y, 10);
+        navigateToCoord(x, y);
+      });
+    });
+  } else {
+    countEl.textContent = `${count} selected`;
+  }
+
+  // Update status bar styling
+  const isProcessing =
+    serverStatus &&
+    (serverStatus.is_generating || serverStatus.queue_length > 0);
+  if (isProcessing) {
+    if (limitEl) limitEl.style.display = "none";
+    statusEl.classList.remove("empty");
+    statusEl.classList.add("generating");
+  } else {
+    if (limitEl) limitEl.style.display = "";
+    statusEl.classList.toggle("empty", count === 0);
+    statusEl.classList.remove("generating");
+  }
+
+  // Enable buttons for selection (can add to queue even during processing)
+  deselectBtn.disabled = count === 0;
+  deleteBtn.disabled = count === 0;
+  renderBtn.disabled = count === 0;
+  generateBtn.disabled = count === 0;
+  // Generate with prompt button
+  const generateWithPromptBtn = document.getElementById(
+    "generateWithPromptBtn"
+  );
+  if (generateWithPromptBtn) {
+    generateWithPromptBtn.disabled = count === 0;
+  }
+  // Generate Rectangle requires exactly 2 selected
+  generateRectBtn.disabled = count !== 2;
+}
+
+// Toast notification system
+function showToast(type, title, message, duration = 5000) {
+  const container = document.getElementById("toastContainer");
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+
+  const icons = {
+    success: "✅",
+    error: "❌",
+    info: "ℹ️",
+    loading: "⏳",
+  };
+
+  toast.innerHTML = `
+    <span class="toast-icon">${icons[type] || "ℹ️"}</span>
+    <div class="toast-content">
+      <div class="toast-title">${title}</div>
+      ${message ? `<div class="toast-message">${message}</div>` : ""}
+    </div>
+    <button class="toast-close" onclick="this.parentElement.remove()">×</button>
+  `;
+
+  container.appendChild(toast);
+
+  // Auto-remove after duration (except for loading toasts)
+  if (type !== "loading" && duration > 0) {
+    setTimeout(() => {
+      toast.classList.add("removing");
+      setTimeout(() => toast.remove(), 300);
+    }, duration);
+  }
+
+  return toast;
+}
+
+function clearLoadingToasts() {
+  document.querySelectorAll(".toast.loading").forEach((t) => t.remove());
+}
+
+// Generation/Render state (tracked from server)
+let isGenerating = false;
+let isRendering = false;
+
+async function deleteSelected() {
+  if (selectedQuadrants.size === 0) return;
+
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return [x, y];
+  });
+
+  // Confirm deletion
+  const coordsStr = coords.map(([x, y]) => `(${x},${y})`).join(", ");
+  if (!confirm(`Delete generation data for ${coordsStr}?`)) {
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quadrants: coords }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast("success", "Deleted", result.message);
+      // Deselect and refresh
+      deselectAll();
+      location.reload();
+    } else {
+      showToast("error", "Delete failed", result.error);
+    }
+  } catch (error) {
+    console.error("Delete error:", error);
+    showToast("error", "Delete failed", error.message);
+  }
+}
+
+async function clearQueue() {
+  // Get current queue info first
+  try {
+    const statusResponse = await fetch("/api/status");
+    const status = await statusResponse.json();
+
+    const queueLength = status.queue_length || 0;
+    const isGenerating = status.is_generating || false;
+
+    if (queueLength === 0 && !isGenerating) {
+      showToast(
+        "info",
+        "Nothing to clear",
+        "There are no pending items or active generations."
+      );
+      return;
+    }
+
+    // Build confirm message based on what will be cancelled
+    let confirmMessage = "Are you sure you want to clear the queue?";
+    const parts = [];
+    if (queueLength > 0) {
+      parts.push(`${queueLength} pending item(s)`);
+    }
+    if (isGenerating) {
+      parts.push("the current generation in progress");
+    }
+    if (parts.length > 0) {
+      confirmMessage = `Are you sure you want to cancel ${parts.join(
+        " and "
+      )}?`;
+    }
+
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    // Clear the queue
+    const response = await fetch("/api/queue/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast(
+        "success",
+        "Queue cleared",
+        result.message || `Cleared ${result.cleared_count} item(s)`
+      );
+      // Refresh status
+      await checkGenerationStatus();
+    } else {
+      showToast(
+        "error",
+        "Failed to clear queue",
+        result.error || "Unknown error"
+      );
+    }
+  } catch (error) {
+    console.error("Clear queue error:", error);
+    showToast("error", "Request failed", error.message);
+  }
+}
+
+// Prompt dialog functions
+function showPromptDialog() {
+  if (selectedQuadrants.size === 0) return;
+  const dialog = document.getElementById("promptDialog");
+  const input = document.getElementById("promptInput");
+  if (dialog && input) {
+    input.value = "";
+    dialog.style.display = "flex";
+    input.focus();
+  }
+}
+
+function hidePromptDialog() {
+  const dialog = document.getElementById("promptDialog");
+  if (dialog) {
+    dialog.style.display = "none";
+  }
+}
+
+async function submitPromptGeneration() {
+  const input = document.getElementById("promptInput");
+  const prompt = input ? input.value.trim() : "";
+  hidePromptDialog();
+  await generateSelected(prompt);
+}
+
+async function generateSelected(prompt = null) {
+  if (selectedQuadrants.size === 0) return;
+
+  // Separate selected quadrants into those that need generation vs those that already have it
+  const toGenerate = [];
+  const contextQuadrants = [];
+
+  Array.from(selectedQuadrants).forEach((s) => {
+    const [x, y] = s.split(",").map(Number);
+    const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+
+    if (tile && !tile.classList.contains("placeholder")) {
+      // This quadrant already has a generation - use as context
+      contextQuadrants.push([x, y]);
+    } else {
+      // This quadrant needs generation
+      toGenerate.push([x, y]);
+    }
+  });
+
+  // If nothing needs generation, inform the user
+  if (toGenerate.length === 0) {
+    showToast(
+      "info",
+      "Already generated",
+      "All selected quadrants already have generations. Select at least one empty quadrant."
+    );
+    return;
+  }
+
+  const modelId = getSelectedModelId();
+
+  console.log(
+    "Generate requested for:",
+    toGenerate,
+    "with context:",
+    contextQuadrants,
+    "model:",
+    modelId
+  );
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+
+  // Show immediate feedback with context info
+  const contextMsg =
+    contextQuadrants.length > 0
+      ? ` (using ${contextQuadrants.length} as context)`
+      : "";
+  const promptMsg = prompt ? " with prompt" : "";
+  showToast(
+    "info",
+    "Adding to queue...",
+    `Queueing ${toGenerate.length} quadrant(s) for generation${promptMsg}${contextMsg}`
+  );
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const requestBody = {
+      quadrants: toGenerate,
+      model_id: modelId,
+    };
+
+    // Include context quadrants if any
+    if (contextQuadrants.length > 0) {
+      requestBody.context = contextQuadrants;
+    }
+
+    // Include prompt if provided
+    if (prompt) {
+      requestBody.prompt = prompt;
+    }
+
+    const response = await fetch("/api/generate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    const result = await response.json();
+
+    if (result.queued) {
+      console.log(
+        "Generation queued at position:",
+        result.position,
+        "model:",
+        result.model_id
+      );
+      // Get model name for display
+      const modelName = getModelDisplayName(result.model_id);
+      const modelInfo = modelName ? ` (${modelName})` : "";
+      showToast(
+        "success",
+        "Added to queue",
+        `Queued at position ${result.position}${modelInfo}`
+      );
+    } else if (!result.success) {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    console.error("Generation error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+  }
+}
+
+async function renderSelected() {
+  if (selectedQuadrants.size === 0) return;
+
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return [x, y];
+  });
+
+  console.log("Render requested for:", coords);
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+
+  // Show immediate feedback
+  showToast(
+    "info",
+    "Adding to queue...",
+    `Queueing ${coords.length} quadrant(s) for render`
+  );
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const response = await fetch("/api/render", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ quadrants: coords }),
+    });
+
+    const result = await response.json();
+
+    if (result.queued) {
+      console.log("Render queued at position:", result.position);
+      showToast(
+        "success",
+        "Added to queue",
+        `Render queued at position ${result.position}.`
+      );
+    } else if (!result.success) {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    console.error("Render error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+  }
+}
+
+async function generateRectangle() {
+  if (selectedQuadrants.size !== 2) {
+    showToast(
+      "error",
+      "Invalid selection",
+      "Please select exactly 2 quadrants to define the rectangle corners."
+    );
+    return;
+  }
+
+  // Get the two selected coordinates
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return { x, y };
+  });
+
+  // Calculate rectangle bounds (top-left and bottom-right)
+  const minX = Math.min(coords[0].x, coords[1].x);
+  const maxX = Math.max(coords[0].x, coords[1].x);
+  const minY = Math.min(coords[0].y, coords[1].y);
+  const maxY = Math.max(coords[0].y, coords[1].y);
+
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const totalQuadrants = width * height;
+
+  // Build confirmation message
+  const confirmMessage =
+    `Generate rectangle from (${minX}, ${minY}) to (${maxX}, ${maxY})?\n\n` +
+    `Size: ${width} × ${height} = ${totalQuadrants} quadrant(s)\n\n` +
+    `This will create a generation plan and queue all steps.\n` +
+    `Pre-existing generations will be skipped.`;
+
+  if (!confirm(confirmMessage)) {
+    return;
+  }
+
+  const modelId = getSelectedModelId();
+
+  console.log(
+    "Generate rectangle requested:",
+    { tl: [minX, minY], br: [maxX, maxY] },
+    "with model:",
+    modelId
+  );
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+
+  // Show immediate feedback
+  const btn = document.getElementById("generateRectBtn");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  btn.innerHTML = 'Queueing...<span class="spinner"></span>';
+
+  showToast(
+    "loading",
+    "Creating generation plan...",
+    `Rectangle (${minX}, ${minY}) to (${maxX}, ${maxY})`
+  );
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const response = await fetch("/api/generate-rectangle", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        tl: [minX, minY],
+        br: [maxX, maxY],
+        model_id: modelId,
+      }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    // Reset button
+    btn.classList.remove("loading");
+    btn.innerHTML = "Generate Rectangle";
+
+    if (result.success) {
+      if (result.queued_count === 0) {
+        showToast(
+          "info",
+          "Nothing to generate",
+          result.message || "All quadrants already generated."
+        );
+      } else {
+        console.log("Rectangle generation queued:", result);
+        const summary = result.plan_summary || {};
+        const stepTypes = summary.steps_by_type || {};
+        const typeInfo = Object.entries(stepTypes)
+          .map(([type, count]) => `${count}× ${type}`)
+          .join(", ");
+
+        showToast(
+          "success",
+          "Rectangle queued!",
+          `${result.queued_count} step(s) for ${
+            summary.total_quadrants || "?"
+          } quadrant(s)` + (typeInfo ? ` (${typeInfo})` : "")
+        );
+      }
+    } else {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Generate rectangle error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+
+    // Reset button
+    btn.classList.remove("loading");
+    btn.innerHTML = "Generate Rectangle";
+  }
+}
+
+function deselectAll() {
+  selectedQuadrants.clear();
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+  console.log("Deselected all quadrants");
+}
+
+function toggleTileSelection(tileEl, qx, qy) {
+  if (!selectToolActive) return;
+
+  // Check if this tile is currently being generated or in the queue
+  const key = `${qx},${qy}`;
+  if (
+    tileEl.classList.contains("locked") ||
+    tileEl.classList.contains("queued")
+  ) {
+    console.log(
+      `Cannot select quadrant (${qx}, ${qy}) - currently generating or in queue`
+    );
+    return;
+  }
+
+  if (selectedQuadrants.has(key)) {
+    selectedQuadrants.delete(key);
+    tileEl.classList.remove("selected");
+    console.log(`Deselected quadrant (${qx}, ${qy})`);
+  } else {
+    // Check if we've hit the max selection limit
+    if (selectedQuadrants.size >= MAX_SELECTION) {
+      console.log(`Cannot select more than ${MAX_SELECTION} quadrants`);
+      return;
+    }
+    selectedQuadrants.add(key);
+    tileEl.classList.add("selected");
+    console.log(`Selected quadrant (${qx}, ${qy})`);
+  }
+
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+
+  // Log current selection
+  if (selectedQuadrants.size > 0) {
+    console.log("Selected:", Array.from(selectedQuadrants).join("; "));
+  }
+}
+
+// Setup tile click handlers
+document.querySelectorAll(".tile").forEach((tile) => {
+  tile.addEventListener("click", (e) => {
+    // Handle fix water tool clicks
+    if (fixWaterToolActive) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleFixWaterClick(tile, e);
+      return;
+    }
+
+    // Handle water fill tool clicks
+    if (waterFillToolActive) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleWaterFillClick(tile);
+      return;
+    }
+
+    // Handle select tool clicks
+    if (!selectToolActive) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const coords = tile.dataset.coords.split(",").map(Number);
+    toggleTileSelection(tile, coords[0], coords[1]);
+  });
+});
+
+// Initialize selection status
+updateSelectionStatus();
+
+// Status polling for generation progress
+let statusPollInterval = null;
+let lastStatus = null;
+
+function startStatusPolling() {
+  if (statusPollInterval) return;
+  statusPollInterval = setInterval(checkGenerationStatus, 1000);
+}
+
+function stopStatusPolling() {
+  if (statusPollInterval) {
+    clearInterval(statusPollInterval);
+    statusPollInterval = null;
+  }
+}
+
+async function checkGenerationStatus() {
+  try {
+    const response = await fetch("/api/status");
+    const status = await response.json();
+
+    console.log("Status poll:", status);
+
+    // Track state changes - consider active_model_count for parallel processing
+    const wasGenerating = isGenerating || isRendering;
+    const hasActiveModels = (status.active_model_count || 0) > 0;
+    isGenerating =
+      (status.is_generating || hasActiveModels) &&
+      status.status !== "rendering";
+    isRendering = status.is_generating && status.status === "rendering";
+    const nowProcessing = isGenerating || isRendering;
+
+    // Apply visual styles based on server status
+    applyStatusStyles(status);
+
+    // Update render button based on state
+    const renderBtn = document.getElementById("renderBtn");
+
+    if (nowProcessing) {
+      // Show loading state on render button only (generate state is shown in toolbar)
+      if (isRendering) {
+        renderBtn.classList.add("loading");
+        renderBtn.innerHTML = 'Rendering<span class="spinner"></span>';
+      } else {
+        renderBtn.classList.remove("loading");
+        renderBtn.innerHTML = "Render";
+      }
+
+      // Show toast if not already showing
+      if (document.querySelectorAll(".toast.loading").length === 0) {
+        const opName = isRendering ? "Render" : "Generation";
+        showToast(
+          "loading",
+          `${opName} in progress...`,
+          status.message || "Please wait..."
+        );
+      }
+
+      // Update the loading toast message
+      const loadingToast = document.querySelector(
+        ".toast.loading .toast-message"
+      );
+      if (loadingToast && status.message) {
+        loadingToast.textContent = status.message;
+      }
+    } else {
+      // Reset render button
+      renderBtn.classList.remove("loading");
+      renderBtn.innerHTML = "Render";
+    }
+
+    // Handle status transitions
+    if (status.status === "complete" && wasGenerating && !nowProcessing) {
+      clearLoadingToasts();
+      showToast("success", "Complete!", status.message);
+
+      // Check if there are more items in queue
+      if (status.queue_length > 0) {
+        // Build per-model queue message
+        let queueMsg = "";
+        if (status.queue_by_model) {
+          const parts = Object.entries(status.queue_by_model)
+            .map(([modelId, info]) => {
+              const name = getModelDisplayName(modelId) || modelId;
+              const count = info.pending_count + (info.is_processing ? 1 : 0);
+              return { name, count };
+            })
+            .filter(({ count }) => count > 0)
+            .map(({ name, count }) => `${name}: ${count}`);
+          if (parts.length > 0) {
+            queueMsg = parts.join(", ");
+          }
+        }
+        if (queueMsg) {
+          showToast("info", "Processing queue", queueMsg);
+        }
+      } else {
+        // No more items, reload after delay
+        stopStatusPolling();
+        setTimeout(() => window.location.reload(), 1500);
+      }
+    } else if (status.status === "error" && status.error) {
+      clearLoadingToasts();
+      showToast("error", "Error", status.error);
+
+      // Continue polling if there are more items in queue
+      if (status.queue_length === 0) {
+        stopStatusPolling();
+      }
+    } else if (
+      status.status === "idle" &&
+      status.queue_length === 0 &&
+      !nowProcessing
+    ) {
+      // Idle with no queue - stop polling
+      stopStatusPolling();
+    }
+
+    // Update selection status with server info
+    updateSelectionStatus(status);
+    lastStatus = status;
+  } catch (error) {
+    console.error("Status check failed:", error);
+  }
+}
+
+// Restore saved tool on page load
+function restoreSavedTool() {
+  const savedTool = getSavedTool();
+  if (!savedTool) return;
+
+  // Check if the tool button exists before activating
+  switch (savedTool) {
+    case "select":
+      if (document.getElementById("selectTool")) {
+        toggleSelectTool();
+      }
+      break;
+    case "fixwater":
+      if (document.getElementById("fixWaterTool")) {
+        toggleFixWaterTool();
+      }
+      break;
+    case "waterfill":
+      if (document.getElementById("waterFillTool")) {
+        toggleWaterFillTool();
+      }
+      break;
+    default:
+      // Unknown tool, clear saved state
+      saveSelectedTool("");
+      break;
+  }
+}
+
+// Restore saved quadrant selections on page load
+function restoreSavedQuadrants() {
+  const savedQuadrants = getSavedQuadrants();
+  if (!savedQuadrants || savedQuadrants.length === 0) return;
+
+  let restoredCount = 0;
+
+  savedQuadrants.forEach((key) => {
+    // Check if this quadrant tile exists on the current page
+    const tile = document.querySelector(`.tile[data-coords="${key}"]`);
+    if (tile) {
+      // Don't restore if tile is locked or queued
+      if (
+        !tile.classList.contains("locked") &&
+        !tile.classList.contains("queued")
+      ) {
+        selectedQuadrants.add(key);
+        tile.classList.add("selected");
+        restoredCount++;
+      }
+    }
+  });
+
+  if (restoredCount > 0) {
+    console.log(`Restored ${restoredCount} selected quadrant(s)`);
+    // Update localStorage to only contain valid selections
+    saveSelectedQuadrants();
+    updateSelectionStatus();
+  } else if (savedQuadrants.length > 0) {
+    // Had saved selections but none are on current page - clear storage
+    saveSelectedQuadrants();
+  }
+}
+
+// Initialize on page load
+(async function initialize() {
+  // Initialize model selector
+  initModelSelector();
+
+  // Restore saved tool
+  restoreSavedTool();
+
+  // Restore saved quadrant selections
+  restoreSavedQuadrants();
+
+  try {
+    const response = await fetch("/api/status");
+    const status = await response.json();
+
+    // Apply initial status styles
+    applyStatusStyles(status);
+
+    if (status.is_generating || status.queue_length > 0) {
+      console.log(
+        "Processing in progress or queue non-empty, starting polling..."
+      );
+      isGenerating = status.is_generating && status.status !== "rendering";
+      isRendering = status.is_generating && status.status === "rendering";
+      startStatusPolling();
+    }
+
+    updateSelectionStatus(status);
+  } catch (error) {
+    console.error("Initial status check failed:", error);
+  }
+})();
+
+```
+
+Now let me add CSS styling for the button:
+
+---
+
+**User**
+
+also ensure that newly generated quadrants are shown once theyve been generated
+
+---
+
+**Cursor**
+
+I see the issue. Currently it only reloads the page when the queue is completely empty. Let me modify the code to refresh individual tiles as they complete. I'll need to track which quadrants were processing and refresh them when they complete:
+
+```javascript
+// Get config from data attributes
+const config = JSON.parse(document.getElementById("app-config").dataset.config);
+
+// LocalStorage keys for persistence
+const STORAGE_KEY_MODEL = "viewer_selected_model";
+const STORAGE_KEY_TOOL = "viewer_selected_tool";
+const STORAGE_KEY_SELECTION = "viewer_selected_quadrants";
+
+// Save selected model ID to localStorage
+function saveSelectedModel(modelId) {
+  try {
+    localStorage.setItem(STORAGE_KEY_MODEL, modelId);
+  } catch (e) {
+    console.warn("Could not save model to localStorage:", e);
+  }
+}
+
+// Get saved model ID from localStorage
+function getSavedModel() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_MODEL);
+  } catch (e) {
+    return null;
+  }
+}
+
+// Save selected tool to localStorage
+function saveSelectedTool(toolName) {
+  try {
+    localStorage.setItem(STORAGE_KEY_TOOL, toolName || "");
+  } catch (e) {
+    console.warn("Could not save tool to localStorage:", e);
+  }
+}
+
+// Get saved tool from localStorage
+function getSavedTool() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_TOOL) || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+// Save selected quadrants to localStorage
+function saveSelectedQuadrants() {
+  try {
+    const quadrantsArray = Array.from(selectedQuadrants);
+    localStorage.setItem(STORAGE_KEY_SELECTION, JSON.stringify(quadrantsArray));
+  } catch (e) {
+    console.warn("Could not save selection to localStorage:", e);
+  }
+}
+
+// Get saved quadrants from localStorage
+function getSavedQuadrants() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_SELECTION);
+    return saved ? JSON.parse(saved) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+// Initialize model selector
+function initModelSelector() {
+  const select = document.getElementById("modelSelect");
+  if (!select || !config.models || config.models.length === 0) {
+    return;
+  }
+
+  // Clear existing options
+  select.innerHTML = "";
+
+  // Check if saved model ID exists in available models
+  const savedModelId = getSavedModel();
+  const savedModelExists =
+    savedModelId && config.models.some((m) => m.model_id === savedModelId);
+
+  // Add options for each model
+  config.models.forEach((model, index) => {
+    const option = document.createElement("option");
+    option.value = model.model_id;
+    option.textContent = model.name;
+
+    // Select saved model if it exists, otherwise use default or first
+    if (savedModelExists && model.model_id === savedModelId) {
+      option.selected = true;
+    } else if (
+      !savedModelExists &&
+      model.model_id === config.default_model_id
+    ) {
+      option.selected = true;
+    } else if (!savedModelExists && !config.default_model_id && index === 0) {
+      option.selected = true;
+    }
+    select.appendChild(option);
+  });
+
+  // Auto-blur after selection and save to localStorage
+  select.addEventListener("change", () => {
+    saveSelectedModel(select.value);
+    select.blur();
+  });
+}
+
+// Get the currently selected model ID
+function getSelectedModelId() {
+  const select = document.getElementById("modelSelect");
+  return select ? select.value : null;
+}
+
+// Get display name for a model ID
+function getModelDisplayName(modelId) {
+  if (!modelId) return null;
+  const configEl = document.getElementById("app-config");
+  if (!configEl) return modelId;
+  try {
+    const config = JSON.parse(configEl.dataset.config);
+    const models = config.models || [];
+    const model = models.find((m) => m.model_id === modelId);
+    return model ? model.name : modelId;
+  } catch {
+    return modelId;
+  }
+}
+
+// Apply locked/queued styles based on server status
+function applyStatusStyles(status) {
+  // Clear all existing locked/queued styles first
+  document.querySelectorAll(".tile.locked, .tile.queued").forEach((tile) => {
+    tile.classList.remove("locked", "queued");
+  });
+
+  // Apply locked style to ALL currently processing quadrants (from all models)
+  const processingQuadrants =
+    status.all_processing_quadrants || status.quadrants || [];
+  const isProcessing = status.is_generating || status.active_model_count > 0;
+
+  if (isProcessing && processingQuadrants.length > 0) {
+    document.body.classList.add("generating");
+    processingQuadrants.forEach(([qx, qy]) => {
+      const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+      if (tile) {
+        tile.classList.add("locked");
+      }
+    });
+  } else if (!isProcessing) {
+    document.body.classList.remove("generating");
+  }
+
+  // Apply queued style to pending queue items AND create overlays
+  // Also create overlays for processing items
+  const processingItems = getProcessingItems(status);
+  updateQueueOverlays(status.queue || [], processingItems);
+}
+
+// Extract currently processing items from status
+function getProcessingItems(status) {
+  const processingItems = [];
+  if (status.queue_by_model) {
+    Object.entries(status.queue_by_model).forEach(([modelId, info]) => {
+      if (info.is_processing && info.current_item) {
+        processingItems.push({
+          ...info.current_item,
+          model_id: modelId,
+          _isProcessing: true,
+        });
+      }
+    });
+  }
+  return processingItems;
+}
+
+// Create/update overlays for pending queue items and processing items
+function updateQueueOverlays(queueItems, processingItems = []) {
+  // Remove existing overlays
+  document.querySelectorAll(".queue-overlay").forEach((el) => el.remove());
+
+  // Also clear queued class from all tiles
+  document.querySelectorAll(".tile.queued").forEach((tile) => {
+    tile.classList.remove("queued");
+  });
+
+  const hasItems =
+    (queueItems && queueItems.length > 0) ||
+    (processingItems && processingItems.length > 0);
+  if (!hasItems) return;
+
+  const grid = document.querySelector(".grid");
+  if (!grid) return;
+
+  // Get grid dimensions from config
+  const gridX = config.x;
+  const gridY = config.y;
+  const sizePx = config.size_px;
+  const showLines = document.getElementById("showLines")?.checked || false;
+  const gap = showLines ? 2 : 0;
+
+  // Helper function to create an overlay for an item
+  function createOverlay(item, options = {}) {
+    const { isProcessing = false, queuePosition = null } = options;
+
+    if (!item.quadrants || item.quadrants.length === 0) return null;
+
+    // Calculate bounding box for this generation
+    const quadrants = item.quadrants;
+    let minCol = Infinity,
+      maxCol = -Infinity;
+    let minRow = Infinity,
+      maxRow = -Infinity;
+
+    // Track which tiles are visible in the current view
+    const visibleQuadrants = [];
+
+    quadrants.forEach(([qx, qy]) => {
+      const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+      if (tile) {
+        visibleQuadrants.push([qx, qy]);
+        const col = qx - gridX;
+        const row = qy - gridY;
+        minCol = Math.min(minCol, col);
+        maxCol = Math.max(maxCol, col);
+        minRow = Math.min(minRow, row);
+        maxRow = Math.max(maxRow, row);
+
+        // Add appropriate class to tile
+        if (isProcessing) {
+          tile.classList.add("locked");
+        } else if (!tile.classList.contains("locked")) {
+          tile.classList.add("queued");
+        }
+      }
+    });
+
+    if (visibleQuadrants.length === 0) return null;
+
+    // Create overlay element
+    const overlay = document.createElement("div");
+    overlay.className = isProcessing
+      ? "queue-overlay processing"
+      : "queue-overlay";
+    overlay.dataset.itemId = item.id;
+
+    // Calculate position and size
+    const left = minCol * (sizePx + gap);
+    const top = minRow * (sizePx + gap);
+    const width = (maxCol - minCol + 1) * sizePx + (maxCol - minCol) * gap;
+    const height = (maxRow - minRow + 1) * sizePx + (maxRow - minRow) * gap;
+
+    overlay.style.left = `${left}px`;
+    overlay.style.top = `${top}px`;
+    overlay.style.width = `${width}px`;
+    overlay.style.height = `${height}px`;
+
+    // Badge: spinner for processing, number for queued
+    const badge = document.createElement("div");
+    badge.className = isProcessing ? "queue-badge processing" : "queue-badge";
+    if (isProcessing) {
+      badge.innerHTML = `<svg class="processing-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+      </svg>`;
+    } else {
+      badge.textContent = queuePosition;
+    }
+    overlay.appendChild(badge);
+
+    // Model name label
+    if (item.model_id) {
+      const modelLabel = document.createElement("div");
+      modelLabel.className = "queue-model-label";
+      modelLabel.textContent =
+        getModelDisplayName(item.model_id) || item.model_id;
+      overlay.appendChild(modelLabel);
+    }
+
+    // Cancel button (visible on hover) - for both processing and queued
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className = "queue-cancel-btn";
+    cancelBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+      <line x1="10" y1="11" x2="10" y2="17"/>
+      <line x1="14" y1="11" x2="14" y2="17"/>
+    </svg>`;
+    cancelBtn.title = isProcessing
+      ? "Cancel this generation (in progress)"
+      : "Cancel this generation";
+    cancelBtn.onclick = (e) => {
+      e.stopPropagation();
+      cancelQueueItem(item.id);
+    };
+    overlay.appendChild(cancelBtn);
+
+    return overlay;
+  }
+
+  // First, create overlays for processing items (with spinner)
+  processingItems.forEach((item) => {
+    const overlay = createOverlay(item, { isProcessing: true });
+    if (overlay) {
+      grid.appendChild(overlay);
+    }
+  });
+
+  // Then, create overlays for queued items (with per-model position numbers)
+  // Track position within each model's queue
+  const modelPositionCounters = {};
+
+  queueItems.forEach((item) => {
+    const modelId = item.model_id || "default";
+    // Initialize or increment the counter for this model
+    if (!modelPositionCounters[modelId]) {
+      modelPositionCounters[modelId] = 1;
+    }
+    const positionInModelQueue = modelPositionCounters[modelId];
+    modelPositionCounters[modelId]++;
+
+    const overlay = createOverlay(item, {
+      queuePosition: positionInModelQueue,
+    });
+    if (overlay) {
+      grid.appendChild(overlay);
+    }
+  });
+}
+
+// Cancel a specific queue item
+async function cancelQueueItem(itemId) {
+  try {
+    const response = await fetch(`/api/queue/cancel/${itemId}`, {
+      method: "POST",
+    });
+    const result = await response.json();
+
+    if (result.success && result.cancelled) {
+      showToast("success", "Cancelled", result.message);
+      // Trigger immediate status update
+      checkGenerationStatus();
+    } else if (result.success && !result.cancelled) {
+      showToast("info", "Not found", result.message);
+    } else {
+      showToast("error", "Error", result.error || "Failed to cancel");
+    }
+  } catch (error) {
+    console.error("Cancel queue item failed:", error);
+    showToast("error", "Error", "Failed to cancel queue item");
+  }
+}
+
+function getParams() {
+  const x = document.getElementById("x").value;
+  const y = document.getElementById("y").value;
+  const nx = document.getElementById("nx").value;
+  const ny = document.getElementById("ny").value;
+  const sizePx = document.getElementById("sizePx").value;
+  const showLines = document.getElementById("showLines").checked ? "1" : "0";
+  const showCoords = document.getElementById("showCoords").checked ? "1" : "0";
+  const showRender = document.getElementById("showRender").checked ? "1" : "0";
+  return { x, y, nx, ny, sizePx, showLines, showCoords, showRender };
+}
+
+function goTo() {
+  const { x, y, nx, ny, sizePx, showLines, showCoords, showRender } =
+    getParams();
+  window.location.href = `?x=${x}&y=${y}&nx=${nx}&ny=${ny}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
+}
+
+function navigate(dx, dy) {
+  const params = getParams();
+  const x = parseInt(params.x) + dx;
+  const y = parseInt(params.y) + dy;
+  window.location.href = `?x=${x}&y=${y}&nx=${params.nx}&ny=${params.ny}&size=${params.sizePx}&lines=${params.showLines}&coords=${params.showCoords}&render=${params.showRender}`;
+}
+
+// Navigate to center the view on a specific coordinate
+function navigateToCoord(targetX, targetY) {
+  const params = getParams();
+  const nx = parseInt(params.nx);
+  const ny = parseInt(params.ny);
+  // Center the target coordinate in the view
+  const x = targetX - Math.floor(nx / 2);
+  const y = targetY - Math.floor(ny / 2);
+  window.location.href = `?x=${x}&y=${y}&nx=${params.nx}&ny=${params.ny}&size=${params.sizePx}&lines=${params.showLines}&coords=${params.showCoords}&render=${params.showRender}`;
+}
+
+// Hard refresh - clear image cache and reload page
+function hardRefresh() {
+  // Add cache-busting timestamp to all tile images to force reload
+  const timestamp = Date.now();
+
+  // Update all tile image sources to bust cache
+  document.querySelectorAll(".tile img").forEach((img) => {
+    const url = new URL(img.src);
+    url.searchParams.set("_t", timestamp);
+    img.src = url.toString();
+  });
+
+  // Also reload the page with cache bypass
+  // The true parameter forces reload from server, not cache
+  window.location.reload(true);
+}
+
+function toggleLines() {
+  const container = document.getElementById("gridContainer");
+  const showLines = document.getElementById("showLines").checked;
+  container.classList.toggle("show-lines", showLines);
+
+  // Update URL without reload
+  const url = new URL(window.location);
+  url.searchParams.set("lines", showLines ? "1" : "0");
+  history.replaceState({}, "", url);
+}
+
+function toggleCoords() {
+  const container = document.getElementById("gridContainer");
+  const showCoords = document.getElementById("showCoords").checked;
+  container.classList.toggle("show-coords", showCoords);
+
+  // Update URL without reload
+  const url = new URL(window.location);
+  url.searchParams.set("coords", showCoords ? "1" : "0");
+  history.replaceState({}, "", url);
+}
+
+function toggleRender() {
+  // This requires a page reload to fetch different data
+  const { x, y, nx, ny, sizePx, showLines, showCoords, showRender } =
+    getParams();
+  window.location.href = `?x=${x}&y=${y}&nx=${nx}&ny=${ny}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
+}
+
+// Keyboard navigation
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+
+  // Ignore keyboard shortcuts when prompt dialog is open
+  const promptDialog = document.getElementById("promptDialog");
+  if (promptDialog && promptDialog.style.display !== "none") return;
+
+  switch (e.key) {
+    case "ArrowLeft":
+      navigate(-1, 0);
+      break;
+    case "ArrowRight":
+      navigate(1, 0);
+      break;
+    case "ArrowUp":
+      navigate(0, -1);
+      break;
+    case "ArrowDown":
+      navigate(0, 1);
+      break;
+    case "l":
+    case "L":
+      document.getElementById("showLines").click();
+      break;
+    case "c":
+    case "C":
+      document.getElementById("showCoords").click();
+      break;
+    case "d":
+    case "D":
+      document.getElementById("showRender").click();
+      break;
+    case "g":
+    case "G":
+      generateSelected();
+      break;
+    case "s":
+    case "S":
+      toggleSelectTool();
+      break;
+    case "w":
+    case "W":
+      toggleFixWaterTool();
+      break;
+    case "f":
+    case "F":
+      toggleWaterFillTool();
+      break;
+    case "Escape":
+      if (selectToolActive) toggleSelectTool();
+      if (fixWaterToolActive) cancelWaterFix();
+      if (waterFillToolActive) cancelWaterFill();
+      break;
+  }
+});
+
+// Select tool state
+let selectToolActive = false;
+const selectedQuadrants = new Set();
+const MAX_SELECTION = 4;
+
+function toggleSelectTool() {
+  // Deactivate other tools if active
+  if (fixWaterToolActive) {
+    cancelWaterFix();
+  }
+  if (waterFillToolActive) {
+    cancelWaterFill();
+  }
+
+  selectToolActive = !selectToolActive;
+  const btn = document.getElementById("selectTool");
+  const tiles = document.querySelectorAll(".tile");
+
+  if (selectToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => tile.classList.add("selectable"));
+    saveSelectedTool("select");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => tile.classList.remove("selectable"));
+    saveSelectedTool("");
+  }
+}
+
+// Fix water tool state
+let fixWaterToolActive = false;
+let fixWaterTargetColor = null;
+let fixWaterQuadrant = null;
+
+function toggleFixWaterTool() {
+  // Deactivate other tools if active
+  if (selectToolActive) {
+    toggleSelectTool();
+  }
+  if (waterFillToolActive) {
+    cancelWaterFill();
+  }
+
+  fixWaterToolActive = !fixWaterToolActive;
+  const btn = document.getElementById("fixWaterTool");
+  const tiles = document.querySelectorAll(".tile");
+  const selectionStatus = document.getElementById("selectionStatus");
+  const waterFixStatus = document.getElementById("waterFixStatus");
+
+  if (fixWaterToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => {
+      // Only make tiles with images selectable
+      if (tile.querySelector("img")) {
+        tile.classList.add("fix-water-selectable");
+      }
+    });
+    // Show water fix status bar, hide selection status
+    selectionStatus.style.display = "none";
+    waterFixStatus.style.display = "flex";
+    // Reset state
+    resetWaterFixState();
+    saveSelectedTool("fixwater");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => {
+      tile.classList.remove("fix-water-selectable");
+      tile.classList.remove("water-fix-selected");
+    });
+    // Hide water fix status bar, show selection status
+    selectionStatus.style.display = "flex";
+    waterFixStatus.style.display = "none";
+    saveSelectedTool("");
+  }
+}
+
+function resetWaterFixState() {
+  fixWaterTargetColor = null;
+  fixWaterQuadrant = null;
+  document.getElementById("targetColorSwatch").style.background = "#333";
+  document.getElementById("targetColorSwatch").classList.remove("has-color");
+  document.getElementById("targetColorHex").textContent =
+    "Click a quadrant to pick color";
+  document.getElementById("waterFixQuadrant").textContent = "";
+  // Reset button state
+  const btn = document.getElementById("applyWaterFixBtn");
+  btn.disabled = true;
+  btn.classList.remove("loading");
+  btn.textContent = "Apply Fix";
+  document.querySelectorAll(".tile.water-fix-selected").forEach((tile) => {
+    tile.classList.remove("water-fix-selected");
+  });
+}
+
+function cancelWaterFix() {
+  if (fixWaterToolActive) {
+    toggleFixWaterTool();
+  }
+}
+
+function rgbToHex(r, g, b) {
+  return (
+    "#" +
+    [r, g, b]
+      .map((x) => {
+        const hex = x.toString(16);
+        return hex.length === 1 ? "0" + hex : hex;
+      })
+      .join("")
+      .toUpperCase()
+  );
+}
+
+function getPixelColorFromImage(img, x, y) {
+  // Create an off-screen canvas
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+
+  // Get the pixel data at the clicked position
+  const pixelData = ctx.getImageData(x, y, 1, 1).data;
+
+  return {
+    r: pixelData[0],
+    g: pixelData[1],
+    b: pixelData[2],
+    a: pixelData[3],
+  };
+}
+
+function handleFixWaterClick(tileEl, e) {
+  if (!fixWaterToolActive) return;
+
+  const img = tileEl.querySelector("img");
+  if (!img) {
+    showToast("error", "No image", "This quadrant has no generation to fix");
+    return;
+  }
+
+  // Get coordinates
+  const coords = tileEl.dataset.coords.split(",").map(Number);
+  const [qx, qy] = coords;
+
+  // Calculate click position relative to the image
+  const rect = img.getBoundingClientRect();
+  const clickX = e.clientX - rect.left;
+  const clickY = e.clientY - rect.top;
+
+  // Scale to natural image dimensions
+  const scaleX = img.naturalWidth / rect.width;
+  const scaleY = img.naturalHeight / rect.height;
+  const imgX = Math.floor(clickX * scaleX);
+  const imgY = Math.floor(clickY * scaleY);
+
+  // Ensure we're within bounds
+  if (
+    imgX < 0 ||
+    imgX >= img.naturalWidth ||
+    imgY < 0 ||
+    imgY >= img.naturalHeight
+  ) {
+    console.log("Click outside image bounds");
+    return;
+  }
+
+  try {
+    // Get the pixel color
+    const color = getPixelColorFromImage(img, imgX, imgY);
+    const hex = rgbToHex(color.r, color.g, color.b);
+
+    console.log(
+      `Picked color at (${imgX}, ${imgY}) in quadrant (${qx}, ${qy}): RGB(${color.r}, ${color.g}, ${color.b}) = ${hex}`
+    );
+
+    // Update state
+    fixWaterTargetColor = hex;
+    fixWaterQuadrant = { x: qx, y: qy };
+
+    // Update UI
+    document.getElementById("targetColorSwatch").style.background = hex;
+    document.getElementById("targetColorSwatch").classList.add("has-color");
+    document.getElementById(
+      "targetColorHex"
+    ).textContent = `${hex} — RGB(${color.r}, ${color.g}, ${color.b})`;
+    document.getElementById(
+      "waterFixQuadrant"
+    ).textContent = `Quadrant (${qx}, ${qy})`;
+    document.getElementById("applyWaterFixBtn").disabled = false;
+
+    // Update selected tile visual
+    document.querySelectorAll(".tile.water-fix-selected").forEach((tile) => {
+      tile.classList.remove("water-fix-selected");
+    });
+    tileEl.classList.add("water-fix-selected");
+
+    showToast("info", "Color picked", `Target color: ${hex} at (${qx}, ${qy})`);
+  } catch (error) {
+    console.error("Error picking color:", error);
+    showToast(
+      "error",
+      "Error picking color",
+      "Could not read pixel color. Try again."
+    );
+  }
+}
+
+async function applyWaterFix() {
+  if (!fixWaterTargetColor || !fixWaterQuadrant) {
+    showToast("error", "No color selected", "Pick a color first");
+    return;
+  }
+
+  // Default replacement color - a nice blue water color
+  const replacementColor = "#2A4A5F";
+
+  const btn = document.getElementById("applyWaterFixBtn");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  btn.textContent = "Applying...";
+
+  showToast(
+    "loading",
+    "Applying water fix...",
+    `Replacing ${fixWaterTargetColor} in (${fixWaterQuadrant.x}, ${fixWaterQuadrant.y})`
+  );
+
+  try {
+    const response = await fetch("/api/fix-water", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        x: fixWaterQuadrant.x,
+        y: fixWaterQuadrant.y,
+        target_color: fixWaterTargetColor,
+        replacement_color: replacementColor,
+      }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    if (result.success) {
+      showToast(
+        "success",
+        "Water fix applied!",
+        result.message || "Color replaced successfully"
+      );
+
+      // Refresh the specific tile image immediately with cache-busting
+      const { x, y } = fixWaterQuadrant;
+      const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+      if (tile) {
+        const img = tile.querySelector("img");
+        if (img) {
+          // Add timestamp to bust browser cache
+          const currentSrc = new URL(img.src);
+          currentSrc.searchParams.set("_t", Date.now());
+          img.src = currentSrc.toString();
+        }
+      }
+
+      // Reset the tool after a short delay
+      setTimeout(() => {
+        cancelWaterFix();
+      }, 1000);
+    } else {
+      showToast("error", "Water fix failed", result.error || "Unknown error");
+      btn.disabled = false;
+      btn.classList.remove("loading");
+      btn.textContent = "Apply Fix";
+    }
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Water fix error:", error);
+    showToast("error", "Request failed", error.message);
+    btn.disabled = false;
+    btn.classList.remove("loading");
+    btn.textContent = "Apply Fix";
+  }
+}
+
+// Water Fill tool - fills entire quadrant with water color
+let waterFillToolActive = false;
+
+function toggleWaterFillTool() {
+  // Deactivate other tools
+  if (selectToolActive) {
+    toggleSelectTool();
+  }
+  if (fixWaterToolActive) {
+    cancelWaterFix();
+  }
+
+  waterFillToolActive = !waterFillToolActive;
+  const btn = document.getElementById("waterFillTool");
+  const tiles = document.querySelectorAll(".tile");
+  const selectionStatus = document.getElementById("selectionStatus");
+  const waterFillStatus = document.getElementById("waterFillStatus");
+
+  if (waterFillToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => {
+      tile.classList.add("water-fill-selectable");
+    });
+    // Show water fill status bar, hide selection status
+    selectionStatus.style.display = "none";
+    waterFillStatus.style.display = "flex";
+    saveSelectedTool("waterfill");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => {
+      tile.classList.remove("water-fill-selectable");
+    });
+    // Hide water fill status bar, show selection status
+    selectionStatus.style.display = "flex";
+    waterFillStatus.style.display = "none";
+    saveSelectedTool("");
+  }
+}
+
+function cancelWaterFill() {
+  if (waterFillToolActive) {
+    toggleWaterFillTool();
+  }
+}
+
+async function handleWaterFillClick(tileEl) {
+  if (!waterFillToolActive) return;
+
+  const coords = tileEl.dataset.coords.split(",").map(Number);
+  const [qx, qy] = coords;
+
+  // Confirm action
+  if (!confirm(`Fill quadrant (${qx}, ${qy}) entirely with water color?`)) {
+    return;
+  }
+
+  const instruction = document.getElementById("waterFillInstruction");
+  instruction.textContent = `Filling (${qx}, ${qy})...`;
+
+  showToast(
+    "loading",
+    "Filling with water...",
+    `Processing quadrant (${qx}, ${qy})`
+  );
+
+  try {
+    const response = await fetch("/api/water-fill", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ x: qx, y: qy }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    if (result.success) {
+      showToast("success", "Water fill complete!", result.message);
+
+      // Refresh the tile image
+      const img = tileEl.querySelector("img");
+      if (img) {
+        const currentSrc = new URL(img.src);
+        currentSrc.searchParams.set("_t", Date.now());
+        img.src = currentSrc.toString();
+      }
+
+      instruction.textContent = "Click a quadrant to fill with water";
+    } else {
+      showToast("error", "Water fill failed", result.error || "Unknown error");
+      instruction.textContent = "Click a quadrant to fill with water";
+    }
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Water fill error:", error);
+    showToast("error", "Request failed", error.message);
+    instruction.textContent = "Click a quadrant to fill with water";
+  }
+}
+
+function updateSelectionStatus(serverStatus = null) {
+  const count = selectedQuadrants.size;
+  const countEl = document.getElementById("selectionCount");
+  const limitEl = document.querySelector(".selection-limit");
+  const statusEl = document.getElementById("selectionStatus");
+  const deselectBtn = document.getElementById("deselectAllBtn");
+  const deleteBtn = document.getElementById("deleteBtn");
+  const renderBtn = document.getElementById("renderBtn");
+  const generateBtn = document.getElementById("generateBtn");
+  const generateRectBtn = document.getElementById("generateRectBtn");
+
+  let statusParts = [];
+
+  // Show current processing status from server
+  if (serverStatus) {
+    // Show all active models generating
+    const activeModels = serverStatus.active_models || [];
+    const processingQuadrants =
+      serverStatus.all_processing_quadrants || serverStatus.quadrants || [];
+
+    if (activeModels.length > 0 && processingQuadrants.length > 0) {
+      // Show which models are actively generating with their queue counts
+      const queueByModel = serverStatus.queue_by_model || {};
+
+      if (activeModels.length === 1) {
+        const modelId = activeModels[0];
+        const modelName = getModelDisplayName(modelId) || modelId || "default";
+        const modelInfo = queueByModel[modelId];
+        const queueCount = modelInfo
+          ? modelInfo.pending_count + (modelInfo.is_processing ? 1 : 0)
+          : 0;
+        // Create clickable coordinate links
+        const coordsHtml = processingQuadrants
+          .map(
+            ([x, y]) =>
+              `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+          )
+          .join(" ");
+        const countStr = queueCount > 0 ? ` [${queueCount}]` : "";
+        statusParts.push({
+          html: `🔄 ${modelName}${countStr}: ${coordsHtml}`,
+        });
+      } else {
+        // Multiple models generating in parallel - show each with queue count and coords
+        const queueByModel = serverStatus.queue_by_model || {};
+        const modelPartsHtml = activeModels.map((modelId) => {
+          const name = getModelDisplayName(modelId) || modelId || "default";
+          const modelInfo = queueByModel[modelId];
+          const queueCount = modelInfo
+            ? modelInfo.pending_count + (modelInfo.is_processing ? 1 : 0)
+            : 0;
+          // Get quadrants for this specific model
+          const modelQuadrants =
+            modelInfo && modelInfo.current_item
+              ? modelInfo.current_item.quadrants || []
+              : [];
+          const coordsHtml =
+            modelQuadrants.length > 0
+              ? " " +
+                modelQuadrants
+                  .map(
+                    ([x, y]) =>
+                      `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+                  )
+                  .join(" ")
+              : "";
+          const countStr = queueCount > 0 ? ` [${queueCount}]` : "";
+          return `${name}${countStr}${coordsHtml}`;
+        });
+        statusParts.push({ html: `🔄 ${modelPartsHtml.join(", ")}` });
+      }
+    } else if (
+      serverStatus.is_generating &&
+      serverStatus.quadrants &&
+      serverStatus.quadrants.length > 0
+    ) {
+      // Fallback to old behavior with clickable coords
+      const action =
+        serverStatus.status === "rendering" ? "Rendering" : "Generating";
+      const coordsHtml = serverStatus.quadrants
+        .map(
+          ([x, y]) =>
+            `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+        )
+        .join(" ");
+      statusParts.push({ html: `${action} ${coordsHtml}` });
+    }
+
+    // Show per-model queue counts (only models with items)
+    if (serverStatus.queue_by_model) {
+      const modelQueues = Object.entries(serverStatus.queue_by_model);
+      const queueParts = modelQueues
+        .map(([modelId, info]) => {
+          const name = getModelDisplayName(modelId) || modelId;
+          const count = info.pending_count + (info.is_processing ? 1 : 0);
+          return { name, count };
+        })
+        .filter(({ count }) => count > 0)
+        .map(({ name, count }) => `${name}: ${count}`);
+
+      if (queueParts.length > 0) {
+        statusParts.push(`📋 ${queueParts.join(", ")}`);
+      }
+    }
+  }
+
+  // Update selection display in toolbar-info (separate from status)
+  const selectedDisplay = document.getElementById("selectedQuadrantsDisplay");
+  if (selectedDisplay) {
+    if (count > 0) {
+      const coordsStr = Array.from(selectedQuadrants)
+        .map((key) => {
+          const [x, y] = key.split(",");
+          return `(${x},${y})`;
+        })
+        .join(" ");
+      selectedDisplay.textContent = `✓ ${coordsStr}`;
+      selectedDisplay.style.display = "";
+    } else {
+      selectedDisplay.textContent = "";
+      selectedDisplay.style.display = "none";
+    }
+  }
+
+  // Build status display - some parts may be HTML objects, others plain strings
+  if (statusParts.length > 0) {
+    const statusHtml = statusParts
+      .map((part) => (typeof part === "object" && part.html ? part.html : part))
+      .join(" • ");
+    countEl.innerHTML = statusHtml;
+
+    // Add click handlers for coordinate links
+    countEl.querySelectorAll(".coord-link").forEach((link) => {
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        const x = parseInt(link.dataset.x, 10);
+        const y = parseInt(link.dataset.y, 10);
+        navigateToCoord(x, y);
+      });
+    });
+  } else {
+    countEl.textContent = `${count} selected`;
+  }
+
+  // Update status bar styling
+  const isProcessing =
+    serverStatus &&
+    (serverStatus.is_generating || serverStatus.queue_length > 0);
+  if (isProcessing) {
+    if (limitEl) limitEl.style.display = "none";
+    statusEl.classList.remove("empty");
+    statusEl.classList.add("generating");
+  } else {
+    if (limitEl) limitEl.style.display = "";
+    statusEl.classList.toggle("empty", count === 0);
+    statusEl.classList.remove("generating");
+  }
+
+  // Enable buttons for selection (can add to queue even during processing)
+  deselectBtn.disabled = count === 0;
+  deleteBtn.disabled = count === 0;
+  renderBtn.disabled = count === 0;
+  generateBtn.disabled = count === 0;
+  // Generate with prompt button
+  const generateWithPromptBtn = document.getElementById(
+    "generateWithPromptBtn"
+  );
+  if (generateWithPromptBtn) {
+    generateWithPromptBtn.disabled = count === 0;
+  }
+  // Generate Rectangle requires exactly 2 selected
+  generateRectBtn.disabled = count !== 2;
+}
+
+// Toast notification system
+function showToast(type, title, message, duration = 5000) {
+  const container = document.getElementById("toastContainer");
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+
+  const icons = {
+    success: "✅",
+    error: "❌",
+    info: "ℹ️",
+    loading: "⏳",
+  };
+
+  toast.innerHTML = `
+    <span class="toast-icon">${icons[type] || "ℹ️"}</span>
+    <div class="toast-content">
+      <div class="toast-title">${title}</div>
+      ${message ? `<div class="toast-message">${message}</div>` : ""}
+    </div>
+    <button class="toast-close" onclick="this.parentElement.remove()">×</button>
+  `;
+
+  container.appendChild(toast);
+
+  // Auto-remove after duration (except for loading toasts)
+  if (type !== "loading" && duration > 0) {
+    setTimeout(() => {
+      toast.classList.add("removing");
+      setTimeout(() => toast.remove(), 300);
+    }, duration);
+  }
+
+  return toast;
+}
+
+function clearLoadingToasts() {
+  document.querySelectorAll(".toast.loading").forEach((t) => t.remove());
+}
+
+// Generation/Render state (tracked from server)
+let isGenerating = false;
+let isRendering = false;
+
+async function deleteSelected() {
+  if (selectedQuadrants.size === 0) return;
+
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return [x, y];
+  });
+
+  // Confirm deletion
+  const coordsStr = coords.map(([x, y]) => `(${x},${y})`).join(", ");
+  if (!confirm(`Delete generation data for ${coordsStr}?`)) {
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quadrants: coords }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast("success", "Deleted", result.message);
+      // Deselect and refresh
+      deselectAll();
+      location.reload();
+    } else {
+      showToast("error", "Delete failed", result.error);
+    }
+  } catch (error) {
+    console.error("Delete error:", error);
+    showToast("error", "Delete failed", error.message);
+  }
+}
+
+async function clearQueue() {
+  // Get current queue info first
+  try {
+    const statusResponse = await fetch("/api/status");
+    const status = await statusResponse.json();
+
+    const queueLength = status.queue_length || 0;
+    const isGenerating = status.is_generating || false;
+
+    if (queueLength === 0 && !isGenerating) {
+      showToast(
+        "info",
+        "Nothing to clear",
+        "There are no pending items or active generations."
+      );
+      return;
+    }
+
+    // Build confirm message based on what will be cancelled
+    let confirmMessage = "Are you sure you want to clear the queue?";
+    const parts = [];
+    if (queueLength > 0) {
+      parts.push(`${queueLength} pending item(s)`);
+    }
+    if (isGenerating) {
+      parts.push("the current generation in progress");
+    }
+    if (parts.length > 0) {
+      confirmMessage = `Are you sure you want to cancel ${parts.join(
+        " and "
+      )}?`;
+    }
+
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    // Clear the queue
+    const response = await fetch("/api/queue/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast(
+        "success",
+        "Queue cleared",
+        result.message || `Cleared ${result.cleared_count} item(s)`
+      );
+      // Refresh status
+      await checkGenerationStatus();
+    } else {
+      showToast(
+        "error",
+        "Failed to clear queue",
+        result.error || "Unknown error"
+      );
+    }
+  } catch (error) {
+    console.error("Clear queue error:", error);
+    showToast("error", "Request failed", error.message);
+  }
+}
+
+// Prompt dialog functions
+function showPromptDialog() {
+  if (selectedQuadrants.size === 0) return;
+  const dialog = document.getElementById("promptDialog");
+  const input = document.getElementById("promptInput");
+  if (dialog && input) {
+    input.value = "";
+    dialog.style.display = "flex";
+    input.focus();
+  }
+}
+
+function hidePromptDialog() {
+  const dialog = document.getElementById("promptDialog");
+  if (dialog) {
+    dialog.style.display = "none";
+  }
+}
+
+async function submitPromptGeneration() {
+  const input = document.getElementById("promptInput");
+  const prompt = input ? input.value.trim() : "";
+  hidePromptDialog();
+  await generateSelected(prompt);
+}
+
+async function generateSelected(prompt = null) {
+  if (selectedQuadrants.size === 0) return;
+
+  // Separate selected quadrants into those that need generation vs those that already have it
+  const toGenerate = [];
+  const contextQuadrants = [];
+
+  Array.from(selectedQuadrants).forEach((s) => {
+    const [x, y] = s.split(",").map(Number);
+    const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+
+    if (tile && !tile.classList.contains("placeholder")) {
+      // This quadrant already has a generation - use as context
+      contextQuadrants.push([x, y]);
+    } else {
+      // This quadrant needs generation
+      toGenerate.push([x, y]);
+    }
+  });
+
+  // If nothing needs generation, inform the user
+  if (toGenerate.length === 0) {
+    showToast(
+      "info",
+      "Already generated",
+      "All selected quadrants already have generations. Select at least one empty quadrant."
+    );
+    return;
+  }
+
+  const modelId = getSelectedModelId();
+
+  console.log(
+    "Generate requested for:",
+    toGenerate,
+    "with context:",
+    contextQuadrants,
+    "model:",
+    modelId
+  );
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+
+  // Show immediate feedback with context info
+  const contextMsg =
+    contextQuadrants.length > 0
+      ? ` (using ${contextQuadrants.length} as context)`
+      : "";
+  const promptMsg = prompt ? " with prompt" : "";
+  showToast(
+    "info",
+    "Adding to queue...",
+    `Queueing ${toGenerate.length} quadrant(s) for generation${promptMsg}${contextMsg}`
+  );
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const requestBody = {
+      quadrants: toGenerate,
+      model_id: modelId,
+    };
+
+    // Include context quadrants if any
+    if (contextQuadrants.length > 0) {
+      requestBody.context = contextQuadrants;
+    }
+
+    // Include prompt if provided
+    if (prompt) {
+      requestBody.prompt = prompt;
+    }
+
+    const response = await fetch("/api/generate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    const result = await response.json();
+
+    if (result.queued) {
+      console.log(
+        "Generation queued at position:",
+        result.position,
+        "model:",
+        result.model_id
+      );
+      // Get model name for display
+      const modelName = getModelDisplayName(result.model_id);
+      const modelInfo = modelName ? ` (${modelName})` : "";
+      showToast(
+        "success",
+        "Added to queue",
+        `Queued at position ${result.position}${modelInfo}`
+      );
+    } else if (!result.success) {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    console.error("Generation error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+  }
+}
+
+async function renderSelected() {
+  if (selectedQuadrants.size === 0) return;
+
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return [x, y];
+  });
+
+  console.log("Render requested for:", coords);
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+
+  // Show immediate feedback
+  showToast(
+    "info",
+    "Adding to queue...",
+    `Queueing ${coords.length} quadrant(s) for render`
+  );
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const response = await fetch("/api/render", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ quadrants: coords }),
+    });
+
+    const result = await response.json();
+
+    if (result.queued) {
+      console.log("Render queued at position:", result.position);
+      showToast(
+        "success",
+        "Added to queue",
+        `Render queued at position ${result.position}.`
+      );
+    } else if (!result.success) {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    console.error("Render error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+  }
+}
+
+async function generateRectangle() {
+  if (selectedQuadrants.size !== 2) {
+    showToast(
+      "error",
+      "Invalid selection",
+      "Please select exactly 2 quadrants to define the rectangle corners."
+    );
+    return;
+  }
+
+  // Get the two selected coordinates
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return { x, y };
+  });
+
+  // Calculate rectangle bounds (top-left and bottom-right)
+  const minX = Math.min(coords[0].x, coords[1].x);
+  const maxX = Math.max(coords[0].x, coords[1].x);
+  const minY = Math.min(coords[0].y, coords[1].y);
+  const maxY = Math.max(coords[0].y, coords[1].y);
+
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const totalQuadrants = width * height;
+
+  // Build confirmation message
+  const confirmMessage =
+    `Generate rectangle from (${minX}, ${minY}) to (${maxX}, ${maxY})?\n\n` +
+    `Size: ${width} × ${height} = ${totalQuadrants} quadrant(s)\n\n` +
+    `This will create a generation plan and queue all steps.\n` +
+    `Pre-existing generations will be skipped.`;
+
+  if (!confirm(confirmMessage)) {
+    return;
+  }
+
+  const modelId = getSelectedModelId();
+
+  console.log(
+    "Generate rectangle requested:",
+    { tl: [minX, minY], br: [maxX, maxY] },
+    "with model:",
+    modelId
+  );
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+
+  // Show immediate feedback
+  const btn = document.getElementById("generateRectBtn");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  btn.innerHTML = 'Queueing...<span class="spinner"></span>';
+
+  showToast(
+    "loading",
+    "Creating generation plan...",
+    `Rectangle (${minX}, ${minY}) to (${maxX}, ${maxY})`
+  );
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const response = await fetch("/api/generate-rectangle", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        tl: [minX, minY],
+        br: [maxX, maxY],
+        model_id: modelId,
+      }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    // Reset button
+    btn.classList.remove("loading");
+    btn.innerHTML = "Generate Rectangle";
+
+    if (result.success) {
+      if (result.queued_count === 0) {
+        showToast(
+          "info",
+          "Nothing to generate",
+          result.message || "All quadrants already generated."
+        );
+      } else {
+        console.log("Rectangle generation queued:", result);
+        const summary = result.plan_summary || {};
+        const stepTypes = summary.steps_by_type || {};
+        const typeInfo = Object.entries(stepTypes)
+          .map(([type, count]) => `${count}× ${type}`)
+          .join(", ");
+
+        showToast(
+          "success",
+          "Rectangle queued!",
+          `${result.queued_count} step(s) for ${
+            summary.total_quadrants || "?"
+          } quadrant(s)` + (typeInfo ? ` (${typeInfo})` : "")
+        );
+      }
+    } else {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Generate rectangle error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+
+    // Reset button
+    btn.classList.remove("loading");
+    btn.innerHTML = "Generate Rectangle";
+  }
+}
+
+function deselectAll() {
+  selectedQuadrants.clear();
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+  console.log("Deselected all quadrants");
+}
+
+function toggleTileSelection(tileEl, qx, qy) {
+  if (!selectToolActive) return;
+
+  // Check if this tile is currently being generated or in the queue
+  const key = `${qx},${qy}`;
+  if (
+    tileEl.classList.contains("locked") ||
+    tileEl.classList.contains("queued")
+  ) {
+    console.log(
+      `Cannot select quadrant (${qx}, ${qy}) - currently generating or in queue`
+    );
+    return;
+  }
+
+  if (selectedQuadrants.has(key)) {
+    selectedQuadrants.delete(key);
+    tileEl.classList.remove("selected");
+    console.log(`Deselected quadrant (${qx}, ${qy})`);
+  } else {
+    // Check if we've hit the max selection limit
+    if (selectedQuadrants.size >= MAX_SELECTION) {
+      console.log(`Cannot select more than ${MAX_SELECTION} quadrants`);
+      return;
+    }
+    selectedQuadrants.add(key);
+    tileEl.classList.add("selected");
+    console.log(`Selected quadrant (${qx}, ${qy})`);
+  }
+
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+
+  // Log current selection
+  if (selectedQuadrants.size > 0) {
+    console.log("Selected:", Array.from(selectedQuadrants).join("; "));
+  }
+}
+
+// Setup tile click handlers
+document.querySelectorAll(".tile").forEach((tile) => {
+  tile.addEventListener("click", (e) => {
+    // Handle fix water tool clicks
+    if (fixWaterToolActive) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleFixWaterClick(tile, e);
+      return;
+    }
+
+    // Handle water fill tool clicks
+    if (waterFillToolActive) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleWaterFillClick(tile);
+      return;
+    }
+
+    // Handle select tool clicks
+    if (!selectToolActive) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const coords = tile.dataset.coords.split(",").map(Number);
+    toggleTileSelection(tile, coords[0], coords[1]);
+  });
+});
+
+// Initialize selection status
+updateSelectionStatus();
+
+// Status polling for generation progress
+let statusPollInterval = null;
+let lastStatus = null;
+let lastProcessingQuadrants = new Set(); // Track quadrants that were processing
+
+function startStatusPolling() {
+  if (statusPollInterval) return;
+  statusPollInterval = setInterval(checkGenerationStatus, 1000);
+}
+
+// Refresh a specific tile's image (or add image if it was a placeholder)
+function refreshTileImage(qx, qy) {
+  const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+  if (!tile) return;
+
+  const showRender = document.getElementById("showRender")?.checked ? "1" : "0";
+  const timestamp = Date.now();
+  const imgUrl = `/tile/${qx}/${qy}?render=${showRender}&_t=${timestamp}`;
+
+  let img = tile.querySelector("img");
+  if (img) {
+    // Update existing image
+    img.src = imgUrl;
+  } else {
+    // Create new image for placeholder tile
+    img = document.createElement("img");
+    img.src = imgUrl;
+    img.alt = `Tile ${qx},${qy}`;
+    img.onload = () => {
+      // Remove placeholder class once image loads
+      tile.classList.remove("placeholder");
+    };
+    tile.appendChild(img);
+  }
+}
+
+function stopStatusPolling() {
+  if (statusPollInterval) {
+    clearInterval(statusPollInterval);
+    statusPollInterval = null;
+  }
+}
+
+async function checkGenerationStatus() {
+  try {
+    const response = await fetch("/api/status");
+    const status = await response.json();
+
+    console.log("Status poll:", status);
+
+    // Track state changes - consider active_model_count for parallel processing
+    const wasGenerating = isGenerating || isRendering;
+    const hasActiveModels = (status.active_model_count || 0) > 0;
+    isGenerating =
+      (status.is_generating || hasActiveModels) &&
+      status.status !== "rendering";
+    isRendering = status.is_generating && status.status === "rendering";
+    const nowProcessing = isGenerating || isRendering;
+
+    // Apply visual styles based on server status
+    applyStatusStyles(status);
+
+    // Update render button based on state
+    const renderBtn = document.getElementById("renderBtn");
+
+    if (nowProcessing) {
+      // Show loading state on render button only (generate state is shown in toolbar)
+      if (isRendering) {
+        renderBtn.classList.add("loading");
+        renderBtn.innerHTML = 'Rendering<span class="spinner"></span>';
+      } else {
+        renderBtn.classList.remove("loading");
+        renderBtn.innerHTML = "Render";
+      }
+
+      // Show toast if not already showing
+      if (document.querySelectorAll(".toast.loading").length === 0) {
+        const opName = isRendering ? "Render" : "Generation";
+        showToast(
+          "loading",
+          `${opName} in progress...`,
+          status.message || "Please wait..."
+        );
+      }
+
+      // Update the loading toast message
+      const loadingToast = document.querySelector(
+        ".toast.loading .toast-message"
+      );
+      if (loadingToast && status.message) {
+        loadingToast.textContent = status.message;
+      }
+    } else {
+      // Reset render button
+      renderBtn.classList.remove("loading");
+      renderBtn.innerHTML = "Render";
+    }
+
+    // Handle status transitions
+    if (status.status === "complete" && wasGenerating && !nowProcessing) {
+      clearLoadingToasts();
+      showToast("success", "Complete!", status.message);
+
+      // Check if there are more items in queue
+      if (status.queue_length > 0) {
+        // Build per-model queue message
+        let queueMsg = "";
+        if (status.queue_by_model) {
+          const parts = Object.entries(status.queue_by_model)
+            .map(([modelId, info]) => {
+              const name = getModelDisplayName(modelId) || modelId;
+              const count = info.pending_count + (info.is_processing ? 1 : 0);
+              return { name, count };
+            })
+            .filter(({ count }) => count > 0)
+            .map(({ name, count }) => `${name}: ${count}`);
+          if (parts.length > 0) {
+            queueMsg = parts.join(", ");
+          }
+        }
+        if (queueMsg) {
+          showToast("info", "Processing queue", queueMsg);
+        }
+      } else {
+        // No more items, reload after delay
+        stopStatusPolling();
+        setTimeout(() => window.location.reload(), 1500);
+      }
+    } else if (status.status === "error" && status.error) {
+      clearLoadingToasts();
+      showToast("error", "Error", status.error);
+
+      // Continue polling if there are more items in queue
+      if (status.queue_length === 0) {
+        stopStatusPolling();
+      }
+    } else if (
+      status.status === "idle" &&
+      status.queue_length === 0 &&
+      !nowProcessing
+    ) {
+      // Idle with no queue - stop polling
+      stopStatusPolling();
+    }
+
+    // Update selection status with server info
+    updateSelectionStatus(status);
+    lastStatus = status;
+  } catch (error) {
+    console.error("Status check failed:", error);
+  }
+}
+
+// Restore saved tool on page load
+function restoreSavedTool() {
+  const savedTool = getSavedTool();
+  if (!savedTool) return;
+
+  // Check if the tool button exists before activating
+  switch (savedTool) {
+    case "select":
+      if (document.getElementById("selectTool")) {
+        toggleSelectTool();
+      }
+      break;
+    case "fixwater":
+      if (document.getElementById("fixWaterTool")) {
+        toggleFixWaterTool();
+      }
+      break;
+    case "waterfill":
+      if (document.getElementById("waterFillTool")) {
+        toggleWaterFillTool();
+      }
+      break;
+    default:
+      // Unknown tool, clear saved state
+      saveSelectedTool("");
+      break;
+  }
+}
+
+// Restore saved quadrant selections on page load
+function restoreSavedQuadrants() {
+  const savedQuadrants = getSavedQuadrants();
+  if (!savedQuadrants || savedQuadrants.length === 0) return;
+
+  let restoredCount = 0;
+
+  savedQuadrants.forEach((key) => {
+    // Check if this quadrant tile exists on the current page
+    const tile = document.querySelector(`.tile[data-coords="${key}"]`);
+    if (tile) {
+      // Don't restore if tile is locked or queued
+      if (
+        !tile.classList.contains("locked") &&
+        !tile.classList.contains("queued")
+      ) {
+        selectedQuadrants.add(key);
+        tile.classList.add("selected");
+        restoredCount++;
+      }
+    }
+  });
+
+  if (restoredCount > 0) {
+    console.log(`Restored ${restoredCount} selected quadrant(s)`);
+    // Update localStorage to only contain valid selections
+    saveSelectedQuadrants();
+    updateSelectionStatus();
+  } else if (savedQuadrants.length > 0) {
+    // Had saved selections but none are on current page - clear storage
+    saveSelectedQuadrants();
+  }
+}
+
+// Initialize on page load
+(async function initialize() {
+  // Initialize model selector
+  initModelSelector();
+
+  // Restore saved tool
+  restoreSavedTool();
+
+  // Restore saved quadrant selections
+  restoreSavedQuadrants();
+
+  try {
+    const response = await fetch("/api/status");
+    const status = await response.json();
+
+    // Apply initial status styles
+    applyStatusStyles(status);
+
+    if (status.is_generating || status.queue_length > 0) {
+      console.log(
+        "Processing in progress or queue non-empty, starting polling..."
+      );
+      isGenerating = status.is_generating && status.status !== "rendering";
+      isRendering = status.is_generating && status.status === "rendering";
+      startStatusPolling();
+    }
+
+    updateSelectionStatus(status);
+  } catch (error) {
+    console.error("Initial status check failed:", error);
+  }
+})();
+
+```
+
+Now let me update the `checkGenerationStatus` function to detect and refresh completed tiles:
+
+```javascript
+// Get config from data attributes
+const config = JSON.parse(document.getElementById("app-config").dataset.config);
+
+// LocalStorage keys for persistence
+const STORAGE_KEY_MODEL = "viewer_selected_model";
+const STORAGE_KEY_TOOL = "viewer_selected_tool";
+const STORAGE_KEY_SELECTION = "viewer_selected_quadrants";
+
+// Save selected model ID to localStorage
+function saveSelectedModel(modelId) {
+  try {
+    localStorage.setItem(STORAGE_KEY_MODEL, modelId);
+  } catch (e) {
+    console.warn("Could not save model to localStorage:", e);
+  }
+}
+
+// Get saved model ID from localStorage
+function getSavedModel() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_MODEL);
+  } catch (e) {
+    return null;
+  }
+}
+
+// Save selected tool to localStorage
+function saveSelectedTool(toolName) {
+  try {
+    localStorage.setItem(STORAGE_KEY_TOOL, toolName || "");
+  } catch (e) {
+    console.warn("Could not save tool to localStorage:", e);
+  }
+}
+
+// Get saved tool from localStorage
+function getSavedTool() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_TOOL) || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+// Save selected quadrants to localStorage
+function saveSelectedQuadrants() {
+  try {
+    const quadrantsArray = Array.from(selectedQuadrants);
+    localStorage.setItem(STORAGE_KEY_SELECTION, JSON.stringify(quadrantsArray));
+  } catch (e) {
+    console.warn("Could not save selection to localStorage:", e);
+  }
+}
+
+// Get saved quadrants from localStorage
+function getSavedQuadrants() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_SELECTION);
+    return saved ? JSON.parse(saved) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+// Initialize model selector
+function initModelSelector() {
+  const select = document.getElementById("modelSelect");
+  if (!select || !config.models || config.models.length === 0) {
+    return;
+  }
+
+  // Clear existing options
+  select.innerHTML = "";
+
+  // Check if saved model ID exists in available models
+  const savedModelId = getSavedModel();
+  const savedModelExists =
+    savedModelId && config.models.some((m) => m.model_id === savedModelId);
+
+  // Add options for each model
+  config.models.forEach((model, index) => {
+    const option = document.createElement("option");
+    option.value = model.model_id;
+    option.textContent = model.name;
+
+    // Select saved model if it exists, otherwise use default or first
+    if (savedModelExists && model.model_id === savedModelId) {
+      option.selected = true;
+    } else if (
+      !savedModelExists &&
+      model.model_id === config.default_model_id
+    ) {
+      option.selected = true;
+    } else if (!savedModelExists && !config.default_model_id && index === 0) {
+      option.selected = true;
+    }
+    select.appendChild(option);
+  });
+
+  // Auto-blur after selection and save to localStorage
+  select.addEventListener("change", () => {
+    saveSelectedModel(select.value);
+    select.blur();
+  });
+}
+
+// Get the currently selected model ID
+function getSelectedModelId() {
+  const select = document.getElementById("modelSelect");
+  return select ? select.value : null;
+}
+
+// Get display name for a model ID
+function getModelDisplayName(modelId) {
+  if (!modelId) return null;
+  const configEl = document.getElementById("app-config");
+  if (!configEl) return modelId;
+  try {
+    const config = JSON.parse(configEl.dataset.config);
+    const models = config.models || [];
+    const model = models.find((m) => m.model_id === modelId);
+    return model ? model.name : modelId;
+  } catch {
+    return modelId;
+  }
+}
+
+// Apply locked/queued styles based on server status
+function applyStatusStyles(status) {
+  // Clear all existing locked/queued styles first
+  document.querySelectorAll(".tile.locked, .tile.queued").forEach((tile) => {
+    tile.classList.remove("locked", "queued");
+  });
+
+  // Apply locked style to ALL currently processing quadrants (from all models)
+  const processingQuadrants =
+    status.all_processing_quadrants || status.quadrants || [];
+  const isProcessing = status.is_generating || status.active_model_count > 0;
+
+  if (isProcessing && processingQuadrants.length > 0) {
+    document.body.classList.add("generating");
+    processingQuadrants.forEach(([qx, qy]) => {
+      const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+      if (tile) {
+        tile.classList.add("locked");
+      }
+    });
+  } else if (!isProcessing) {
+    document.body.classList.remove("generating");
+  }
+
+  // Apply queued style to pending queue items AND create overlays
+  // Also create overlays for processing items
+  const processingItems = getProcessingItems(status);
+  updateQueueOverlays(status.queue || [], processingItems);
+}
+
+// Extract currently processing items from status
+function getProcessingItems(status) {
+  const processingItems = [];
+  if (status.queue_by_model) {
+    Object.entries(status.queue_by_model).forEach(([modelId, info]) => {
+      if (info.is_processing && info.current_item) {
+        processingItems.push({
+          ...info.current_item,
+          model_id: modelId,
+          _isProcessing: true,
+        });
+      }
+    });
+  }
+  return processingItems;
+}
+
+// Create/update overlays for pending queue items and processing items
+function updateQueueOverlays(queueItems, processingItems = []) {
+  // Remove existing overlays
+  document.querySelectorAll(".queue-overlay").forEach((el) => el.remove());
+
+  // Also clear queued class from all tiles
+  document.querySelectorAll(".tile.queued").forEach((tile) => {
+    tile.classList.remove("queued");
+  });
+
+  const hasItems =
+    (queueItems && queueItems.length > 0) ||
+    (processingItems && processingItems.length > 0);
+  if (!hasItems) return;
+
+  const grid = document.querySelector(".grid");
+  if (!grid) return;
+
+  // Get grid dimensions from config
+  const gridX = config.x;
+  const gridY = config.y;
+  const sizePx = config.size_px;
+  const showLines = document.getElementById("showLines")?.checked || false;
+  const gap = showLines ? 2 : 0;
+
+  // Helper function to create an overlay for an item
+  function createOverlay(item, options = {}) {
+    const { isProcessing = false, queuePosition = null } = options;
+
+    if (!item.quadrants || item.quadrants.length === 0) return null;
+
+    // Calculate bounding box for this generation
+    const quadrants = item.quadrants;
+    let minCol = Infinity,
+      maxCol = -Infinity;
+    let minRow = Infinity,
+      maxRow = -Infinity;
+
+    // Track which tiles are visible in the current view
+    const visibleQuadrants = [];
+
+    quadrants.forEach(([qx, qy]) => {
+      const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+      if (tile) {
+        visibleQuadrants.push([qx, qy]);
+        const col = qx - gridX;
+        const row = qy - gridY;
+        minCol = Math.min(minCol, col);
+        maxCol = Math.max(maxCol, col);
+        minRow = Math.min(minRow, row);
+        maxRow = Math.max(maxRow, row);
+
+        // Add appropriate class to tile
+        if (isProcessing) {
+          tile.classList.add("locked");
+        } else if (!tile.classList.contains("locked")) {
+          tile.classList.add("queued");
+        }
+      }
+    });
+
+    if (visibleQuadrants.length === 0) return null;
+
+    // Create overlay element
+    const overlay = document.createElement("div");
+    overlay.className = isProcessing
+      ? "queue-overlay processing"
+      : "queue-overlay";
+    overlay.dataset.itemId = item.id;
+
+    // Calculate position and size
+    const left = minCol * (sizePx + gap);
+    const top = minRow * (sizePx + gap);
+    const width = (maxCol - minCol + 1) * sizePx + (maxCol - minCol) * gap;
+    const height = (maxRow - minRow + 1) * sizePx + (maxRow - minRow) * gap;
+
+    overlay.style.left = `${left}px`;
+    overlay.style.top = `${top}px`;
+    overlay.style.width = `${width}px`;
+    overlay.style.height = `${height}px`;
+
+    // Badge: spinner for processing, number for queued
+    const badge = document.createElement("div");
+    badge.className = isProcessing ? "queue-badge processing" : "queue-badge";
+    if (isProcessing) {
+      badge.innerHTML = `<svg class="processing-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+      </svg>`;
+    } else {
+      badge.textContent = queuePosition;
+    }
+    overlay.appendChild(badge);
+
+    // Model name label
+    if (item.model_id) {
+      const modelLabel = document.createElement("div");
+      modelLabel.className = "queue-model-label";
+      modelLabel.textContent =
+        getModelDisplayName(item.model_id) || item.model_id;
+      overlay.appendChild(modelLabel);
+    }
+
+    // Cancel button (visible on hover) - for both processing and queued
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className = "queue-cancel-btn";
+    cancelBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+      <line x1="10" y1="11" x2="10" y2="17"/>
+      <line x1="14" y1="11" x2="14" y2="17"/>
+    </svg>`;
+    cancelBtn.title = isProcessing
+      ? "Cancel this generation (in progress)"
+      : "Cancel this generation";
+    cancelBtn.onclick = (e) => {
+      e.stopPropagation();
+      cancelQueueItem(item.id);
+    };
+    overlay.appendChild(cancelBtn);
+
+    return overlay;
+  }
+
+  // First, create overlays for processing items (with spinner)
+  processingItems.forEach((item) => {
+    const overlay = createOverlay(item, { isProcessing: true });
+    if (overlay) {
+      grid.appendChild(overlay);
+    }
+  });
+
+  // Then, create overlays for queued items (with per-model position numbers)
+  // Track position within each model's queue
+  const modelPositionCounters = {};
+
+  queueItems.forEach((item) => {
+    const modelId = item.model_id || "default";
+    // Initialize or increment the counter for this model
+    if (!modelPositionCounters[modelId]) {
+      modelPositionCounters[modelId] = 1;
+    }
+    const positionInModelQueue = modelPositionCounters[modelId];
+    modelPositionCounters[modelId]++;
+
+    const overlay = createOverlay(item, {
+      queuePosition: positionInModelQueue,
+    });
+    if (overlay) {
+      grid.appendChild(overlay);
+    }
+  });
+}
+
+// Cancel a specific queue item
+async function cancelQueueItem(itemId) {
+  try {
+    const response = await fetch(`/api/queue/cancel/${itemId}`, {
+      method: "POST",
+    });
+    const result = await response.json();
+
+    if (result.success && result.cancelled) {
+      showToast("success", "Cancelled", result.message);
+      // Trigger immediate status update
+      checkGenerationStatus();
+    } else if (result.success && !result.cancelled) {
+      showToast("info", "Not found", result.message);
+    } else {
+      showToast("error", "Error", result.error || "Failed to cancel");
+    }
+  } catch (error) {
+    console.error("Cancel queue item failed:", error);
+    showToast("error", "Error", "Failed to cancel queue item");
+  }
+}
+
+function getParams() {
+  const x = document.getElementById("x").value;
+  const y = document.getElementById("y").value;
+  const nx = document.getElementById("nx").value;
+  const ny = document.getElementById("ny").value;
+  const sizePx = document.getElementById("sizePx").value;
+  const showLines = document.getElementById("showLines").checked ? "1" : "0";
+  const showCoords = document.getElementById("showCoords").checked ? "1" : "0";
+  const showRender = document.getElementById("showRender").checked ? "1" : "0";
+  return { x, y, nx, ny, sizePx, showLines, showCoords, showRender };
+}
+
+function goTo() {
+  const { x, y, nx, ny, sizePx, showLines, showCoords, showRender } =
+    getParams();
+  window.location.href = `?x=${x}&y=${y}&nx=${nx}&ny=${ny}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
+}
+
+function navigate(dx, dy) {
+  const params = getParams();
+  const x = parseInt(params.x) + dx;
+  const y = parseInt(params.y) + dy;
+  window.location.href = `?x=${x}&y=${y}&nx=${params.nx}&ny=${params.ny}&size=${params.sizePx}&lines=${params.showLines}&coords=${params.showCoords}&render=${params.showRender}`;
+}
+
+// Navigate to center the view on a specific coordinate
+function navigateToCoord(targetX, targetY) {
+  const params = getParams();
+  const nx = parseInt(params.nx);
+  const ny = parseInt(params.ny);
+  // Center the target coordinate in the view
+  const x = targetX - Math.floor(nx / 2);
+  const y = targetY - Math.floor(ny / 2);
+  window.location.href = `?x=${x}&y=${y}&nx=${params.nx}&ny=${params.ny}&size=${params.sizePx}&lines=${params.showLines}&coords=${params.showCoords}&render=${params.showRender}`;
+}
+
+// Hard refresh - clear image cache and reload page
+function hardRefresh() {
+  // Add cache-busting timestamp to all tile images to force reload
+  const timestamp = Date.now();
+
+  // Update all tile image sources to bust cache
+  document.querySelectorAll(".tile img").forEach((img) => {
+    const url = new URL(img.src);
+    url.searchParams.set("_t", timestamp);
+    img.src = url.toString();
+  });
+
+  // Also reload the page with cache bypass
+  // The true parameter forces reload from server, not cache
+  window.location.reload(true);
+}
+
+function toggleLines() {
+  const container = document.getElementById("gridContainer");
+  const showLines = document.getElementById("showLines").checked;
+  container.classList.toggle("show-lines", showLines);
+
+  // Update URL without reload
+  const url = new URL(window.location);
+  url.searchParams.set("lines", showLines ? "1" : "0");
+  history.replaceState({}, "", url);
+}
+
+function toggleCoords() {
+  const container = document.getElementById("gridContainer");
+  const showCoords = document.getElementById("showCoords").checked;
+  container.classList.toggle("show-coords", showCoords);
+
+  // Update URL without reload
+  const url = new URL(window.location);
+  url.searchParams.set("coords", showCoords ? "1" : "0");
+  history.replaceState({}, "", url);
+}
+
+function toggleRender() {
+  // This requires a page reload to fetch different data
+  const { x, y, nx, ny, sizePx, showLines, showCoords, showRender } =
+    getParams();
+  window.location.href = `?x=${x}&y=${y}&nx=${nx}&ny=${ny}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
+}
+
+// Keyboard navigation
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+
+  // Ignore keyboard shortcuts when prompt dialog is open
+  const promptDialog = document.getElementById("promptDialog");
+  if (promptDialog && promptDialog.style.display !== "none") return;
+
+  switch (e.key) {
+    case "ArrowLeft":
+      navigate(-1, 0);
+      break;
+    case "ArrowRight":
+      navigate(1, 0);
+      break;
+    case "ArrowUp":
+      navigate(0, -1);
+      break;
+    case "ArrowDown":
+      navigate(0, 1);
+      break;
+    case "l":
+    case "L":
+      document.getElementById("showLines").click();
+      break;
+    case "c":
+    case "C":
+      document.getElementById("showCoords").click();
+      break;
+    case "d":
+    case "D":
+      document.getElementById("showRender").click();
+      break;
+    case "g":
+    case "G":
+      generateSelected();
+      break;
+    case "s":
+    case "S":
+      toggleSelectTool();
+      break;
+    case "w":
+    case "W":
+      toggleFixWaterTool();
+      break;
+    case "f":
+    case "F":
+      toggleWaterFillTool();
+      break;
+    case "Escape":
+      if (selectToolActive) toggleSelectTool();
+      if (fixWaterToolActive) cancelWaterFix();
+      if (waterFillToolActive) cancelWaterFill();
+      break;
+  }
+});
+
+// Select tool state
+let selectToolActive = false;
+const selectedQuadrants = new Set();
+const MAX_SELECTION = 4;
+
+function toggleSelectTool() {
+  // Deactivate other tools if active
+  if (fixWaterToolActive) {
+    cancelWaterFix();
+  }
+  if (waterFillToolActive) {
+    cancelWaterFill();
+  }
+
+  selectToolActive = !selectToolActive;
+  const btn = document.getElementById("selectTool");
+  const tiles = document.querySelectorAll(".tile");
+
+  if (selectToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => tile.classList.add("selectable"));
+    saveSelectedTool("select");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => tile.classList.remove("selectable"));
+    saveSelectedTool("");
+  }
+}
+
+// Fix water tool state
+let fixWaterToolActive = false;
+let fixWaterTargetColor = null;
+let fixWaterQuadrant = null;
+
+function toggleFixWaterTool() {
+  // Deactivate other tools if active
+  if (selectToolActive) {
+    toggleSelectTool();
+  }
+  if (waterFillToolActive) {
+    cancelWaterFill();
+  }
+
+  fixWaterToolActive = !fixWaterToolActive;
+  const btn = document.getElementById("fixWaterTool");
+  const tiles = document.querySelectorAll(".tile");
+  const selectionStatus = document.getElementById("selectionStatus");
+  const waterFixStatus = document.getElementById("waterFixStatus");
+
+  if (fixWaterToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => {
+      // Only make tiles with images selectable
+      if (tile.querySelector("img")) {
+        tile.classList.add("fix-water-selectable");
+      }
+    });
+    // Show water fix status bar, hide selection status
+    selectionStatus.style.display = "none";
+    waterFixStatus.style.display = "flex";
+    // Reset state
+    resetWaterFixState();
+    saveSelectedTool("fixwater");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => {
+      tile.classList.remove("fix-water-selectable");
+      tile.classList.remove("water-fix-selected");
+    });
+    // Hide water fix status bar, show selection status
+    selectionStatus.style.display = "flex";
+    waterFixStatus.style.display = "none";
+    saveSelectedTool("");
+  }
+}
+
+function resetWaterFixState() {
+  fixWaterTargetColor = null;
+  fixWaterQuadrant = null;
+  document.getElementById("targetColorSwatch").style.background = "#333";
+  document.getElementById("targetColorSwatch").classList.remove("has-color");
+  document.getElementById("targetColorHex").textContent =
+    "Click a quadrant to pick color";
+  document.getElementById("waterFixQuadrant").textContent = "";
+  // Reset button state
+  const btn = document.getElementById("applyWaterFixBtn");
+  btn.disabled = true;
+  btn.classList.remove("loading");
+  btn.textContent = "Apply Fix";
+  document.querySelectorAll(".tile.water-fix-selected").forEach((tile) => {
+    tile.classList.remove("water-fix-selected");
+  });
+}
+
+function cancelWaterFix() {
+  if (fixWaterToolActive) {
+    toggleFixWaterTool();
+  }
+}
+
+function rgbToHex(r, g, b) {
+  return (
+    "#" +
+    [r, g, b]
+      .map((x) => {
+        const hex = x.toString(16);
+        return hex.length === 1 ? "0" + hex : hex;
+      })
+      .join("")
+      .toUpperCase()
+  );
+}
+
+function getPixelColorFromImage(img, x, y) {
+  // Create an off-screen canvas
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+
+  // Get the pixel data at the clicked position
+  const pixelData = ctx.getImageData(x, y, 1, 1).data;
+
+  return {
+    r: pixelData[0],
+    g: pixelData[1],
+    b: pixelData[2],
+    a: pixelData[3],
+  };
+}
+
+function handleFixWaterClick(tileEl, e) {
+  if (!fixWaterToolActive) return;
+
+  const img = tileEl.querySelector("img");
+  if (!img) {
+    showToast("error", "No image", "This quadrant has no generation to fix");
+    return;
+  }
+
+  // Get coordinates
+  const coords = tileEl.dataset.coords.split(",").map(Number);
+  const [qx, qy] = coords;
+
+  // Calculate click position relative to the image
+  const rect = img.getBoundingClientRect();
+  const clickX = e.clientX - rect.left;
+  const clickY = e.clientY - rect.top;
+
+  // Scale to natural image dimensions
+  const scaleX = img.naturalWidth / rect.width;
+  const scaleY = img.naturalHeight / rect.height;
+  const imgX = Math.floor(clickX * scaleX);
+  const imgY = Math.floor(clickY * scaleY);
+
+  // Ensure we're within bounds
+  if (
+    imgX < 0 ||
+    imgX >= img.naturalWidth ||
+    imgY < 0 ||
+    imgY >= img.naturalHeight
+  ) {
+    console.log("Click outside image bounds");
+    return;
+  }
+
+  try {
+    // Get the pixel color
+    const color = getPixelColorFromImage(img, imgX, imgY);
+    const hex = rgbToHex(color.r, color.g, color.b);
+
+    console.log(
+      `Picked color at (${imgX}, ${imgY}) in quadrant (${qx}, ${qy}): RGB(${color.r}, ${color.g}, ${color.b}) = ${hex}`
+    );
+
+    // Update state
+    fixWaterTargetColor = hex;
+    fixWaterQuadrant = { x: qx, y: qy };
+
+    // Update UI
+    document.getElementById("targetColorSwatch").style.background = hex;
+    document.getElementById("targetColorSwatch").classList.add("has-color");
+    document.getElementById(
+      "targetColorHex"
+    ).textContent = `${hex} — RGB(${color.r}, ${color.g}, ${color.b})`;
+    document.getElementById(
+      "waterFixQuadrant"
+    ).textContent = `Quadrant (${qx}, ${qy})`;
+    document.getElementById("applyWaterFixBtn").disabled = false;
+
+    // Update selected tile visual
+    document.querySelectorAll(".tile.water-fix-selected").forEach((tile) => {
+      tile.classList.remove("water-fix-selected");
+    });
+    tileEl.classList.add("water-fix-selected");
+
+    showToast("info", "Color picked", `Target color: ${hex} at (${qx}, ${qy})`);
+  } catch (error) {
+    console.error("Error picking color:", error);
+    showToast(
+      "error",
+      "Error picking color",
+      "Could not read pixel color. Try again."
+    );
+  }
+}
+
+async function applyWaterFix() {
+  if (!fixWaterTargetColor || !fixWaterQuadrant) {
+    showToast("error", "No color selected", "Pick a color first");
+    return;
+  }
+
+  // Default replacement color - a nice blue water color
+  const replacementColor = "#2A4A5F";
+
+  const btn = document.getElementById("applyWaterFixBtn");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  btn.textContent = "Applying...";
+
+  showToast(
+    "loading",
+    "Applying water fix...",
+    `Replacing ${fixWaterTargetColor} in (${fixWaterQuadrant.x}, ${fixWaterQuadrant.y})`
+  );
+
+  try {
+    const response = await fetch("/api/fix-water", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        x: fixWaterQuadrant.x,
+        y: fixWaterQuadrant.y,
+        target_color: fixWaterTargetColor,
+        replacement_color: replacementColor,
+      }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    if (result.success) {
+      showToast(
+        "success",
+        "Water fix applied!",
+        result.message || "Color replaced successfully"
+      );
+
+      // Refresh the specific tile image immediately with cache-busting
+      const { x, y } = fixWaterQuadrant;
+      const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+      if (tile) {
+        const img = tile.querySelector("img");
+        if (img) {
+          // Add timestamp to bust browser cache
+          const currentSrc = new URL(img.src);
+          currentSrc.searchParams.set("_t", Date.now());
+          img.src = currentSrc.toString();
+        }
+      }
+
+      // Reset the tool after a short delay
+      setTimeout(() => {
+        cancelWaterFix();
+      }, 1000);
+    } else {
+      showToast("error", "Water fix failed", result.error || "Unknown error");
+      btn.disabled = false;
+      btn.classList.remove("loading");
+      btn.textContent = "Apply Fix";
+    }
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Water fix error:", error);
+    showToast("error", "Request failed", error.message);
+    btn.disabled = false;
+    btn.classList.remove("loading");
+    btn.textContent = "Apply Fix";
+  }
+}
+
+// Water Fill tool - fills entire quadrant with water color
+let waterFillToolActive = false;
+
+function toggleWaterFillTool() {
+  // Deactivate other tools
+  if (selectToolActive) {
+    toggleSelectTool();
+  }
+  if (fixWaterToolActive) {
+    cancelWaterFix();
+  }
+
+  waterFillToolActive = !waterFillToolActive;
+  const btn = document.getElementById("waterFillTool");
+  const tiles = document.querySelectorAll(".tile");
+  const selectionStatus = document.getElementById("selectionStatus");
+  const waterFillStatus = document.getElementById("waterFillStatus");
+
+  if (waterFillToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => {
+      tile.classList.add("water-fill-selectable");
+    });
+    // Show water fill status bar, hide selection status
+    selectionStatus.style.display = "none";
+    waterFillStatus.style.display = "flex";
+    saveSelectedTool("waterfill");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => {
+      tile.classList.remove("water-fill-selectable");
+    });
+    // Hide water fill status bar, show selection status
+    selectionStatus.style.display = "flex";
+    waterFillStatus.style.display = "none";
+    saveSelectedTool("");
+  }
+}
+
+function cancelWaterFill() {
+  if (waterFillToolActive) {
+    toggleWaterFillTool();
+  }
+}
+
+async function handleWaterFillClick(tileEl) {
+  if (!waterFillToolActive) return;
+
+  const coords = tileEl.dataset.coords.split(",").map(Number);
+  const [qx, qy] = coords;
+
+  // Confirm action
+  if (!confirm(`Fill quadrant (${qx}, ${qy}) entirely with water color?`)) {
+    return;
+  }
+
+  const instruction = document.getElementById("waterFillInstruction");
+  instruction.textContent = `Filling (${qx}, ${qy})...`;
+
+  showToast(
+    "loading",
+    "Filling with water...",
+    `Processing quadrant (${qx}, ${qy})`
+  );
+
+  try {
+    const response = await fetch("/api/water-fill", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ x: qx, y: qy }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    if (result.success) {
+      showToast("success", "Water fill complete!", result.message);
+
+      // Refresh the tile image
+      const img = tileEl.querySelector("img");
+      if (img) {
+        const currentSrc = new URL(img.src);
+        currentSrc.searchParams.set("_t", Date.now());
+        img.src = currentSrc.toString();
+      }
+
+      instruction.textContent = "Click a quadrant to fill with water";
+    } else {
+      showToast("error", "Water fill failed", result.error || "Unknown error");
+      instruction.textContent = "Click a quadrant to fill with water";
+    }
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Water fill error:", error);
+    showToast("error", "Request failed", error.message);
+    instruction.textContent = "Click a quadrant to fill with water";
+  }
+}
+
+function updateSelectionStatus(serverStatus = null) {
+  const count = selectedQuadrants.size;
+  const countEl = document.getElementById("selectionCount");
+  const limitEl = document.querySelector(".selection-limit");
+  const statusEl = document.getElementById("selectionStatus");
+  const deselectBtn = document.getElementById("deselectAllBtn");
+  const deleteBtn = document.getElementById("deleteBtn");
+  const renderBtn = document.getElementById("renderBtn");
+  const generateBtn = document.getElementById("generateBtn");
+  const generateRectBtn = document.getElementById("generateRectBtn");
+
+  let statusParts = [];
+
+  // Show current processing status from server
+  if (serverStatus) {
+    // Show all active models generating
+    const activeModels = serverStatus.active_models || [];
+    const processingQuadrants =
+      serverStatus.all_processing_quadrants || serverStatus.quadrants || [];
+
+    if (activeModels.length > 0 && processingQuadrants.length > 0) {
+      // Show which models are actively generating with their queue counts
+      const queueByModel = serverStatus.queue_by_model || {};
+
+      if (activeModels.length === 1) {
+        const modelId = activeModels[0];
+        const modelName = getModelDisplayName(modelId) || modelId || "default";
+        const modelInfo = queueByModel[modelId];
+        const queueCount = modelInfo
+          ? modelInfo.pending_count + (modelInfo.is_processing ? 1 : 0)
+          : 0;
+        // Create clickable coordinate links
+        const coordsHtml = processingQuadrants
+          .map(
+            ([x, y]) =>
+              `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+          )
+          .join(" ");
+        const countStr = queueCount > 0 ? ` [${queueCount}]` : "";
+        statusParts.push({
+          html: `🔄 ${modelName}${countStr}: ${coordsHtml}`,
+        });
+      } else {
+        // Multiple models generating in parallel - show each with queue count and coords
+        const queueByModel = serverStatus.queue_by_model || {};
+        const modelPartsHtml = activeModels.map((modelId) => {
+          const name = getModelDisplayName(modelId) || modelId || "default";
+          const modelInfo = queueByModel[modelId];
+          const queueCount = modelInfo
+            ? modelInfo.pending_count + (modelInfo.is_processing ? 1 : 0)
+            : 0;
+          // Get quadrants for this specific model
+          const modelQuadrants =
+            modelInfo && modelInfo.current_item
+              ? modelInfo.current_item.quadrants || []
+              : [];
+          const coordsHtml =
+            modelQuadrants.length > 0
+              ? " " +
+                modelQuadrants
+                  .map(
+                    ([x, y]) =>
+                      `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+                  )
+                  .join(" ")
+              : "";
+          const countStr = queueCount > 0 ? ` [${queueCount}]` : "";
+          return `${name}${countStr}${coordsHtml}`;
+        });
+        statusParts.push({ html: `🔄 ${modelPartsHtml.join(", ")}` });
+      }
+    } else if (
+      serverStatus.is_generating &&
+      serverStatus.quadrants &&
+      serverStatus.quadrants.length > 0
+    ) {
+      // Fallback to old behavior with clickable coords
+      const action =
+        serverStatus.status === "rendering" ? "Rendering" : "Generating";
+      const coordsHtml = serverStatus.quadrants
+        .map(
+          ([x, y]) =>
+            `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+        )
+        .join(" ");
+      statusParts.push({ html: `${action} ${coordsHtml}` });
+    }
+
+    // Show per-model queue counts (only models with items)
+    if (serverStatus.queue_by_model) {
+      const modelQueues = Object.entries(serverStatus.queue_by_model);
+      const queueParts = modelQueues
+        .map(([modelId, info]) => {
+          const name = getModelDisplayName(modelId) || modelId;
+          const count = info.pending_count + (info.is_processing ? 1 : 0);
+          return { name, count };
+        })
+        .filter(({ count }) => count > 0)
+        .map(({ name, count }) => `${name}: ${count}`);
+
+      if (queueParts.length > 0) {
+        statusParts.push(`📋 ${queueParts.join(", ")}`);
+      }
+    }
+  }
+
+  // Update selection display in toolbar-info (separate from status)
+  const selectedDisplay = document.getElementById("selectedQuadrantsDisplay");
+  if (selectedDisplay) {
+    if (count > 0) {
+      const coordsStr = Array.from(selectedQuadrants)
+        .map((key) => {
+          const [x, y] = key.split(",");
+          return `(${x},${y})`;
+        })
+        .join(" ");
+      selectedDisplay.textContent = `✓ ${coordsStr}`;
+      selectedDisplay.style.display = "";
+    } else {
+      selectedDisplay.textContent = "";
+      selectedDisplay.style.display = "none";
+    }
+  }
+
+  // Build status display - some parts may be HTML objects, others plain strings
+  if (statusParts.length > 0) {
+    const statusHtml = statusParts
+      .map((part) => (typeof part === "object" && part.html ? part.html : part))
+      .join(" • ");
+    countEl.innerHTML = statusHtml;
+
+    // Add click handlers for coordinate links
+    countEl.querySelectorAll(".coord-link").forEach((link) => {
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        const x = parseInt(link.dataset.x, 10);
+        const y = parseInt(link.dataset.y, 10);
+        navigateToCoord(x, y);
+      });
+    });
+  } else {
+    countEl.textContent = `${count} selected`;
+  }
+
+  // Update status bar styling
+  const isProcessing =
+    serverStatus &&
+    (serverStatus.is_generating || serverStatus.queue_length > 0);
+  if (isProcessing) {
+    if (limitEl) limitEl.style.display = "none";
+    statusEl.classList.remove("empty");
+    statusEl.classList.add("generating");
+  } else {
+    if (limitEl) limitEl.style.display = "";
+    statusEl.classList.toggle("empty", count === 0);
+    statusEl.classList.remove("generating");
+  }
+
+  // Enable buttons for selection (can add to queue even during processing)
+  deselectBtn.disabled = count === 0;
+  deleteBtn.disabled = count === 0;
+  renderBtn.disabled = count === 0;
+  generateBtn.disabled = count === 0;
+  // Generate with prompt button
+  const generateWithPromptBtn = document.getElementById(
+    "generateWithPromptBtn"
+  );
+  if (generateWithPromptBtn) {
+    generateWithPromptBtn.disabled = count === 0;
+  }
+  // Generate Rectangle requires exactly 2 selected
+  generateRectBtn.disabled = count !== 2;
+}
+
+// Toast notification system
+function showToast(type, title, message, duration = 5000) {
+  const container = document.getElementById("toastContainer");
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+
+  const icons = {
+    success: "✅",
+    error: "❌",
+    info: "ℹ️",
+    loading: "⏳",
+  };
+
+  toast.innerHTML = `
+    <span class="toast-icon">${icons[type] || "ℹ️"}</span>
+    <div class="toast-content">
+      <div class="toast-title">${title}</div>
+      ${message ? `<div class="toast-message">${message}</div>` : ""}
+    </div>
+    <button class="toast-close" onclick="this.parentElement.remove()">×</button>
+  `;
+
+  container.appendChild(toast);
+
+  // Auto-remove after duration (except for loading toasts)
+  if (type !== "loading" && duration > 0) {
+    setTimeout(() => {
+      toast.classList.add("removing");
+      setTimeout(() => toast.remove(), 300);
+    }, duration);
+  }
+
+  return toast;
+}
+
+function clearLoadingToasts() {
+  document.querySelectorAll(".toast.loading").forEach((t) => t.remove());
+}
+
+// Generation/Render state (tracked from server)
+let isGenerating = false;
+let isRendering = false;
+
+async function deleteSelected() {
+  if (selectedQuadrants.size === 0) return;
+
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return [x, y];
+  });
+
+  // Confirm deletion
+  const coordsStr = coords.map(([x, y]) => `(${x},${y})`).join(", ");
+  if (!confirm(`Delete generation data for ${coordsStr}?`)) {
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quadrants: coords }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast("success", "Deleted", result.message);
+      // Deselect and refresh
+      deselectAll();
+      location.reload();
+    } else {
+      showToast("error", "Delete failed", result.error);
+    }
+  } catch (error) {
+    console.error("Delete error:", error);
+    showToast("error", "Delete failed", error.message);
+  }
+}
+
+async function clearQueue() {
+  // Get current queue info first
+  try {
+    const statusResponse = await fetch("/api/status");
+    const status = await statusResponse.json();
+
+    const queueLength = status.queue_length || 0;
+    const isGenerating = status.is_generating || false;
+
+    if (queueLength === 0 && !isGenerating) {
+      showToast(
+        "info",
+        "Nothing to clear",
+        "There are no pending items or active generations."
+      );
+      return;
+    }
+
+    // Build confirm message based on what will be cancelled
+    let confirmMessage = "Are you sure you want to clear the queue?";
+    const parts = [];
+    if (queueLength > 0) {
+      parts.push(`${queueLength} pending item(s)`);
+    }
+    if (isGenerating) {
+      parts.push("the current generation in progress");
+    }
+    if (parts.length > 0) {
+      confirmMessage = `Are you sure you want to cancel ${parts.join(
+        " and "
+      )}?`;
+    }
+
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    // Clear the queue
+    const response = await fetch("/api/queue/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast(
+        "success",
+        "Queue cleared",
+        result.message || `Cleared ${result.cleared_count} item(s)`
+      );
+      // Refresh status
+      await checkGenerationStatus();
+    } else {
+      showToast(
+        "error",
+        "Failed to clear queue",
+        result.error || "Unknown error"
+      );
+    }
+  } catch (error) {
+    console.error("Clear queue error:", error);
+    showToast("error", "Request failed", error.message);
+  }
+}
+
+// Prompt dialog functions
+function showPromptDialog() {
+  if (selectedQuadrants.size === 0) return;
+  const dialog = document.getElementById("promptDialog");
+  const input = document.getElementById("promptInput");
+  if (dialog && input) {
+    input.value = "";
+    dialog.style.display = "flex";
+    input.focus();
+  }
+}
+
+function hidePromptDialog() {
+  const dialog = document.getElementById("promptDialog");
+  if (dialog) {
+    dialog.style.display = "none";
+  }
+}
+
+async function submitPromptGeneration() {
+  const input = document.getElementById("promptInput");
+  const prompt = input ? input.value.trim() : "";
+  hidePromptDialog();
+  await generateSelected(prompt);
+}
+
+async function generateSelected(prompt = null) {
+  if (selectedQuadrants.size === 0) return;
+
+  // Separate selected quadrants into those that need generation vs those that already have it
+  const toGenerate = [];
+  const contextQuadrants = [];
+
+  Array.from(selectedQuadrants).forEach((s) => {
+    const [x, y] = s.split(",").map(Number);
+    const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+
+    if (tile && !tile.classList.contains("placeholder")) {
+      // This quadrant already has a generation - use as context
+      contextQuadrants.push([x, y]);
+    } else {
+      // This quadrant needs generation
+      toGenerate.push([x, y]);
+    }
+  });
+
+  // If nothing needs generation, inform the user
+  if (toGenerate.length === 0) {
+    showToast(
+      "info",
+      "Already generated",
+      "All selected quadrants already have generations. Select at least one empty quadrant."
+    );
+    return;
+  }
+
+  const modelId = getSelectedModelId();
+
+  console.log(
+    "Generate requested for:",
+    toGenerate,
+    "with context:",
+    contextQuadrants,
+    "model:",
+    modelId
+  );
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+
+  // Show immediate feedback with context info
+  const contextMsg =
+    contextQuadrants.length > 0
+      ? ` (using ${contextQuadrants.length} as context)`
+      : "";
+  const promptMsg = prompt ? " with prompt" : "";
+  showToast(
+    "info",
+    "Adding to queue...",
+    `Queueing ${toGenerate.length} quadrant(s) for generation${promptMsg}${contextMsg}`
+  );
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const requestBody = {
+      quadrants: toGenerate,
+      model_id: modelId,
+    };
+
+    // Include context quadrants if any
+    if (contextQuadrants.length > 0) {
+      requestBody.context = contextQuadrants;
+    }
+
+    // Include prompt if provided
+    if (prompt) {
+      requestBody.prompt = prompt;
+    }
+
+    const response = await fetch("/api/generate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    const result = await response.json();
+
+    if (result.queued) {
+      console.log(
+        "Generation queued at position:",
+        result.position,
+        "model:",
+        result.model_id
+      );
+      // Get model name for display
+      const modelName = getModelDisplayName(result.model_id);
+      const modelInfo = modelName ? ` (${modelName})` : "";
+      showToast(
+        "success",
+        "Added to queue",
+        `Queued at position ${result.position}${modelInfo}`
+      );
+    } else if (!result.success) {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    console.error("Generation error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+  }
+}
+
+async function renderSelected() {
+  if (selectedQuadrants.size === 0) return;
+
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return [x, y];
+  });
+
+  console.log("Render requested for:", coords);
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+
+  // Show immediate feedback
+  showToast(
+    "info",
+    "Adding to queue...",
+    `Queueing ${coords.length} quadrant(s) for render`
+  );
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const response = await fetch("/api/render", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ quadrants: coords }),
+    });
+
+    const result = await response.json();
+
+    if (result.queued) {
+      console.log("Render queued at position:", result.position);
+      showToast(
+        "success",
+        "Added to queue",
+        `Render queued at position ${result.position}.`
+      );
+    } else if (!result.success) {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    console.error("Render error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+  }
+}
+
+async function generateRectangle() {
+  if (selectedQuadrants.size !== 2) {
+    showToast(
+      "error",
+      "Invalid selection",
+      "Please select exactly 2 quadrants to define the rectangle corners."
+    );
+    return;
+  }
+
+  // Get the two selected coordinates
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return { x, y };
+  });
+
+  // Calculate rectangle bounds (top-left and bottom-right)
+  const minX = Math.min(coords[0].x, coords[1].x);
+  const maxX = Math.max(coords[0].x, coords[1].x);
+  const minY = Math.min(coords[0].y, coords[1].y);
+  const maxY = Math.max(coords[0].y, coords[1].y);
+
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const totalQuadrants = width * height;
+
+  // Build confirmation message
+  const confirmMessage =
+    `Generate rectangle from (${minX}, ${minY}) to (${maxX}, ${maxY})?\n\n` +
+    `Size: ${width} × ${height} = ${totalQuadrants} quadrant(s)\n\n` +
+    `This will create a generation plan and queue all steps.\n` +
+    `Pre-existing generations will be skipped.`;
+
+  if (!confirm(confirmMessage)) {
+    return;
+  }
+
+  const modelId = getSelectedModelId();
+
+  console.log(
+    "Generate rectangle requested:",
+    { tl: [minX, minY], br: [maxX, maxY] },
+    "with model:",
+    modelId
+  );
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+
+  // Show immediate feedback
+  const btn = document.getElementById("generateRectBtn");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  btn.innerHTML = 'Queueing...<span class="spinner"></span>';
+
+  showToast(
+    "loading",
+    "Creating generation plan...",
+    `Rectangle (${minX}, ${minY}) to (${maxX}, ${maxY})`
+  );
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const response = await fetch("/api/generate-rectangle", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        tl: [minX, minY],
+        br: [maxX, maxY],
+        model_id: modelId,
+      }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    // Reset button
+    btn.classList.remove("loading");
+    btn.innerHTML = "Generate Rectangle";
+
+    if (result.success) {
+      if (result.queued_count === 0) {
+        showToast(
+          "info",
+          "Nothing to generate",
+          result.message || "All quadrants already generated."
+        );
+      } else {
+        console.log("Rectangle generation queued:", result);
+        const summary = result.plan_summary || {};
+        const stepTypes = summary.steps_by_type || {};
+        const typeInfo = Object.entries(stepTypes)
+          .map(([type, count]) => `${count}× ${type}`)
+          .join(", ");
+
+        showToast(
+          "success",
+          "Rectangle queued!",
+          `${result.queued_count} step(s) for ${
+            summary.total_quadrants || "?"
+          } quadrant(s)` + (typeInfo ? ` (${typeInfo})` : "")
+        );
+      }
+    } else {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Generate rectangle error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+
+    // Reset button
+    btn.classList.remove("loading");
+    btn.innerHTML = "Generate Rectangle";
+  }
+}
+
+function deselectAll() {
+  selectedQuadrants.clear();
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+  console.log("Deselected all quadrants");
+}
+
+function toggleTileSelection(tileEl, qx, qy) {
+  if (!selectToolActive) return;
+
+  // Check if this tile is currently being generated or in the queue
+  const key = `${qx},${qy}`;
+  if (
+    tileEl.classList.contains("locked") ||
+    tileEl.classList.contains("queued")
+  ) {
+    console.log(
+      `Cannot select quadrant (${qx}, ${qy}) - currently generating or in queue`
+    );
+    return;
+  }
+
+  if (selectedQuadrants.has(key)) {
+    selectedQuadrants.delete(key);
+    tileEl.classList.remove("selected");
+    console.log(`Deselected quadrant (${qx}, ${qy})`);
+  } else {
+    // Check if we've hit the max selection limit
+    if (selectedQuadrants.size >= MAX_SELECTION) {
+      console.log(`Cannot select more than ${MAX_SELECTION} quadrants`);
+      return;
+    }
+    selectedQuadrants.add(key);
+    tileEl.classList.add("selected");
+    console.log(`Selected quadrant (${qx}, ${qy})`);
+  }
+
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+
+  // Log current selection
+  if (selectedQuadrants.size > 0) {
+    console.log("Selected:", Array.from(selectedQuadrants).join("; "));
+  }
+}
+
+// Setup tile click handlers
+document.querySelectorAll(".tile").forEach((tile) => {
+  tile.addEventListener("click", (e) => {
+    // Handle fix water tool clicks
+    if (fixWaterToolActive) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleFixWaterClick(tile, e);
+      return;
+    }
+
+    // Handle water fill tool clicks
+    if (waterFillToolActive) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleWaterFillClick(tile);
+      return;
+    }
+
+    // Handle select tool clicks
+    if (!selectToolActive) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const coords = tile.dataset.coords.split(",").map(Number);
+    toggleTileSelection(tile, coords[0], coords[1]);
+  });
+});
+
+// Initialize selection status
+updateSelectionStatus();
+
+// Status polling for generation progress
+let statusPollInterval = null;
+let lastStatus = null;
+let lastProcessingQuadrants = new Set(); // Track quadrants that were processing
+
+function startStatusPolling() {
+  if (statusPollInterval) return;
+  statusPollInterval = setInterval(checkGenerationStatus, 1000);
+}
+
+// Refresh a specific tile's image (or add image if it was a placeholder)
+function refreshTileImage(qx, qy) {
+  const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+  if (!tile) return;
+
+  const showRender = document.getElementById("showRender")?.checked ? "1" : "0";
+  const timestamp = Date.now();
+  const imgUrl = `/tile/${qx}/${qy}?render=${showRender}&_t=${timestamp}`;
+
+  let img = tile.querySelector("img");
+  if (img) {
+    // Update existing image
+    img.src = imgUrl;
+  } else {
+    // Create new image for placeholder tile
+    img = document.createElement("img");
+    img.src = imgUrl;
+    img.alt = `Tile ${qx},${qy}`;
+    img.onload = () => {
+      // Remove placeholder class once image loads
+      tile.classList.remove("placeholder");
+    };
+    tile.appendChild(img);
+  }
+}
+
+function stopStatusPolling() {
+  if (statusPollInterval) {
+    clearInterval(statusPollInterval);
+    statusPollInterval = null;
+  }
+}
+
+async function checkGenerationStatus() {
+  try {
+    const response = await fetch("/api/status");
+    const status = await response.json();
+
+    console.log("Status poll:", status);
+
+    // Track state changes - consider active_model_count for parallel processing
+    const wasGenerating = isGenerating || isRendering;
+    const hasActiveModels = (status.active_model_count || 0) > 0;
+    isGenerating =
+      (status.is_generating || hasActiveModels) &&
+      status.status !== "rendering";
+    isRendering = status.is_generating && status.status === "rendering";
+    const nowProcessing = isGenerating || isRendering;
+
+    // Get current processing quadrants
+    const currentProcessingQuadrants = new Set(
+      (status.all_processing_quadrants || status.quadrants || []).map(
+        ([x, y]) => `${x},${y}`
+      )
+    );
+
+    // Detect quadrants that just finished processing (were processing, now not)
+    const completedQuadrants = [];
+    lastProcessingQuadrants.forEach((coordKey) => {
+      if (!currentProcessingQuadrants.has(coordKey)) {
+        completedQuadrants.push(coordKey);
+      }
+    });
+
+    // Refresh tiles for completed quadrants
+    if (completedQuadrants.length > 0) {
+      console.log("Refreshing completed quadrants:", completedQuadrants);
+      completedQuadrants.forEach((coordKey) => {
+        const [qx, qy] = coordKey.split(",").map(Number);
+        refreshTileImage(qx, qy);
+      });
+    }
+
+    // Update tracking for next poll
+    lastProcessingQuadrants = currentProcessingQuadrants;
+
+    // Apply visual styles based on server status
+    applyStatusStyles(status);
+
+    // Update render button based on state
+    const renderBtn = document.getElementById("renderBtn");
+
+    if (nowProcessing) {
+      // Show loading state on render button only (generate state is shown in toolbar)
+      if (isRendering) {
+        renderBtn.classList.add("loading");
+        renderBtn.innerHTML = 'Rendering<span class="spinner"></span>';
+      } else {
+        renderBtn.classList.remove("loading");
+        renderBtn.innerHTML = "Render";
+      }
+
+      // Show toast if not already showing
+      if (document.querySelectorAll(".toast.loading").length === 0) {
+        const opName = isRendering ? "Render" : "Generation";
+        showToast(
+          "loading",
+          `${opName} in progress...`,
+          status.message || "Please wait..."
+        );
+      }
+
+      // Update the loading toast message
+      const loadingToast = document.querySelector(
+        ".toast.loading .toast-message"
+      );
+      if (loadingToast && status.message) {
+        loadingToast.textContent = status.message;
+      }
+    } else {
+      // Reset render button
+      renderBtn.classList.remove("loading");
+      renderBtn.innerHTML = "Render";
+    }
+
+    // Handle status transitions
+    if (status.status === "complete" && wasGenerating && !nowProcessing) {
+      clearLoadingToasts();
+      showToast("success", "Complete!", status.message);
+
+      // Check if there are more items in queue
+      if (status.queue_length > 0) {
+        // Build per-model queue message
+        let queueMsg = "";
+        if (status.queue_by_model) {
+          const parts = Object.entries(status.queue_by_model)
+            .map(([modelId, info]) => {
+              const name = getModelDisplayName(modelId) || modelId;
+              const count = info.pending_count + (info.is_processing ? 1 : 0);
+              return { name, count };
+            })
+            .filter(({ count }) => count > 0)
+            .map(({ name, count }) => `${name}: ${count}`);
+          if (parts.length > 0) {
+            queueMsg = parts.join(", ");
+          }
+        }
+        if (queueMsg) {
+          showToast("info", "Processing queue", queueMsg);
+        }
+      } else {
+        // No more items, reload after delay
+        stopStatusPolling();
+        setTimeout(() => window.location.reload(), 1500);
+      }
+    } else if (status.status === "error" && status.error) {
+      clearLoadingToasts();
+      showToast("error", "Error", status.error);
+
+      // Continue polling if there are more items in queue
+      if (status.queue_length === 0) {
+        stopStatusPolling();
+      }
+    } else if (
+      status.status === "idle" &&
+      status.queue_length === 0 &&
+      !nowProcessing
+    ) {
+      // Idle with no queue - stop polling
+      stopStatusPolling();
+    }
+
+    // Update selection status with server info
+    updateSelectionStatus(status);
+    lastStatus = status;
+  } catch (error) {
+    console.error("Status check failed:", error);
+  }
+}
+
+// Restore saved tool on page load
+function restoreSavedTool() {
+  const savedTool = getSavedTool();
+  if (!savedTool) return;
+
+  // Check if the tool button exists before activating
+  switch (savedTool) {
+    case "select":
+      if (document.getElementById("selectTool")) {
+        toggleSelectTool();
+      }
+      break;
+    case "fixwater":
+      if (document.getElementById("fixWaterTool")) {
+        toggleFixWaterTool();
+      }
+      break;
+    case "waterfill":
+      if (document.getElementById("waterFillTool")) {
+        toggleWaterFillTool();
+      }
+      break;
+    default:
+      // Unknown tool, clear saved state
+      saveSelectedTool("");
+      break;
+  }
+}
+
+// Restore saved quadrant selections on page load
+function restoreSavedQuadrants() {
+  const savedQuadrants = getSavedQuadrants();
+  if (!savedQuadrants || savedQuadrants.length === 0) return;
+
+  let restoredCount = 0;
+
+  savedQuadrants.forEach((key) => {
+    // Check if this quadrant tile exists on the current page
+    const tile = document.querySelector(`.tile[data-coords="${key}"]`);
+    if (tile) {
+      // Don't restore if tile is locked or queued
+      if (
+        !tile.classList.contains("locked") &&
+        !tile.classList.contains("queued")
+      ) {
+        selectedQuadrants.add(key);
+        tile.classList.add("selected");
+        restoredCount++;
+      }
+    }
+  });
+
+  if (restoredCount > 0) {
+    console.log(`Restored ${restoredCount} selected quadrant(s)`);
+    // Update localStorage to only contain valid selections
+    saveSelectedQuadrants();
+    updateSelectionStatus();
+  } else if (savedQuadrants.length > 0) {
+    // Had saved selections but none are on current page - clear storage
+    saveSelectedQuadrants();
+  }
+}
+
+// Initialize on page load
+(async function initialize() {
+  // Initialize model selector
+  initModelSelector();
+
+  // Restore saved tool
+  restoreSavedTool();
+
+  // Restore saved quadrant selections
+  restoreSavedQuadrants();
+
+  try {
+    const response = await fetch("/api/status");
+    const status = await response.json();
+
+    // Apply initial status styles
+    applyStatusStyles(status);
+
+    if (status.is_generating || status.queue_length > 0) {
+      console.log(
+        "Processing in progress or queue non-empty, starting polling..."
+      );
+      isGenerating = status.is_generating && status.status !== "rendering";
+      isRendering = status.is_generating && status.status === "rendering";
+      startStatusPolling();
+    }
+
+    updateSelectionStatus(status);
+  } catch (error) {
+    console.error("Initial status check failed:", error);
+  }
+})();
+
+```
+
+Now let me also update the completion handling to not require a full page reload since we're now refreshing tiles as they complete:
+
+```javascript
+// Get config from data attributes
+const config = JSON.parse(document.getElementById("app-config").dataset.config);
+
+// LocalStorage keys for persistence
+const STORAGE_KEY_MODEL = "viewer_selected_model";
+const STORAGE_KEY_TOOL = "viewer_selected_tool";
+const STORAGE_KEY_SELECTION = "viewer_selected_quadrants";
+
+// Save selected model ID to localStorage
+function saveSelectedModel(modelId) {
+  try {
+    localStorage.setItem(STORAGE_KEY_MODEL, modelId);
+  } catch (e) {
+    console.warn("Could not save model to localStorage:", e);
+  }
+}
+
+// Get saved model ID from localStorage
+function getSavedModel() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_MODEL);
+  } catch (e) {
+    return null;
+  }
+}
+
+// Save selected tool to localStorage
+function saveSelectedTool(toolName) {
+  try {
+    localStorage.setItem(STORAGE_KEY_TOOL, toolName || "");
+  } catch (e) {
+    console.warn("Could not save tool to localStorage:", e);
+  }
+}
+
+// Get saved tool from localStorage
+function getSavedTool() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_TOOL) || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+// Save selected quadrants to localStorage
+function saveSelectedQuadrants() {
+  try {
+    const quadrantsArray = Array.from(selectedQuadrants);
+    localStorage.setItem(STORAGE_KEY_SELECTION, JSON.stringify(quadrantsArray));
+  } catch (e) {
+    console.warn("Could not save selection to localStorage:", e);
+  }
+}
+
+// Get saved quadrants from localStorage
+function getSavedQuadrants() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_SELECTION);
+    return saved ? JSON.parse(saved) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+// Initialize model selector
+function initModelSelector() {
+  const select = document.getElementById("modelSelect");
+  if (!select || !config.models || config.models.length === 0) {
+    return;
+  }
+
+  // Clear existing options
+  select.innerHTML = "";
+
+  // Check if saved model ID exists in available models
+  const savedModelId = getSavedModel();
+  const savedModelExists =
+    savedModelId && config.models.some((m) => m.model_id === savedModelId);
+
+  // Add options for each model
+  config.models.forEach((model, index) => {
+    const option = document.createElement("option");
+    option.value = model.model_id;
+    option.textContent = model.name;
+
+    // Select saved model if it exists, otherwise use default or first
+    if (savedModelExists && model.model_id === savedModelId) {
+      option.selected = true;
+    } else if (
+      !savedModelExists &&
+      model.model_id === config.default_model_id
+    ) {
+      option.selected = true;
+    } else if (!savedModelExists && !config.default_model_id && index === 0) {
+      option.selected = true;
+    }
+    select.appendChild(option);
+  });
+
+  // Auto-blur after selection and save to localStorage
+  select.addEventListener("change", () => {
+    saveSelectedModel(select.value);
+    select.blur();
+  });
+}
+
+// Get the currently selected model ID
+function getSelectedModelId() {
+  const select = document.getElementById("modelSelect");
+  return select ? select.value : null;
+}
+
+// Get display name for a model ID
+function getModelDisplayName(modelId) {
+  if (!modelId) return null;
+  const configEl = document.getElementById("app-config");
+  if (!configEl) return modelId;
+  try {
+    const config = JSON.parse(configEl.dataset.config);
+    const models = config.models || [];
+    const model = models.find((m) => m.model_id === modelId);
+    return model ? model.name : modelId;
+  } catch {
+    return modelId;
+  }
+}
+
+// Apply locked/queued styles based on server status
+function applyStatusStyles(status) {
+  // Clear all existing locked/queued styles first
+  document.querySelectorAll(".tile.locked, .tile.queued").forEach((tile) => {
+    tile.classList.remove("locked", "queued");
+  });
+
+  // Apply locked style to ALL currently processing quadrants (from all models)
+  const processingQuadrants =
+    status.all_processing_quadrants || status.quadrants || [];
+  const isProcessing = status.is_generating || status.active_model_count > 0;
+
+  if (isProcessing && processingQuadrants.length > 0) {
+    document.body.classList.add("generating");
+    processingQuadrants.forEach(([qx, qy]) => {
+      const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+      if (tile) {
+        tile.classList.add("locked");
+      }
+    });
+  } else if (!isProcessing) {
+    document.body.classList.remove("generating");
+  }
+
+  // Apply queued style to pending queue items AND create overlays
+  // Also create overlays for processing items
+  const processingItems = getProcessingItems(status);
+  updateQueueOverlays(status.queue || [], processingItems);
+}
+
+// Extract currently processing items from status
+function getProcessingItems(status) {
+  const processingItems = [];
+  if (status.queue_by_model) {
+    Object.entries(status.queue_by_model).forEach(([modelId, info]) => {
+      if (info.is_processing && info.current_item) {
+        processingItems.push({
+          ...info.current_item,
+          model_id: modelId,
+          _isProcessing: true,
+        });
+      }
+    });
+  }
+  return processingItems;
+}
+
+// Create/update overlays for pending queue items and processing items
+function updateQueueOverlays(queueItems, processingItems = []) {
+  // Remove existing overlays
+  document.querySelectorAll(".queue-overlay").forEach((el) => el.remove());
+
+  // Also clear queued class from all tiles
+  document.querySelectorAll(".tile.queued").forEach((tile) => {
+    tile.classList.remove("queued");
+  });
+
+  const hasItems =
+    (queueItems && queueItems.length > 0) ||
+    (processingItems && processingItems.length > 0);
+  if (!hasItems) return;
+
+  const grid = document.querySelector(".grid");
+  if (!grid) return;
+
+  // Get grid dimensions from config
+  const gridX = config.x;
+  const gridY = config.y;
+  const sizePx = config.size_px;
+  const showLines = document.getElementById("showLines")?.checked || false;
+  const gap = showLines ? 2 : 0;
+
+  // Helper function to create an overlay for an item
+  function createOverlay(item, options = {}) {
+    const { isProcessing = false, queuePosition = null } = options;
+
+    if (!item.quadrants || item.quadrants.length === 0) return null;
+
+    // Calculate bounding box for this generation
+    const quadrants = item.quadrants;
+    let minCol = Infinity,
+      maxCol = -Infinity;
+    let minRow = Infinity,
+      maxRow = -Infinity;
+
+    // Track which tiles are visible in the current view
+    const visibleQuadrants = [];
+
+    quadrants.forEach(([qx, qy]) => {
+      const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+      if (tile) {
+        visibleQuadrants.push([qx, qy]);
+        const col = qx - gridX;
+        const row = qy - gridY;
+        minCol = Math.min(minCol, col);
+        maxCol = Math.max(maxCol, col);
+        minRow = Math.min(minRow, row);
+        maxRow = Math.max(maxRow, row);
+
+        // Add appropriate class to tile
+        if (isProcessing) {
+          tile.classList.add("locked");
+        } else if (!tile.classList.contains("locked")) {
+          tile.classList.add("queued");
+        }
+      }
+    });
+
+    if (visibleQuadrants.length === 0) return null;
+
+    // Create overlay element
+    const overlay = document.createElement("div");
+    overlay.className = isProcessing
+      ? "queue-overlay processing"
+      : "queue-overlay";
+    overlay.dataset.itemId = item.id;
+
+    // Calculate position and size
+    const left = minCol * (sizePx + gap);
+    const top = minRow * (sizePx + gap);
+    const width = (maxCol - minCol + 1) * sizePx + (maxCol - minCol) * gap;
+    const height = (maxRow - minRow + 1) * sizePx + (maxRow - minRow) * gap;
+
+    overlay.style.left = `${left}px`;
+    overlay.style.top = `${top}px`;
+    overlay.style.width = `${width}px`;
+    overlay.style.height = `${height}px`;
+
+    // Badge: spinner for processing, number for queued
+    const badge = document.createElement("div");
+    badge.className = isProcessing ? "queue-badge processing" : "queue-badge";
+    if (isProcessing) {
+      badge.innerHTML = `<svg class="processing-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+      </svg>`;
+    } else {
+      badge.textContent = queuePosition;
+    }
+    overlay.appendChild(badge);
+
+    // Model name label
+    if (item.model_id) {
+      const modelLabel = document.createElement("div");
+      modelLabel.className = "queue-model-label";
+      modelLabel.textContent =
+        getModelDisplayName(item.model_id) || item.model_id;
+      overlay.appendChild(modelLabel);
+    }
+
+    // Cancel button (visible on hover) - for both processing and queued
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className = "queue-cancel-btn";
+    cancelBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+      <line x1="10" y1="11" x2="10" y2="17"/>
+      <line x1="14" y1="11" x2="14" y2="17"/>
+    </svg>`;
+    cancelBtn.title = isProcessing
+      ? "Cancel this generation (in progress)"
+      : "Cancel this generation";
+    cancelBtn.onclick = (e) => {
+      e.stopPropagation();
+      cancelQueueItem(item.id);
+    };
+    overlay.appendChild(cancelBtn);
+
+    return overlay;
+  }
+
+  // First, create overlays for processing items (with spinner)
+  processingItems.forEach((item) => {
+    const overlay = createOverlay(item, { isProcessing: true });
+    if (overlay) {
+      grid.appendChild(overlay);
+    }
+  });
+
+  // Then, create overlays for queued items (with per-model position numbers)
+  // Track position within each model's queue
+  const modelPositionCounters = {};
+
+  queueItems.forEach((item) => {
+    const modelId = item.model_id || "default";
+    // Initialize or increment the counter for this model
+    if (!modelPositionCounters[modelId]) {
+      modelPositionCounters[modelId] = 1;
+    }
+    const positionInModelQueue = modelPositionCounters[modelId];
+    modelPositionCounters[modelId]++;
+
+    const overlay = createOverlay(item, {
+      queuePosition: positionInModelQueue,
+    });
+    if (overlay) {
+      grid.appendChild(overlay);
+    }
+  });
+}
+
+// Cancel a specific queue item
+async function cancelQueueItem(itemId) {
+  try {
+    const response = await fetch(`/api/queue/cancel/${itemId}`, {
+      method: "POST",
+    });
+    const result = await response.json();
+
+    if (result.success && result.cancelled) {
+      showToast("success", "Cancelled", result.message);
+      // Trigger immediate status update
+      checkGenerationStatus();
+    } else if (result.success && !result.cancelled) {
+      showToast("info", "Not found", result.message);
+    } else {
+      showToast("error", "Error", result.error || "Failed to cancel");
+    }
+  } catch (error) {
+    console.error("Cancel queue item failed:", error);
+    showToast("error", "Error", "Failed to cancel queue item");
+  }
+}
+
+function getParams() {
+  const x = document.getElementById("x").value;
+  const y = document.getElementById("y").value;
+  const nx = document.getElementById("nx").value;
+  const ny = document.getElementById("ny").value;
+  const sizePx = document.getElementById("sizePx").value;
+  const showLines = document.getElementById("showLines").checked ? "1" : "0";
+  const showCoords = document.getElementById("showCoords").checked ? "1" : "0";
+  const showRender = document.getElementById("showRender").checked ? "1" : "0";
+  return { x, y, nx, ny, sizePx, showLines, showCoords, showRender };
+}
+
+function goTo() {
+  const { x, y, nx, ny, sizePx, showLines, showCoords, showRender } =
+    getParams();
+  window.location.href = `?x=${x}&y=${y}&nx=${nx}&ny=${ny}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
+}
+
+function navigate(dx, dy) {
+  const params = getParams();
+  const x = parseInt(params.x) + dx;
+  const y = parseInt(params.y) + dy;
+  window.location.href = `?x=${x}&y=${y}&nx=${params.nx}&ny=${params.ny}&size=${params.sizePx}&lines=${params.showLines}&coords=${params.showCoords}&render=${params.showRender}`;
+}
+
+// Navigate to center the view on a specific coordinate
+function navigateToCoord(targetX, targetY) {
+  const params = getParams();
+  const nx = parseInt(params.nx);
+  const ny = parseInt(params.ny);
+  // Center the target coordinate in the view
+  const x = targetX - Math.floor(nx / 2);
+  const y = targetY - Math.floor(ny / 2);
+  window.location.href = `?x=${x}&y=${y}&nx=${params.nx}&ny=${params.ny}&size=${params.sizePx}&lines=${params.showLines}&coords=${params.showCoords}&render=${params.showRender}`;
+}
+
+// Hard refresh - clear image cache and reload page
+function hardRefresh() {
+  // Add cache-busting timestamp to all tile images to force reload
+  const timestamp = Date.now();
+
+  // Update all tile image sources to bust cache
+  document.querySelectorAll(".tile img").forEach((img) => {
+    const url = new URL(img.src);
+    url.searchParams.set("_t", timestamp);
+    img.src = url.toString();
+  });
+
+  // Also reload the page with cache bypass
+  // The true parameter forces reload from server, not cache
+  window.location.reload(true);
+}
+
+function toggleLines() {
+  const container = document.getElementById("gridContainer");
+  const showLines = document.getElementById("showLines").checked;
+  container.classList.toggle("show-lines", showLines);
+
+  // Update URL without reload
+  const url = new URL(window.location);
+  url.searchParams.set("lines", showLines ? "1" : "0");
+  history.replaceState({}, "", url);
+}
+
+function toggleCoords() {
+  const container = document.getElementById("gridContainer");
+  const showCoords = document.getElementById("showCoords").checked;
+  container.classList.toggle("show-coords", showCoords);
+
+  // Update URL without reload
+  const url = new URL(window.location);
+  url.searchParams.set("coords", showCoords ? "1" : "0");
+  history.replaceState({}, "", url);
+}
+
+function toggleRender() {
+  // This requires a page reload to fetch different data
+  const { x, y, nx, ny, sizePx, showLines, showCoords, showRender } =
+    getParams();
+  window.location.href = `?x=${x}&y=${y}&nx=${nx}&ny=${ny}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
+}
+
+// Keyboard navigation
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+
+  // Ignore keyboard shortcuts when prompt dialog is open
+  const promptDialog = document.getElementById("promptDialog");
+  if (promptDialog && promptDialog.style.display !== "none") return;
+
+  switch (e.key) {
+    case "ArrowLeft":
+      navigate(-1, 0);
+      break;
+    case "ArrowRight":
+      navigate(1, 0);
+      break;
+    case "ArrowUp":
+      navigate(0, -1);
+      break;
+    case "ArrowDown":
+      navigate(0, 1);
+      break;
+    case "l":
+    case "L":
+      document.getElementById("showLines").click();
+      break;
+    case "c":
+    case "C":
+      document.getElementById("showCoords").click();
+      break;
+    case "d":
+    case "D":
+      document.getElementById("showRender").click();
+      break;
+    case "g":
+    case "G":
+      generateSelected();
+      break;
+    case "s":
+    case "S":
+      toggleSelectTool();
+      break;
+    case "w":
+    case "W":
+      toggleFixWaterTool();
+      break;
+    case "f":
+    case "F":
+      toggleWaterFillTool();
+      break;
+    case "Escape":
+      if (selectToolActive) toggleSelectTool();
+      if (fixWaterToolActive) cancelWaterFix();
+      if (waterFillToolActive) cancelWaterFill();
+      break;
+  }
+});
+
+// Select tool state
+let selectToolActive = false;
+const selectedQuadrants = new Set();
+const MAX_SELECTION = 4;
+
+function toggleSelectTool() {
+  // Deactivate other tools if active
+  if (fixWaterToolActive) {
+    cancelWaterFix();
+  }
+  if (waterFillToolActive) {
+    cancelWaterFill();
+  }
+
+  selectToolActive = !selectToolActive;
+  const btn = document.getElementById("selectTool");
+  const tiles = document.querySelectorAll(".tile");
+
+  if (selectToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => tile.classList.add("selectable"));
+    saveSelectedTool("select");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => tile.classList.remove("selectable"));
+    saveSelectedTool("");
+  }
+}
+
+// Fix water tool state
+let fixWaterToolActive = false;
+let fixWaterTargetColor = null;
+let fixWaterQuadrant = null;
+
+function toggleFixWaterTool() {
+  // Deactivate other tools if active
+  if (selectToolActive) {
+    toggleSelectTool();
+  }
+  if (waterFillToolActive) {
+    cancelWaterFill();
+  }
+
+  fixWaterToolActive = !fixWaterToolActive;
+  const btn = document.getElementById("fixWaterTool");
+  const tiles = document.querySelectorAll(".tile");
+  const selectionStatus = document.getElementById("selectionStatus");
+  const waterFixStatus = document.getElementById("waterFixStatus");
+
+  if (fixWaterToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => {
+      // Only make tiles with images selectable
+      if (tile.querySelector("img")) {
+        tile.classList.add("fix-water-selectable");
+      }
+    });
+    // Show water fix status bar, hide selection status
+    selectionStatus.style.display = "none";
+    waterFixStatus.style.display = "flex";
+    // Reset state
+    resetWaterFixState();
+    saveSelectedTool("fixwater");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => {
+      tile.classList.remove("fix-water-selectable");
+      tile.classList.remove("water-fix-selected");
+    });
+    // Hide water fix status bar, show selection status
+    selectionStatus.style.display = "flex";
+    waterFixStatus.style.display = "none";
+    saveSelectedTool("");
+  }
+}
+
+function resetWaterFixState() {
+  fixWaterTargetColor = null;
+  fixWaterQuadrant = null;
+  document.getElementById("targetColorSwatch").style.background = "#333";
+  document.getElementById("targetColorSwatch").classList.remove("has-color");
+  document.getElementById("targetColorHex").textContent =
+    "Click a quadrant to pick color";
+  document.getElementById("waterFixQuadrant").textContent = "";
+  // Reset button state
+  const btn = document.getElementById("applyWaterFixBtn");
+  btn.disabled = true;
+  btn.classList.remove("loading");
+  btn.textContent = "Apply Fix";
+  document.querySelectorAll(".tile.water-fix-selected").forEach((tile) => {
+    tile.classList.remove("water-fix-selected");
+  });
+}
+
+function cancelWaterFix() {
+  if (fixWaterToolActive) {
+    toggleFixWaterTool();
+  }
+}
+
+function rgbToHex(r, g, b) {
+  return (
+    "#" +
+    [r, g, b]
+      .map((x) => {
+        const hex = x.toString(16);
+        return hex.length === 1 ? "0" + hex : hex;
+      })
+      .join("")
+      .toUpperCase()
+  );
+}
+
+function getPixelColorFromImage(img, x, y) {
+  // Create an off-screen canvas
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+
+  // Get the pixel data at the clicked position
+  const pixelData = ctx.getImageData(x, y, 1, 1).data;
+
+  return {
+    r: pixelData[0],
+    g: pixelData[1],
+    b: pixelData[2],
+    a: pixelData[3],
+  };
+}
+
+function handleFixWaterClick(tileEl, e) {
+  if (!fixWaterToolActive) return;
+
+  const img = tileEl.querySelector("img");
+  if (!img) {
+    showToast("error", "No image", "This quadrant has no generation to fix");
+    return;
+  }
+
+  // Get coordinates
+  const coords = tileEl.dataset.coords.split(",").map(Number);
+  const [qx, qy] = coords;
+
+  // Calculate click position relative to the image
+  const rect = img.getBoundingClientRect();
+  const clickX = e.clientX - rect.left;
+  const clickY = e.clientY - rect.top;
+
+  // Scale to natural image dimensions
+  const scaleX = img.naturalWidth / rect.width;
+  const scaleY = img.naturalHeight / rect.height;
+  const imgX = Math.floor(clickX * scaleX);
+  const imgY = Math.floor(clickY * scaleY);
+
+  // Ensure we're within bounds
+  if (
+    imgX < 0 ||
+    imgX >= img.naturalWidth ||
+    imgY < 0 ||
+    imgY >= img.naturalHeight
+  ) {
+    console.log("Click outside image bounds");
+    return;
+  }
+
+  try {
+    // Get the pixel color
+    const color = getPixelColorFromImage(img, imgX, imgY);
+    const hex = rgbToHex(color.r, color.g, color.b);
+
+    console.log(
+      `Picked color at (${imgX}, ${imgY}) in quadrant (${qx}, ${qy}): RGB(${color.r}, ${color.g}, ${color.b}) = ${hex}`
+    );
+
+    // Update state
+    fixWaterTargetColor = hex;
+    fixWaterQuadrant = { x: qx, y: qy };
+
+    // Update UI
+    document.getElementById("targetColorSwatch").style.background = hex;
+    document.getElementById("targetColorSwatch").classList.add("has-color");
+    document.getElementById(
+      "targetColorHex"
+    ).textContent = `${hex} — RGB(${color.r}, ${color.g}, ${color.b})`;
+    document.getElementById(
+      "waterFixQuadrant"
+    ).textContent = `Quadrant (${qx}, ${qy})`;
+    document.getElementById("applyWaterFixBtn").disabled = false;
+
+    // Update selected tile visual
+    document.querySelectorAll(".tile.water-fix-selected").forEach((tile) => {
+      tile.classList.remove("water-fix-selected");
+    });
+    tileEl.classList.add("water-fix-selected");
+
+    showToast("info", "Color picked", `Target color: ${hex} at (${qx}, ${qy})`);
+  } catch (error) {
+    console.error("Error picking color:", error);
+    showToast(
+      "error",
+      "Error picking color",
+      "Could not read pixel color. Try again."
+    );
+  }
+}
+
+async function applyWaterFix() {
+  if (!fixWaterTargetColor || !fixWaterQuadrant) {
+    showToast("error", "No color selected", "Pick a color first");
+    return;
+  }
+
+  // Default replacement color - a nice blue water color
+  const replacementColor = "#2A4A5F";
+
+  const btn = document.getElementById("applyWaterFixBtn");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  btn.textContent = "Applying...";
+
+  showToast(
+    "loading",
+    "Applying water fix...",
+    `Replacing ${fixWaterTargetColor} in (${fixWaterQuadrant.x}, ${fixWaterQuadrant.y})`
+  );
+
+  try {
+    const response = await fetch("/api/fix-water", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        x: fixWaterQuadrant.x,
+        y: fixWaterQuadrant.y,
+        target_color: fixWaterTargetColor,
+        replacement_color: replacementColor,
+      }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    if (result.success) {
+      showToast(
+        "success",
+        "Water fix applied!",
+        result.message || "Color replaced successfully"
+      );
+
+      // Refresh the specific tile image immediately with cache-busting
+      const { x, y } = fixWaterQuadrant;
+      const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+      if (tile) {
+        const img = tile.querySelector("img");
+        if (img) {
+          // Add timestamp to bust browser cache
+          const currentSrc = new URL(img.src);
+          currentSrc.searchParams.set("_t", Date.now());
+          img.src = currentSrc.toString();
+        }
+      }
+
+      // Reset the tool after a short delay
+      setTimeout(() => {
+        cancelWaterFix();
+      }, 1000);
+    } else {
+      showToast("error", "Water fix failed", result.error || "Unknown error");
+      btn.disabled = false;
+      btn.classList.remove("loading");
+      btn.textContent = "Apply Fix";
+    }
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Water fix error:", error);
+    showToast("error", "Request failed", error.message);
+    btn.disabled = false;
+    btn.classList.remove("loading");
+    btn.textContent = "Apply Fix";
+  }
+}
+
+// Water Fill tool - fills entire quadrant with water color
+let waterFillToolActive = false;
+
+function toggleWaterFillTool() {
+  // Deactivate other tools
+  if (selectToolActive) {
+    toggleSelectTool();
+  }
+  if (fixWaterToolActive) {
+    cancelWaterFix();
+  }
+
+  waterFillToolActive = !waterFillToolActive;
+  const btn = document.getElementById("waterFillTool");
+  const tiles = document.querySelectorAll(".tile");
+  const selectionStatus = document.getElementById("selectionStatus");
+  const waterFillStatus = document.getElementById("waterFillStatus");
+
+  if (waterFillToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => {
+      tile.classList.add("water-fill-selectable");
+    });
+    // Show water fill status bar, hide selection status
+    selectionStatus.style.display = "none";
+    waterFillStatus.style.display = "flex";
+    saveSelectedTool("waterfill");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => {
+      tile.classList.remove("water-fill-selectable");
+    });
+    // Hide water fill status bar, show selection status
+    selectionStatus.style.display = "flex";
+    waterFillStatus.style.display = "none";
+    saveSelectedTool("");
+  }
+}
+
+function cancelWaterFill() {
+  if (waterFillToolActive) {
+    toggleWaterFillTool();
+  }
+}
+
+async function handleWaterFillClick(tileEl) {
+  if (!waterFillToolActive) return;
+
+  const coords = tileEl.dataset.coords.split(",").map(Number);
+  const [qx, qy] = coords;
+
+  // Confirm action
+  if (!confirm(`Fill quadrant (${qx}, ${qy}) entirely with water color?`)) {
+    return;
+  }
+
+  const instruction = document.getElementById("waterFillInstruction");
+  instruction.textContent = `Filling (${qx}, ${qy})...`;
+
+  showToast(
+    "loading",
+    "Filling with water...",
+    `Processing quadrant (${qx}, ${qy})`
+  );
+
+  try {
+    const response = await fetch("/api/water-fill", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ x: qx, y: qy }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    if (result.success) {
+      showToast("success", "Water fill complete!", result.message);
+
+      // Refresh the tile image
+      const img = tileEl.querySelector("img");
+      if (img) {
+        const currentSrc = new URL(img.src);
+        currentSrc.searchParams.set("_t", Date.now());
+        img.src = currentSrc.toString();
+      }
+
+      instruction.textContent = "Click a quadrant to fill with water";
+    } else {
+      showToast("error", "Water fill failed", result.error || "Unknown error");
+      instruction.textContent = "Click a quadrant to fill with water";
+    }
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Water fill error:", error);
+    showToast("error", "Request failed", error.message);
+    instruction.textContent = "Click a quadrant to fill with water";
+  }
+}
+
+function updateSelectionStatus(serverStatus = null) {
+  const count = selectedQuadrants.size;
+  const countEl = document.getElementById("selectionCount");
+  const limitEl = document.querySelector(".selection-limit");
+  const statusEl = document.getElementById("selectionStatus");
+  const deselectBtn = document.getElementById("deselectAllBtn");
+  const deleteBtn = document.getElementById("deleteBtn");
+  const renderBtn = document.getElementById("renderBtn");
+  const generateBtn = document.getElementById("generateBtn");
+  const generateRectBtn = document.getElementById("generateRectBtn");
+
+  let statusParts = [];
+
+  // Show current processing status from server
+  if (serverStatus) {
+    // Show all active models generating
+    const activeModels = serverStatus.active_models || [];
+    const processingQuadrants =
+      serverStatus.all_processing_quadrants || serverStatus.quadrants || [];
+
+    if (activeModels.length > 0 && processingQuadrants.length > 0) {
+      // Show which models are actively generating with their queue counts
+      const queueByModel = serverStatus.queue_by_model || {};
+
+      if (activeModels.length === 1) {
+        const modelId = activeModels[0];
+        const modelName = getModelDisplayName(modelId) || modelId || "default";
+        const modelInfo = queueByModel[modelId];
+        const queueCount = modelInfo
+          ? modelInfo.pending_count + (modelInfo.is_processing ? 1 : 0)
+          : 0;
+        // Create clickable coordinate links
+        const coordsHtml = processingQuadrants
+          .map(
+            ([x, y]) =>
+              `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+          )
+          .join(" ");
+        const countStr = queueCount > 0 ? ` [${queueCount}]` : "";
+        statusParts.push({
+          html: `🔄 ${modelName}${countStr}: ${coordsHtml}`,
+        });
+      } else {
+        // Multiple models generating in parallel - show each with queue count and coords
+        const queueByModel = serverStatus.queue_by_model || {};
+        const modelPartsHtml = activeModels.map((modelId) => {
+          const name = getModelDisplayName(modelId) || modelId || "default";
+          const modelInfo = queueByModel[modelId];
+          const queueCount = modelInfo
+            ? modelInfo.pending_count + (modelInfo.is_processing ? 1 : 0)
+            : 0;
+          // Get quadrants for this specific model
+          const modelQuadrants =
+            modelInfo && modelInfo.current_item
+              ? modelInfo.current_item.quadrants || []
+              : [];
+          const coordsHtml =
+            modelQuadrants.length > 0
+              ? " " +
+                modelQuadrants
+                  .map(
+                    ([x, y]) =>
+                      `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+                  )
+                  .join(" ")
+              : "";
+          const countStr = queueCount > 0 ? ` [${queueCount}]` : "";
+          return `${name}${countStr}${coordsHtml}`;
+        });
+        statusParts.push({ html: `🔄 ${modelPartsHtml.join(", ")}` });
+      }
+    } else if (
+      serverStatus.is_generating &&
+      serverStatus.quadrants &&
+      serverStatus.quadrants.length > 0
+    ) {
+      // Fallback to old behavior with clickable coords
+      const action =
+        serverStatus.status === "rendering" ? "Rendering" : "Generating";
+      const coordsHtml = serverStatus.quadrants
+        .map(
+          ([x, y]) =>
+            `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+        )
+        .join(" ");
+      statusParts.push({ html: `${action} ${coordsHtml}` });
+    }
+
+    // Show per-model queue counts (only models with items)
+    if (serverStatus.queue_by_model) {
+      const modelQueues = Object.entries(serverStatus.queue_by_model);
+      const queueParts = modelQueues
+        .map(([modelId, info]) => {
+          const name = getModelDisplayName(modelId) || modelId;
+          const count = info.pending_count + (info.is_processing ? 1 : 0);
+          return { name, count };
+        })
+        .filter(({ count }) => count > 0)
+        .map(({ name, count }) => `${name}: ${count}`);
+
+      if (queueParts.length > 0) {
+        statusParts.push(`📋 ${queueParts.join(", ")}`);
+      }
+    }
+  }
+
+  // Update selection display in toolbar-info (separate from status)
+  const selectedDisplay = document.getElementById("selectedQuadrantsDisplay");
+  if (selectedDisplay) {
+    if (count > 0) {
+      const coordsStr = Array.from(selectedQuadrants)
+        .map((key) => {
+          const [x, y] = key.split(",");
+          return `(${x},${y})`;
+        })
+        .join(" ");
+      selectedDisplay.textContent = `✓ ${coordsStr}`;
+      selectedDisplay.style.display = "";
+    } else {
+      selectedDisplay.textContent = "";
+      selectedDisplay.style.display = "none";
+    }
+  }
+
+  // Build status display - some parts may be HTML objects, others plain strings
+  if (statusParts.length > 0) {
+    const statusHtml = statusParts
+      .map((part) => (typeof part === "object" && part.html ? part.html : part))
+      .join(" • ");
+    countEl.innerHTML = statusHtml;
+
+    // Add click handlers for coordinate links
+    countEl.querySelectorAll(".coord-link").forEach((link) => {
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        const x = parseInt(link.dataset.x, 10);
+        const y = parseInt(link.dataset.y, 10);
+        navigateToCoord(x, y);
+      });
+    });
+  } else {
+    countEl.textContent = `${count} selected`;
+  }
+
+  // Update status bar styling
+  const isProcessing =
+    serverStatus &&
+    (serverStatus.is_generating || serverStatus.queue_length > 0);
+  if (isProcessing) {
+    if (limitEl) limitEl.style.display = "none";
+    statusEl.classList.remove("empty");
+    statusEl.classList.add("generating");
+  } else {
+    if (limitEl) limitEl.style.display = "";
+    statusEl.classList.toggle("empty", count === 0);
+    statusEl.classList.remove("generating");
+  }
+
+  // Enable buttons for selection (can add to queue even during processing)
+  deselectBtn.disabled = count === 0;
+  deleteBtn.disabled = count === 0;
+  renderBtn.disabled = count === 0;
+  generateBtn.disabled = count === 0;
+  // Generate with prompt button
+  const generateWithPromptBtn = document.getElementById(
+    "generateWithPromptBtn"
+  );
+  if (generateWithPromptBtn) {
+    generateWithPromptBtn.disabled = count === 0;
+  }
+  // Generate Rectangle requires exactly 2 selected
+  generateRectBtn.disabled = count !== 2;
+}
+
+// Toast notification system
+function showToast(type, title, message, duration = 5000) {
+  const container = document.getElementById("toastContainer");
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+
+  const icons = {
+    success: "✅",
+    error: "❌",
+    info: "ℹ️",
+    loading: "⏳",
+  };
+
+  toast.innerHTML = `
+    <span class="toast-icon">${icons[type] || "ℹ️"}</span>
+    <div class="toast-content">
+      <div class="toast-title">${title}</div>
+      ${message ? `<div class="toast-message">${message}</div>` : ""}
+    </div>
+    <button class="toast-close" onclick="this.parentElement.remove()">×</button>
+  `;
+
+  container.appendChild(toast);
+
+  // Auto-remove after duration (except for loading toasts)
+  if (type !== "loading" && duration > 0) {
+    setTimeout(() => {
+      toast.classList.add("removing");
+      setTimeout(() => toast.remove(), 300);
+    }, duration);
+  }
+
+  return toast;
+}
+
+function clearLoadingToasts() {
+  document.querySelectorAll(".toast.loading").forEach((t) => t.remove());
+}
+
+// Generation/Render state (tracked from server)
+let isGenerating = false;
+let isRendering = false;
+
+async function deleteSelected() {
+  if (selectedQuadrants.size === 0) return;
+
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return [x, y];
+  });
+
+  // Confirm deletion
+  const coordsStr = coords.map(([x, y]) => `(${x},${y})`).join(", ");
+  if (!confirm(`Delete generation data for ${coordsStr}?`)) {
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quadrants: coords }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast("success", "Deleted", result.message);
+      // Deselect and refresh
+      deselectAll();
+      location.reload();
+    } else {
+      showToast("error", "Delete failed", result.error);
+    }
+  } catch (error) {
+    console.error("Delete error:", error);
+    showToast("error", "Delete failed", error.message);
+  }
+}
+
+async function clearQueue() {
+  // Get current queue info first
+  try {
+    const statusResponse = await fetch("/api/status");
+    const status = await statusResponse.json();
+
+    const queueLength = status.queue_length || 0;
+    const isGenerating = status.is_generating || false;
+
+    if (queueLength === 0 && !isGenerating) {
+      showToast(
+        "info",
+        "Nothing to clear",
+        "There are no pending items or active generations."
+      );
+      return;
+    }
+
+    // Build confirm message based on what will be cancelled
+    let confirmMessage = "Are you sure you want to clear the queue?";
+    const parts = [];
+    if (queueLength > 0) {
+      parts.push(`${queueLength} pending item(s)`);
+    }
+    if (isGenerating) {
+      parts.push("the current generation in progress");
+    }
+    if (parts.length > 0) {
+      confirmMessage = `Are you sure you want to cancel ${parts.join(
+        " and "
+      )}?`;
+    }
+
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    // Clear the queue
+    const response = await fetch("/api/queue/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast(
+        "success",
+        "Queue cleared",
+        result.message || `Cleared ${result.cleared_count} item(s)`
+      );
+      // Refresh status
+      await checkGenerationStatus();
+    } else {
+      showToast(
+        "error",
+        "Failed to clear queue",
+        result.error || "Unknown error"
+      );
+    }
+  } catch (error) {
+    console.error("Clear queue error:", error);
+    showToast("error", "Request failed", error.message);
+  }
+}
+
+// Prompt dialog functions
+function showPromptDialog() {
+  if (selectedQuadrants.size === 0) return;
+  const dialog = document.getElementById("promptDialog");
+  const input = document.getElementById("promptInput");
+  if (dialog && input) {
+    input.value = "";
+    dialog.style.display = "flex";
+    input.focus();
+  }
+}
+
+function hidePromptDialog() {
+  const dialog = document.getElementById("promptDialog");
+  if (dialog) {
+    dialog.style.display = "none";
+  }
+}
+
+async function submitPromptGeneration() {
+  const input = document.getElementById("promptInput");
+  const prompt = input ? input.value.trim() : "";
+  hidePromptDialog();
+  await generateSelected(prompt);
+}
+
+async function generateSelected(prompt = null) {
+  if (selectedQuadrants.size === 0) return;
+
+  // Separate selected quadrants into those that need generation vs those that already have it
+  const toGenerate = [];
+  const contextQuadrants = [];
+
+  Array.from(selectedQuadrants).forEach((s) => {
+    const [x, y] = s.split(",").map(Number);
+    const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+
+    if (tile && !tile.classList.contains("placeholder")) {
+      // This quadrant already has a generation - use as context
+      contextQuadrants.push([x, y]);
+    } else {
+      // This quadrant needs generation
+      toGenerate.push([x, y]);
+    }
+  });
+
+  // If nothing needs generation, inform the user
+  if (toGenerate.length === 0) {
+    showToast(
+      "info",
+      "Already generated",
+      "All selected quadrants already have generations. Select at least one empty quadrant."
+    );
+    return;
+  }
+
+  const modelId = getSelectedModelId();
+
+  console.log(
+    "Generate requested for:",
+    toGenerate,
+    "with context:",
+    contextQuadrants,
+    "model:",
+    modelId
+  );
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+
+  // Show immediate feedback with context info
+  const contextMsg =
+    contextQuadrants.length > 0
+      ? ` (using ${contextQuadrants.length} as context)`
+      : "";
+  const promptMsg = prompt ? " with prompt" : "";
+  showToast(
+    "info",
+    "Adding to queue...",
+    `Queueing ${toGenerate.length} quadrant(s) for generation${promptMsg}${contextMsg}`
+  );
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const requestBody = {
+      quadrants: toGenerate,
+      model_id: modelId,
+    };
+
+    // Include context quadrants if any
+    if (contextQuadrants.length > 0) {
+      requestBody.context = contextQuadrants;
+    }
+
+    // Include prompt if provided
+    if (prompt) {
+      requestBody.prompt = prompt;
+    }
+
+    const response = await fetch("/api/generate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    const result = await response.json();
+
+    if (result.queued) {
+      console.log(
+        "Generation queued at position:",
+        result.position,
+        "model:",
+        result.model_id
+      );
+      // Get model name for display
+      const modelName = getModelDisplayName(result.model_id);
+      const modelInfo = modelName ? ` (${modelName})` : "";
+      showToast(
+        "success",
+        "Added to queue",
+        `Queued at position ${result.position}${modelInfo}`
+      );
+    } else if (!result.success) {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    console.error("Generation error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+  }
+}
+
+async function renderSelected() {
+  if (selectedQuadrants.size === 0) return;
+
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return [x, y];
+  });
+
+  console.log("Render requested for:", coords);
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+
+  // Show immediate feedback
+  showToast(
+    "info",
+    "Adding to queue...",
+    `Queueing ${coords.length} quadrant(s) for render`
+  );
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const response = await fetch("/api/render", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ quadrants: coords }),
+    });
+
+    const result = await response.json();
+
+    if (result.queued) {
+      console.log("Render queued at position:", result.position);
+      showToast(
+        "success",
+        "Added to queue",
+        `Render queued at position ${result.position}.`
+      );
+    } else if (!result.success) {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    console.error("Render error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+  }
+}
+
+async function generateRectangle() {
+  if (selectedQuadrants.size !== 2) {
+    showToast(
+      "error",
+      "Invalid selection",
+      "Please select exactly 2 quadrants to define the rectangle corners."
+    );
+    return;
+  }
+
+  // Get the two selected coordinates
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return { x, y };
+  });
+
+  // Calculate rectangle bounds (top-left and bottom-right)
+  const minX = Math.min(coords[0].x, coords[1].x);
+  const maxX = Math.max(coords[0].x, coords[1].x);
+  const minY = Math.min(coords[0].y, coords[1].y);
+  const maxY = Math.max(coords[0].y, coords[1].y);
+
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const totalQuadrants = width * height;
+
+  // Build confirmation message
+  const confirmMessage =
+    `Generate rectangle from (${minX}, ${minY}) to (${maxX}, ${maxY})?\n\n` +
+    `Size: ${width} × ${height} = ${totalQuadrants} quadrant(s)\n\n` +
+    `This will create a generation plan and queue all steps.\n` +
+    `Pre-existing generations will be skipped.`;
+
+  if (!confirm(confirmMessage)) {
+    return;
+  }
+
+  const modelId = getSelectedModelId();
+
+  console.log(
+    "Generate rectangle requested:",
+    { tl: [minX, minY], br: [maxX, maxY] },
+    "with model:",
+    modelId
+  );
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+
+  // Show immediate feedback
+  const btn = document.getElementById("generateRectBtn");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  btn.innerHTML = 'Queueing...<span class="spinner"></span>';
+
+  showToast(
+    "loading",
+    "Creating generation plan...",
+    `Rectangle (${minX}, ${minY}) to (${maxX}, ${maxY})`
+  );
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const response = await fetch("/api/generate-rectangle", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        tl: [minX, minY],
+        br: [maxX, maxY],
+        model_id: modelId,
+      }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    // Reset button
+    btn.classList.remove("loading");
+    btn.innerHTML = "Generate Rectangle";
+
+    if (result.success) {
+      if (result.queued_count === 0) {
+        showToast(
+          "info",
+          "Nothing to generate",
+          result.message || "All quadrants already generated."
+        );
+      } else {
+        console.log("Rectangle generation queued:", result);
+        const summary = result.plan_summary || {};
+        const stepTypes = summary.steps_by_type || {};
+        const typeInfo = Object.entries(stepTypes)
+          .map(([type, count]) => `${count}× ${type}`)
+          .join(", ");
+
+        showToast(
+          "success",
+          "Rectangle queued!",
+          `${result.queued_count} step(s) for ${
+            summary.total_quadrants || "?"
+          } quadrant(s)` + (typeInfo ? ` (${typeInfo})` : "")
+        );
+      }
+    } else {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Generate rectangle error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+
+    // Reset button
+    btn.classList.remove("loading");
+    btn.innerHTML = "Generate Rectangle";
+  }
+}
+
+function deselectAll() {
+  selectedQuadrants.clear();
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+  console.log("Deselected all quadrants");
+}
+
+function toggleTileSelection(tileEl, qx, qy) {
+  if (!selectToolActive) return;
+
+  // Check if this tile is currently being generated or in the queue
+  const key = `${qx},${qy}`;
+  if (
+    tileEl.classList.contains("locked") ||
+    tileEl.classList.contains("queued")
+  ) {
+    console.log(
+      `Cannot select quadrant (${qx}, ${qy}) - currently generating or in queue`
+    );
+    return;
+  }
+
+  if (selectedQuadrants.has(key)) {
+    selectedQuadrants.delete(key);
+    tileEl.classList.remove("selected");
+    console.log(`Deselected quadrant (${qx}, ${qy})`);
+  } else {
+    // Check if we've hit the max selection limit
+    if (selectedQuadrants.size >= MAX_SELECTION) {
+      console.log(`Cannot select more than ${MAX_SELECTION} quadrants`);
+      return;
+    }
+    selectedQuadrants.add(key);
+    tileEl.classList.add("selected");
+    console.log(`Selected quadrant (${qx}, ${qy})`);
+  }
+
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+
+  // Log current selection
+  if (selectedQuadrants.size > 0) {
+    console.log("Selected:", Array.from(selectedQuadrants).join("; "));
+  }
+}
+
+// Setup tile click handlers
+document.querySelectorAll(".tile").forEach((tile) => {
+  tile.addEventListener("click", (e) => {
+    // Handle fix water tool clicks
+    if (fixWaterToolActive) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleFixWaterClick(tile, e);
+      return;
+    }
+
+    // Handle water fill tool clicks
+    if (waterFillToolActive) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleWaterFillClick(tile);
+      return;
+    }
+
+    // Handle select tool clicks
+    if (!selectToolActive) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const coords = tile.dataset.coords.split(",").map(Number);
+    toggleTileSelection(tile, coords[0], coords[1]);
+  });
+});
+
+// Initialize selection status
+updateSelectionStatus();
+
+// Status polling for generation progress
+let statusPollInterval = null;
+let lastStatus = null;
+let lastProcessingQuadrants = new Set(); // Track quadrants that were processing
+
+function startStatusPolling() {
+  if (statusPollInterval) return;
+  statusPollInterval = setInterval(checkGenerationStatus, 1000);
+}
+
+// Refresh a specific tile's image (or add image if it was a placeholder)
+function refreshTileImage(qx, qy) {
+  const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+  if (!tile) return;
+
+  const showRender = document.getElementById("showRender")?.checked ? "1" : "0";
+  const timestamp = Date.now();
+  const imgUrl = `/tile/${qx}/${qy}?render=${showRender}&_t=${timestamp}`;
+
+  let img = tile.querySelector("img");
+  if (img) {
+    // Update existing image
+    img.src = imgUrl;
+  } else {
+    // Create new image for placeholder tile
+    img = document.createElement("img");
+    img.src = imgUrl;
+    img.alt = `Tile ${qx},${qy}`;
+    img.onload = () => {
+      // Remove placeholder class once image loads
+      tile.classList.remove("placeholder");
+    };
+    tile.appendChild(img);
+  }
+}
+
+function stopStatusPolling() {
+  if (statusPollInterval) {
+    clearInterval(statusPollInterval);
+    statusPollInterval = null;
+  }
+}
+
+async function checkGenerationStatus() {
+  try {
+    const response = await fetch("/api/status");
+    const status = await response.json();
+
+    console.log("Status poll:", status);
+
+    // Track state changes - consider active_model_count for parallel processing
+    const wasGenerating = isGenerating || isRendering;
+    const hasActiveModels = (status.active_model_count || 0) > 0;
+    isGenerating =
+      (status.is_generating || hasActiveModels) &&
+      status.status !== "rendering";
+    isRendering = status.is_generating && status.status === "rendering";
+    const nowProcessing = isGenerating || isRendering;
+
+    // Get current processing quadrants
+    const currentProcessingQuadrants = new Set(
+      (status.all_processing_quadrants || status.quadrants || []).map(
+        ([x, y]) => `${x},${y}`
+      )
+    );
+
+    // Detect quadrants that just finished processing (were processing, now not)
+    const completedQuadrants = [];
+    lastProcessingQuadrants.forEach((coordKey) => {
+      if (!currentProcessingQuadrants.has(coordKey)) {
+        completedQuadrants.push(coordKey);
+      }
+    });
+
+    // Refresh tiles for completed quadrants
+    if (completedQuadrants.length > 0) {
+      console.log("Refreshing completed quadrants:", completedQuadrants);
+      completedQuadrants.forEach((coordKey) => {
+        const [qx, qy] = coordKey.split(",").map(Number);
+        refreshTileImage(qx, qy);
+      });
+    }
+
+    // Update tracking for next poll
+    lastProcessingQuadrants = currentProcessingQuadrants;
+
+    // Apply visual styles based on server status
+    applyStatusStyles(status);
+
+    // Update render button based on state
+    const renderBtn = document.getElementById("renderBtn");
+
+    if (nowProcessing) {
+      // Show loading state on render button only (generate state is shown in toolbar)
+      if (isRendering) {
+        renderBtn.classList.add("loading");
+        renderBtn.innerHTML = 'Rendering<span class="spinner"></span>';
+      } else {
+        renderBtn.classList.remove("loading");
+        renderBtn.innerHTML = "Render";
+      }
+
+      // Show toast if not already showing
+      if (document.querySelectorAll(".toast.loading").length === 0) {
+        const opName = isRendering ? "Render" : "Generation";
+        showToast(
+          "loading",
+          `${opName} in progress...`,
+          status.message || "Please wait..."
+        );
+      }
+
+      // Update the loading toast message
+      const loadingToast = document.querySelector(
+        ".toast.loading .toast-message"
+      );
+      if (loadingToast && status.message) {
+        loadingToast.textContent = status.message;
+      }
+    } else {
+      // Reset render button
+      renderBtn.classList.remove("loading");
+      renderBtn.innerHTML = "Render";
+    }
+
+    // Handle status transitions
+    if (status.status === "complete" && wasGenerating && !nowProcessing) {
+      clearLoadingToasts();
+      showToast("success", "Complete!", status.message);
+
+      // Check if there are more items in queue
+      if (status.queue_length > 0) {
+        // Build per-model queue message
+        let queueMsg = "";
+        if (status.queue_by_model) {
+          const parts = Object.entries(status.queue_by_model)
+            .map(([modelId, info]) => {
+              const name = getModelDisplayName(modelId) || modelId;
+              const count = info.pending_count + (info.is_processing ? 1 : 0);
+              return { name, count };
+            })
+            .filter(({ count }) => count > 0)
+            .map(({ name, count }) => `${name}: ${count}`);
+          if (parts.length > 0) {
+            queueMsg = parts.join(", ");
+          }
+        }
+        if (queueMsg) {
+          showToast("info", "Processing queue", queueMsg);
+        }
+      } else {
+        // No more items - tiles already refreshed, just stop polling
+        stopStatusPolling();
+      }
+    } else if (status.status === "error" && status.error) {
+      clearLoadingToasts();
+      showToast("error", "Error", status.error);
+
+      // Continue polling if there are more items in queue
+      if (status.queue_length === 0) {
+        stopStatusPolling();
+      }
+    } else if (
+      status.status === "idle" &&
+      status.queue_length === 0 &&
+      !nowProcessing
+    ) {
+      // Idle with no queue - stop polling
+      stopStatusPolling();
+    }
+
+    // Update selection status with server info
+    updateSelectionStatus(status);
+    lastStatus = status;
+  } catch (error) {
+    console.error("Status check failed:", error);
+  }
+}
+
+// Restore saved tool on page load
+function restoreSavedTool() {
+  const savedTool = getSavedTool();
+  if (!savedTool) return;
+
+  // Check if the tool button exists before activating
+  switch (savedTool) {
+    case "select":
+      if (document.getElementById("selectTool")) {
+        toggleSelectTool();
+      }
+      break;
+    case "fixwater":
+      if (document.getElementById("fixWaterTool")) {
+        toggleFixWaterTool();
+      }
+      break;
+    case "waterfill":
+      if (document.getElementById("waterFillTool")) {
+        toggleWaterFillTool();
+      }
+      break;
+    default:
+      // Unknown tool, clear saved state
+      saveSelectedTool("");
+      break;
+  }
+}
+
+// Restore saved quadrant selections on page load
+function restoreSavedQuadrants() {
+  const savedQuadrants = getSavedQuadrants();
+  if (!savedQuadrants || savedQuadrants.length === 0) return;
+
+  let restoredCount = 0;
+
+  savedQuadrants.forEach((key) => {
+    // Check if this quadrant tile exists on the current page
+    const tile = document.querySelector(`.tile[data-coords="${key}"]`);
+    if (tile) {
+      // Don't restore if tile is locked or queued
+      if (
+        !tile.classList.contains("locked") &&
+        !tile.classList.contains("queued")
+      ) {
+        selectedQuadrants.add(key);
+        tile.classList.add("selected");
+        restoredCount++;
+      }
+    }
+  });
+
+  if (restoredCount > 0) {
+    console.log(`Restored ${restoredCount} selected quadrant(s)`);
+    // Update localStorage to only contain valid selections
+    saveSelectedQuadrants();
+    updateSelectionStatus();
+  } else if (savedQuadrants.length > 0) {
+    // Had saved selections but none are on current page - clear storage
+    saveSelectedQuadrants();
+  }
+}
+
+// Initialize on page load
+(async function initialize() {
+  // Initialize model selector
+  initModelSelector();
+
+  // Restore saved tool
+  restoreSavedTool();
+
+  // Restore saved quadrant selections
+  restoreSavedQuadrants();
+
+  try {
+    const response = await fetch("/api/status");
+    const status = await response.json();
+
+    // Apply initial status styles
+    applyStatusStyles(status);
+
+    if (status.is_generating || status.queue_length > 0) {
+      console.log(
+        "Processing in progress or queue non-empty, starting polling..."
+      );
+      isGenerating = status.is_generating && status.status !== "rendering";
+      isRendering = status.is_generating && status.status === "rendering";
+      startStatusPolling();
+    }
+
+    updateSelectionStatus(status);
+  } catch (error) {
+    console.error("Initial status check failed:", error);
+  }
+})();
+
+```
+
+Now let me add the CSS for the hard refresh button:
+
+```css
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "SF Mono", "Monaco", "Inconsolata", monospace;
+  font-size: 12px;
+  background: #1a1a2e;
+  color: #eee;
+  min-height: 100vh;
+  padding: 15px;
+  padding-top: 95px; /* Space for fixed toolbar */
+}
+
+.toolbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: #1a1a2e;
+  padding: 10px 15px;
+  z-index: 100;
+  border-bottom: 1px solid #333;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+.toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+
+.toolbar-info {
+  color: #666;
+  font-size: 0.75rem;
+}
+
+.toolbar-info span + span {
+  margin-left: 12px;
+}
+
+.toolbar-info .selected-quadrants {
+  color: #00d9ff;
+  font-weight: bold;
+}
+
+.controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.controls label {
+  color: #888;
+  font-size: 0.8rem;
+}
+
+.controls input[type="number"] {
+  width: 50px;
+  padding: 5px 6px;
+  border: 1px solid #333;
+  border-radius: 3px;
+  background: #16213e;
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.8rem;
+}
+
+.controls button {
+  padding: 5px 12px;
+  background: #00d9ff;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: bold;
+}
+
+.controls button:hover {
+  background: #00b8d4;
+}
+
+.toggle-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding-left: 12px;
+  border-left: 1px solid #333;
+}
+
+.toggle-group label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.75rem;
+}
+
+.toggle-group input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: #00d9ff;
+  cursor: pointer;
+}
+
+.grid-container {
+  display: inline-block;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.grid-container.show-lines {
+  border: 2px solid #333;
+}
+
+.grid {
+  display: grid;
+  background: #333;
+}
+
+.grid-container.show-lines .grid {
+  gap: 2px;
+}
+
+.grid-container:not(.show-lines) .grid {
+  gap: 0;
+  background: transparent;
+}
+
+.grid-container:not(.show-lines) {
+  border: none;
+}
+
+.tile {
+  position: relative;
+  background: #2a2a4a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tile img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.tile.placeholder {
+  background: #3a3a5a;
+}
+
+.tile .coords {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.65rem;
+  color: #00d9ff;
+  transition: opacity 0.2s;
+}
+
+.tile.placeholder .coords {
+  color: #666;
+}
+
+.grid-container:not(.show-coords) .tile .coords {
+  opacity: 0;
+}
+
+/* Tool button styles */
+.tools-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tools-label {
+  color: #666;
+  font-size: 0.7rem;
+}
+
+.tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: #2a2a3e;
+  color: #666;
+  border: 1px solid #444;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  transition: all 0.15s ease;
+}
+
+.tool-btn:hover {
+  background: #3a3a4e;
+  color: #999;
+  border-color: #555;
+}
+
+.tool-btn.active {
+  background: #10b981;
+  color: #fff;
+  border-color: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+}
+
+.tool-btn.active:hover {
+  background: #059669;
+  border-color: #059669;
+}
+
+.tool-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Selection styles */
+.tile.selected {
+  outline: 3px solid #ff3333;
+  outline-offset: -3px;
+  z-index: 10;
+}
+
+.grid-container.show-lines .tile.selected {
+  outline-color: #ff3333;
+}
+
+.tile.selectable {
+  cursor: pointer;
+}
+
+.tile.placeholder.selected {
+  background: rgba(255, 51, 51, 0.15);
+}
+
+/* Locked tiles (during generation) */
+.tile.locked {
+  outline: 3px solid #a855f7;
+  outline-offset: -3px;
+  z-index: 10;
+}
+
+.grid-container.show-lines .tile.locked {
+  outline-color: #a855f7;
+}
+
+.tile.placeholder.locked {
+  background: rgba(168, 85, 247, 0.2);
+}
+
+/* Queued tiles (in queue, waiting to be generated) */
+.tile.queued {
+  outline: 3px dashed #c084fc !important;
+  outline-offset: -3px;
+  z-index: 9;
+  animation: pulse-queue 1.5s ease-in-out infinite;
+  /* Fallback: box-shadow for browsers that don't render dashed outlines well */
+  box-shadow: inset 0 0 0 3px rgba(192, 132, 252, 0.5);
+}
+
+@keyframes pulse-queue {
+  0%,
+  100% {
+    outline-color: #c084fc;
+    box-shadow: inset 0 0 0 3px rgba(192, 132, 252, 0.5);
+  }
+  50% {
+    outline-color: #8b5cf6;
+    box-shadow: inset 0 0 0 3px rgba(139, 92, 246, 0.7);
+  }
+}
+
+.grid-container.show-lines .tile.queued {
+  outline-color: #c084fc;
+}
+
+.tile.placeholder.queued {
+  background: rgba(168, 85, 247, 0.3) !important;
+}
+
+/* Allow selection while generating - only disable clicking on locked/queued tiles */
+body.generating .tile.locked.selectable,
+body.generating .tile.queued.selectable {
+  cursor: not-allowed;
+}
+
+/* Selection status bar */
+.selection-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  background: rgba(255, 51, 51, 0.1);
+  border: 1px solid rgba(255, 51, 51, 0.3);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: #ff6666;
+  margin-top: 8px;
+}
+
+.selection-status.empty {
+  background: transparent;
+  border-color: #333;
+  color: #666;
+}
+
+.selection-status.generating {
+  background: rgba(168, 85, 247, 0.1);
+  border-color: rgba(168, 85, 247, 0.4);
+  color: #a855f7;
+}
+
+/* Clickable coordinate links in status bar */
+.coord-link {
+  color: #00d9ff;
+  text-decoration: none;
+  cursor: pointer;
+  padding: 1px 3px;
+  border-radius: 3px;
+  transition: background-color 0.15s ease;
+}
+
+.coord-link:hover {
+  background-color: rgba(0, 217, 255, 0.2);
+  text-decoration: underline;
+}
+
+.selection-limit {
+  color: #888;
+  font-size: 0.65rem;
+}
+
+.deselect-btn {
+  padding: 3px 8px;
+  background: #ff3333;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  margin-left: auto;
+  transition: all 0.2s;
+}
+
+.deselect-btn:hover:not(:disabled) {
+  background: #ff5555;
+}
+
+.deselect-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+}
+
+.delete-btn {
+  padding: 3px 8px;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  transition: all 0.2s;
+}
+
+.delete-btn:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.delete-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+}
+
+.render-btn {
+  padding: 4px 12px;
+  background: #f59e0b;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.render-btn:hover:not(:disabled) {
+  background: #d97706;
+}
+
+.render-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+.render-btn.loading {
+  background: #666;
+  cursor: wait;
+}
+
+.render-btn .spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.generate-btn {
+  padding: 4px 12px;
+  background: #00d9ff;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.generate-btn:hover:not(:disabled) {
+  background: #00b8d4;
+}
+
+.generate-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+/* Generate Rectangle button */
+.generate-rect-btn {
+  padding: 4px 12px;
+  background: #8b5cf6;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.generate-rect-btn:hover:not(:disabled) {
+  background: #7c3aed;
+}
+
+.generate-rect-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+.generate-rect-btn.loading {
+  background: #666;
+  cursor: wait;
+}
+
+.generate-rect-btn .spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+/* Clear Queue button */
+.clear-queue-btn {
+  padding: 4px 10px;
+  background: #6b7280;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  margin-left: 8px;
+}
+
+.clear-queue-btn:hover {
+  background: #ef4444;
+}
+
+.clear-queue-btn:active {
+  background: #dc2626;
+}
+
+.hard-refresh-btn {
+  padding: 4px 10px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  margin-left: 8px;
+}
+
+.hard-refresh-btn:hover {
+  background: #2563eb;
+}
+
+.hard-refresh-btn:active {
+  background: #1d4ed8;
+}
+
+/* Toast notification system */
+.toast-container {
+  position: fixed;
+  bottom: 15px;
+  right: 15px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  max-width: 320px;
+}
+
+.toast {
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  animation: slideIn 0.3s ease-out;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.toast.success {
+  background: linear-gradient(135deg, #065f46 0%, #047857 100%);
+  border: 1px solid #10b981;
+  color: #d1fae5;
+}
+
+.toast.error {
+  background: linear-gradient(135deg, #7f1d1d 0%, #991b1b 100%);
+  border: 1px solid #ef4444;
+  color: #fee2e2;
+}
+
+.toast.info {
+  background: linear-gradient(135deg, #1e3a5f 0%, #1e40af 100%);
+  border: 1px solid #3b82f6;
+  color: #dbeafe;
+}
+
+.toast.loading {
+  background: linear-gradient(135deg, #374151 0%, #4b5563 100%);
+  border: 1px solid #6b7280;
+  color: #e5e7eb;
+}
+
+.toast-icon {
+  flex-shrink: 0;
+  font-size: 1rem;
+}
+
+.toast-content {
+  flex: 1;
+}
+
+.toast-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.toast-message {
+  opacity: 0.9;
+  font-size: 0.7rem;
+}
+
+.toast-close {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+  font-size: 1rem;
+  padding: 0;
+  line-height: 1;
+}
+
+.toast-close:hover {
+  opacity: 1;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOut {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+.toast.removing {
+  animation: slideOut 0.3s ease-in forwards;
+}
+
+/* Loading spinner for generate button */
+.generate-btn.loading {
+  background: #666;
+  color: #fff;
+  cursor: wait;
+}
+
+.generate-btn .spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Water fix tool styles */
+.water-fix-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: #60a5fa;
+  margin-top: 8px;
+}
+
+.water-fix-label {
+  color: #93c5fd;
+  font-weight: 500;
+}
+
+.color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3), inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+  background: #333;
+}
+
+.color-swatch.has-color {
+  cursor: pointer;
+}
+
+.color-hex {
+  font-family: "SF Mono", "Monaco", "Inconsolata", monospace;
+  font-size: 0.75rem;
+  color: #93c5fd;
+  min-width: 180px;
+}
+
+.water-fix-quadrant {
+  color: #60a5fa;
+  font-size: 0.7rem;
+}
+
+.apply-water-fix-btn {
+  padding: 4px 12px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+  margin-left: auto;
+}
+
+.apply-water-fix-btn:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.apply-water-fix-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+.apply-water-fix-btn.loading {
+  background: #666;
+  cursor: wait;
+}
+
+.cancel-water-fix-btn {
+  padding: 4px 8px;
+  background: #4b5563;
+  color: #d1d5db;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  transition: all 0.2s;
+}
+
+.cancel-water-fix-btn:hover {
+  background: #6b7280;
+}
+
+/* Fix water tool active state */
+.tile.fix-water-selectable {
+  cursor: crosshair;
+}
+
+.tile.fix-water-selectable:hover {
+  outline: 2px solid #3b82f6;
+  outline-offset: -2px;
+}
+
+.tile.water-fix-selected {
+  outline: 3px solid #3b82f6;
+  outline-offset: -3px;
+  z-index: 10;
+}
+
+/* Water fill tool styles */
+.water-fill-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: rgba(74, 99, 114, 0.15);
+  border: 1px solid rgba(74, 99, 114, 0.4);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: #7ba3b8;
+  margin-top: 8px;
+}
+
+.water-fill-label {
+  color: #93c5fd;
+  font-weight: 500;
+}
+
+.water-color-preview {
+  background: #4a6372 !important;
+}
+
+.water-fill-instruction {
+  color: #7ba3b8;
+}
+
+.tile.water-fill-selectable {
+  cursor: pointer;
+}
+
+.tile.water-fill-selectable:hover {
+  outline: 2px solid #4a6372;
+  outline-offset: -2px;
+}
+
+/* Model selector styles */
+.model-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.model-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #888;
+  font-size: 0.75rem;
+}
+
+.model-select {
+  padding: 4px 8px;
+  border: 1px solid #333;
+  border-radius: 3px;
+  background: #16213e;
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  min-width: 140px;
+}
+
+.model-select:hover {
+  border-color: #00d9ff;
+}
+
+.model-select:focus {
+  outline: none;
+  border-color: #00d9ff;
+  box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.2);
+}
+
+.model-select option {
+  background: #16213e;
+  color: #fff;
+  padding: 4px;
+}
+
+/* Generate with Prompt button */
+.generate-prompt-btn {
+  background: linear-gradient(135deg, #9b59b6, #8e44ad);
+  color: #fff;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.generate-prompt-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #a569c0, #9b59b6);
+  transform: translateY(-1px);
+}
+
+.generate-prompt-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Prompt Dialog */
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dialog-content {
+  background: #1a1a2e;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 24px;
+  min-width: 400px;
+  max-width: 500px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.dialog-content h3 {
+  margin: 0 0 12px 0;
+  color: #fff;
+  font-size: 18px;
+}
+
+.dialog-description {
+  color: #aaa;
+  font-size: 14px;
+  margin: 0 0 16px 0;
+}
+
+.prompt-input {
+  width: 100%;
+  background: #0f0f1a;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 14px;
+  padding: 12px;
+  resize: vertical;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.prompt-input:focus {
+  outline: none;
+  border-color: #9b59b6;
+  box-shadow: 0 0 0 2px rgba(155, 89, 182, 0.2);
+}
+
+.prompt-input::placeholder {
+  color: #666;
+}
+
+.dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.dialog-cancel-btn {
+  background: #333;
+  color: #fff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+
+.dialog-cancel-btn:hover {
+  background: #444;
+}
+
+.dialog-submit-btn {
+  background: linear-gradient(135deg, #9b59b6, #8e44ad);
+  color: #fff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.dialog-submit-btn:hover {
+  background: linear-gradient(135deg, #a569c0, #9b59b6);
+}
+
+/* Queue Overlays - show pending generations as grouped rectangles */
+.queue-overlay {
+  position: absolute;
+  border: 3px dashed #c084fc;
+  border-radius: 4px;
+  pointer-events: auto;
+  z-index: 20;
+  animation: pulse-queue-overlay 1.5s ease-in-out infinite;
+  box-sizing: border-box;
+}
+
+/* Processing overlay - solid border, different color */
+.queue-overlay.processing {
+  border-style: solid;
+  border-color: #a855f7;
+  animation: pulse-processing-overlay 1s ease-in-out infinite;
+}
+
+@keyframes pulse-queue-overlay {
+  0%,
+  100% {
+    border-color: #c084fc;
+    box-shadow: 0 0 12px rgba(192, 132, 252, 0.3);
+  }
+  50% {
+    border-color: #8b5cf6;
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.5);
+  }
+}
+
+@keyframes pulse-processing-overlay {
+  0%,
+  100% {
+    border-color: #a855f7;
+    box-shadow: 0 0 16px rgba(168, 85, 247, 0.4);
+  }
+  50% {
+    border-color: #c084fc;
+    box-shadow: 0 0 24px rgba(192, 132, 252, 0.7);
+  }
+}
+
+.queue-overlay:hover {
+  border-color: #a855f7;
+  box-shadow: 0 0 16px rgba(168, 85, 247, 0.6);
+}
+
+/* Queue position badge */
+.queue-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  min-width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #8b5cf6, #a855f7);
+  color: white;
+  font-size: 12px;
+  font-weight: bold;
+  font-family: "SF Mono", "Monaco", monospace;
+  border-radius: 6px;
+  padding: 0 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 1;
+}
+
+/* Processing badge - with spinner */
+.queue-badge.processing {
+  background: linear-gradient(135deg, #10b981, #059669);
+  min-width: 28px;
+  height: 28px;
+}
+
+/* Spinner animation for processing badge */
+.processing-spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Model label below badge */
+.queue-model-label {
+  position: absolute;
+  top: 34px;
+  left: 6px;
+  font-size: 9px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(139, 92, 246, 0.8);
+  padding: 2px 6px;
+  border-radius: 3px;
+  max-width: calc(100% - 40px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Cancel button - visible on hover */
+.queue-cancel-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(220, 38, 38, 0.9);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.queue-overlay:hover .queue-cancel-btn {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.queue-cancel-btn:hover {
+  background: #dc2626;
+  transform: scale(1.1);
+}
+
+.queue-cancel-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Make grid position relative for overlay positioning */
+.grid {
+  position: relative;
+}
+
+```
+
+Done! I've added:
+
+1. **Hard Refresh button** (`↻ Refresh`) - A blue button that clears image caches and reloads the page
+
+2. **Auto-refresh completed tiles** - Newly generated quadrants are now automatically refreshed as they complete:
+   - Tracks which quadrants are currently processing
+   - When they finish, automatically refreshes the tile image with cache-busting
+   - For placeholder tiles (empty quadrants), creates the image element dynamically
+   - No more full page reload needed when generation completes
+
+The workflow is now:
+- Generation completes → tile image automatically refreshes
+- Need a full cache clear? → Click the `↻ Refresh` button
+
+---
+
+**User**
+
+Can you update the toast logic to only show one toast when adding to the queue? right now it gives 2 - adding and added
+
+---
+
+**Cursor**
+
+I see the issue - there's one toast before the request ("Adding to queue...") and another after success ("Added to queue"). Let me consolidate to just show one toast on success:
+
+```javascript
+// Get config from data attributes
+const config = JSON.parse(document.getElementById("app-config").dataset.config);
+
+// LocalStorage keys for persistence
+const STORAGE_KEY_MODEL = "viewer_selected_model";
+const STORAGE_KEY_TOOL = "viewer_selected_tool";
+const STORAGE_KEY_SELECTION = "viewer_selected_quadrants";
+
+// Save selected model ID to localStorage
+function saveSelectedModel(modelId) {
+  try {
+    localStorage.setItem(STORAGE_KEY_MODEL, modelId);
+  } catch (e) {
+    console.warn("Could not save model to localStorage:", e);
+  }
+}
+
+// Get saved model ID from localStorage
+function getSavedModel() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_MODEL);
+  } catch (e) {
+    return null;
+  }
+}
+
+// Save selected tool to localStorage
+function saveSelectedTool(toolName) {
+  try {
+    localStorage.setItem(STORAGE_KEY_TOOL, toolName || "");
+  } catch (e) {
+    console.warn("Could not save tool to localStorage:", e);
+  }
+}
+
+// Get saved tool from localStorage
+function getSavedTool() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_TOOL) || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+// Save selected quadrants to localStorage
+function saveSelectedQuadrants() {
+  try {
+    const quadrantsArray = Array.from(selectedQuadrants);
+    localStorage.setItem(STORAGE_KEY_SELECTION, JSON.stringify(quadrantsArray));
+  } catch (e) {
+    console.warn("Could not save selection to localStorage:", e);
+  }
+}
+
+// Get saved quadrants from localStorage
+function getSavedQuadrants() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_SELECTION);
+    return saved ? JSON.parse(saved) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+// Initialize model selector
+function initModelSelector() {
+  const select = document.getElementById("modelSelect");
+  if (!select || !config.models || config.models.length === 0) {
+    return;
+  }
+
+  // Clear existing options
+  select.innerHTML = "";
+
+  // Check if saved model ID exists in available models
+  const savedModelId = getSavedModel();
+  const savedModelExists =
+    savedModelId && config.models.some((m) => m.model_id === savedModelId);
+
+  // Add options for each model
+  config.models.forEach((model, index) => {
+    const option = document.createElement("option");
+    option.value = model.model_id;
+    option.textContent = model.name;
+
+    // Select saved model if it exists, otherwise use default or first
+    if (savedModelExists && model.model_id === savedModelId) {
+      option.selected = true;
+    } else if (
+      !savedModelExists &&
+      model.model_id === config.default_model_id
+    ) {
+      option.selected = true;
+    } else if (!savedModelExists && !config.default_model_id && index === 0) {
+      option.selected = true;
+    }
+    select.appendChild(option);
+  });
+
+  // Auto-blur after selection and save to localStorage
+  select.addEventListener("change", () => {
+    saveSelectedModel(select.value);
+    select.blur();
+  });
+}
+
+// Get the currently selected model ID
+function getSelectedModelId() {
+  const select = document.getElementById("modelSelect");
+  return select ? select.value : null;
+}
+
+// Get display name for a model ID
+function getModelDisplayName(modelId) {
+  if (!modelId) return null;
+  const configEl = document.getElementById("app-config");
+  if (!configEl) return modelId;
+  try {
+    const config = JSON.parse(configEl.dataset.config);
+    const models = config.models || [];
+    const model = models.find((m) => m.model_id === modelId);
+    return model ? model.name : modelId;
+  } catch {
+    return modelId;
+  }
+}
+
+// Apply locked/queued styles based on server status
+function applyStatusStyles(status) {
+  // Clear all existing locked/queued styles first
+  document.querySelectorAll(".tile.locked, .tile.queued").forEach((tile) => {
+    tile.classList.remove("locked", "queued");
+  });
+
+  // Apply locked style to ALL currently processing quadrants (from all models)
+  const processingQuadrants =
+    status.all_processing_quadrants || status.quadrants || [];
+  const isProcessing = status.is_generating || status.active_model_count > 0;
+
+  if (isProcessing && processingQuadrants.length > 0) {
+    document.body.classList.add("generating");
+    processingQuadrants.forEach(([qx, qy]) => {
+      const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+      if (tile) {
+        tile.classList.add("locked");
+      }
+    });
+  } else if (!isProcessing) {
+    document.body.classList.remove("generating");
+  }
+
+  // Apply queued style to pending queue items AND create overlays
+  // Also create overlays for processing items
+  const processingItems = getProcessingItems(status);
+  updateQueueOverlays(status.queue || [], processingItems);
+}
+
+// Extract currently processing items from status
+function getProcessingItems(status) {
+  const processingItems = [];
+  if (status.queue_by_model) {
+    Object.entries(status.queue_by_model).forEach(([modelId, info]) => {
+      if (info.is_processing && info.current_item) {
+        processingItems.push({
+          ...info.current_item,
+          model_id: modelId,
+          _isProcessing: true,
+        });
+      }
+    });
+  }
+  return processingItems;
+}
+
+// Create/update overlays for pending queue items and processing items
+function updateQueueOverlays(queueItems, processingItems = []) {
+  // Remove existing overlays
+  document.querySelectorAll(".queue-overlay").forEach((el) => el.remove());
+
+  // Also clear queued class from all tiles
+  document.querySelectorAll(".tile.queued").forEach((tile) => {
+    tile.classList.remove("queued");
+  });
+
+  const hasItems =
+    (queueItems && queueItems.length > 0) ||
+    (processingItems && processingItems.length > 0);
+  if (!hasItems) return;
+
+  const grid = document.querySelector(".grid");
+  if (!grid) return;
+
+  // Get grid dimensions from config
+  const gridX = config.x;
+  const gridY = config.y;
+  const sizePx = config.size_px;
+  const showLines = document.getElementById("showLines")?.checked || false;
+  const gap = showLines ? 2 : 0;
+
+  // Helper function to create an overlay for an item
+  function createOverlay(item, options = {}) {
+    const { isProcessing = false, queuePosition = null } = options;
+
+    if (!item.quadrants || item.quadrants.length === 0) return null;
+
+    // Calculate bounding box for this generation
+    const quadrants = item.quadrants;
+    let minCol = Infinity,
+      maxCol = -Infinity;
+    let minRow = Infinity,
+      maxRow = -Infinity;
+
+    // Track which tiles are visible in the current view
+    const visibleQuadrants = [];
+
+    quadrants.forEach(([qx, qy]) => {
+      const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+      if (tile) {
+        visibleQuadrants.push([qx, qy]);
+        const col = qx - gridX;
+        const row = qy - gridY;
+        minCol = Math.min(minCol, col);
+        maxCol = Math.max(maxCol, col);
+        minRow = Math.min(minRow, row);
+        maxRow = Math.max(maxRow, row);
+
+        // Add appropriate class to tile
+        if (isProcessing) {
+          tile.classList.add("locked");
+        } else if (!tile.classList.contains("locked")) {
+          tile.classList.add("queued");
+        }
+      }
+    });
+
+    if (visibleQuadrants.length === 0) return null;
+
+    // Create overlay element
+    const overlay = document.createElement("div");
+    overlay.className = isProcessing
+      ? "queue-overlay processing"
+      : "queue-overlay";
+    overlay.dataset.itemId = item.id;
+
+    // Calculate position and size
+    const left = minCol * (sizePx + gap);
+    const top = minRow * (sizePx + gap);
+    const width = (maxCol - minCol + 1) * sizePx + (maxCol - minCol) * gap;
+    const height = (maxRow - minRow + 1) * sizePx + (maxRow - minRow) * gap;
+
+    overlay.style.left = `${left}px`;
+    overlay.style.top = `${top}px`;
+    overlay.style.width = `${width}px`;
+    overlay.style.height = `${height}px`;
+
+    // Badge: spinner for processing, number for queued
+    const badge = document.createElement("div");
+    badge.className = isProcessing ? "queue-badge processing" : "queue-badge";
+    if (isProcessing) {
+      badge.innerHTML = `<svg class="processing-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+      </svg>`;
+    } else {
+      badge.textContent = queuePosition;
+    }
+    overlay.appendChild(badge);
+
+    // Model name label
+    if (item.model_id) {
+      const modelLabel = document.createElement("div");
+      modelLabel.className = "queue-model-label";
+      modelLabel.textContent =
+        getModelDisplayName(item.model_id) || item.model_id;
+      overlay.appendChild(modelLabel);
+    }
+
+    // Cancel button (visible on hover) - for both processing and queued
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className = "queue-cancel-btn";
+    cancelBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+      <line x1="10" y1="11" x2="10" y2="17"/>
+      <line x1="14" y1="11" x2="14" y2="17"/>
+    </svg>`;
+    cancelBtn.title = isProcessing
+      ? "Cancel this generation (in progress)"
+      : "Cancel this generation";
+    cancelBtn.onclick = (e) => {
+      e.stopPropagation();
+      cancelQueueItem(item.id);
+    };
+    overlay.appendChild(cancelBtn);
+
+    return overlay;
+  }
+
+  // First, create overlays for processing items (with spinner)
+  processingItems.forEach((item) => {
+    const overlay = createOverlay(item, { isProcessing: true });
+    if (overlay) {
+      grid.appendChild(overlay);
+    }
+  });
+
+  // Then, create overlays for queued items (with per-model position numbers)
+  // Track position within each model's queue
+  const modelPositionCounters = {};
+
+  queueItems.forEach((item) => {
+    const modelId = item.model_id || "default";
+    // Initialize or increment the counter for this model
+    if (!modelPositionCounters[modelId]) {
+      modelPositionCounters[modelId] = 1;
+    }
+    const positionInModelQueue = modelPositionCounters[modelId];
+    modelPositionCounters[modelId]++;
+
+    const overlay = createOverlay(item, {
+      queuePosition: positionInModelQueue,
+    });
+    if (overlay) {
+      grid.appendChild(overlay);
+    }
+  });
+}
+
+// Cancel a specific queue item
+async function cancelQueueItem(itemId) {
+  try {
+    const response = await fetch(`/api/queue/cancel/${itemId}`, {
+      method: "POST",
+    });
+    const result = await response.json();
+
+    if (result.success && result.cancelled) {
+      showToast("success", "Cancelled", result.message);
+      // Trigger immediate status update
+      checkGenerationStatus();
+    } else if (result.success && !result.cancelled) {
+      showToast("info", "Not found", result.message);
+    } else {
+      showToast("error", "Error", result.error || "Failed to cancel");
+    }
+  } catch (error) {
+    console.error("Cancel queue item failed:", error);
+    showToast("error", "Error", "Failed to cancel queue item");
+  }
+}
+
+function getParams() {
+  const x = document.getElementById("x").value;
+  const y = document.getElementById("y").value;
+  const nx = document.getElementById("nx").value;
+  const ny = document.getElementById("ny").value;
+  const sizePx = document.getElementById("sizePx").value;
+  const showLines = document.getElementById("showLines").checked ? "1" : "0";
+  const showCoords = document.getElementById("showCoords").checked ? "1" : "0";
+  const showRender = document.getElementById("showRender").checked ? "1" : "0";
+  return { x, y, nx, ny, sizePx, showLines, showCoords, showRender };
+}
+
+function goTo() {
+  const { x, y, nx, ny, sizePx, showLines, showCoords, showRender } =
+    getParams();
+  window.location.href = `?x=${x}&y=${y}&nx=${nx}&ny=${ny}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
+}
+
+function navigate(dx, dy) {
+  const params = getParams();
+  const x = parseInt(params.x) + dx;
+  const y = parseInt(params.y) + dy;
+  window.location.href = `?x=${x}&y=${y}&nx=${params.nx}&ny=${params.ny}&size=${params.sizePx}&lines=${params.showLines}&coords=${params.showCoords}&render=${params.showRender}`;
+}
+
+// Navigate to center the view on a specific coordinate
+function navigateToCoord(targetX, targetY) {
+  const params = getParams();
+  const nx = parseInt(params.nx);
+  const ny = parseInt(params.ny);
+  // Center the target coordinate in the view
+  const x = targetX - Math.floor(nx / 2);
+  const y = targetY - Math.floor(ny / 2);
+  window.location.href = `?x=${x}&y=${y}&nx=${params.nx}&ny=${params.ny}&size=${params.sizePx}&lines=${params.showLines}&coords=${params.showCoords}&render=${params.showRender}`;
+}
+
+// Hard refresh - clear image cache and reload page
+function hardRefresh() {
+  // Add cache-busting timestamp to all tile images to force reload
+  const timestamp = Date.now();
+
+  // Update all tile image sources to bust cache
+  document.querySelectorAll(".tile img").forEach((img) => {
+    const url = new URL(img.src);
+    url.searchParams.set("_t", timestamp);
+    img.src = url.toString();
+  });
+
+  // Also reload the page with cache bypass
+  // The true parameter forces reload from server, not cache
+  window.location.reload(true);
+}
+
+function toggleLines() {
+  const container = document.getElementById("gridContainer");
+  const showLines = document.getElementById("showLines").checked;
+  container.classList.toggle("show-lines", showLines);
+
+  // Update URL without reload
+  const url = new URL(window.location);
+  url.searchParams.set("lines", showLines ? "1" : "0");
+  history.replaceState({}, "", url);
+}
+
+function toggleCoords() {
+  const container = document.getElementById("gridContainer");
+  const showCoords = document.getElementById("showCoords").checked;
+  container.classList.toggle("show-coords", showCoords);
+
+  // Update URL without reload
+  const url = new URL(window.location);
+  url.searchParams.set("coords", showCoords ? "1" : "0");
+  history.replaceState({}, "", url);
+}
+
+function toggleRender() {
+  // This requires a page reload to fetch different data
+  const { x, y, nx, ny, sizePx, showLines, showCoords, showRender } =
+    getParams();
+  window.location.href = `?x=${x}&y=${y}&nx=${nx}&ny=${ny}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
+}
+
+// Keyboard navigation
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+
+  // Ignore keyboard shortcuts when prompt dialog is open
+  const promptDialog = document.getElementById("promptDialog");
+  if (promptDialog && promptDialog.style.display !== "none") return;
+
+  switch (e.key) {
+    case "ArrowLeft":
+      navigate(-1, 0);
+      break;
+    case "ArrowRight":
+      navigate(1, 0);
+      break;
+    case "ArrowUp":
+      navigate(0, -1);
+      break;
+    case "ArrowDown":
+      navigate(0, 1);
+      break;
+    case "l":
+    case "L":
+      document.getElementById("showLines").click();
+      break;
+    case "c":
+    case "C":
+      document.getElementById("showCoords").click();
+      break;
+    case "d":
+    case "D":
+      document.getElementById("showRender").click();
+      break;
+    case "g":
+    case "G":
+      generateSelected();
+      break;
+    case "s":
+    case "S":
+      toggleSelectTool();
+      break;
+    case "w":
+    case "W":
+      toggleFixWaterTool();
+      break;
+    case "f":
+    case "F":
+      toggleWaterFillTool();
+      break;
+    case "Escape":
+      if (selectToolActive) toggleSelectTool();
+      if (fixWaterToolActive) cancelWaterFix();
+      if (waterFillToolActive) cancelWaterFill();
+      break;
+  }
+});
+
+// Select tool state
+let selectToolActive = false;
+const selectedQuadrants = new Set();
+const MAX_SELECTION = 4;
+
+function toggleSelectTool() {
+  // Deactivate other tools if active
+  if (fixWaterToolActive) {
+    cancelWaterFix();
+  }
+  if (waterFillToolActive) {
+    cancelWaterFill();
+  }
+
+  selectToolActive = !selectToolActive;
+  const btn = document.getElementById("selectTool");
+  const tiles = document.querySelectorAll(".tile");
+
+  if (selectToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => tile.classList.add("selectable"));
+    saveSelectedTool("select");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => tile.classList.remove("selectable"));
+    saveSelectedTool("");
+  }
+}
+
+// Fix water tool state
+let fixWaterToolActive = false;
+let fixWaterTargetColor = null;
+let fixWaterQuadrant = null;
+
+function toggleFixWaterTool() {
+  // Deactivate other tools if active
+  if (selectToolActive) {
+    toggleSelectTool();
+  }
+  if (waterFillToolActive) {
+    cancelWaterFill();
+  }
+
+  fixWaterToolActive = !fixWaterToolActive;
+  const btn = document.getElementById("fixWaterTool");
+  const tiles = document.querySelectorAll(".tile");
+  const selectionStatus = document.getElementById("selectionStatus");
+  const waterFixStatus = document.getElementById("waterFixStatus");
+
+  if (fixWaterToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => {
+      // Only make tiles with images selectable
+      if (tile.querySelector("img")) {
+        tile.classList.add("fix-water-selectable");
+      }
+    });
+    // Show water fix status bar, hide selection status
+    selectionStatus.style.display = "none";
+    waterFixStatus.style.display = "flex";
+    // Reset state
+    resetWaterFixState();
+    saveSelectedTool("fixwater");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => {
+      tile.classList.remove("fix-water-selectable");
+      tile.classList.remove("water-fix-selected");
+    });
+    // Hide water fix status bar, show selection status
+    selectionStatus.style.display = "flex";
+    waterFixStatus.style.display = "none";
+    saveSelectedTool("");
+  }
+}
+
+function resetWaterFixState() {
+  fixWaterTargetColor = null;
+  fixWaterQuadrant = null;
+  document.getElementById("targetColorSwatch").style.background = "#333";
+  document.getElementById("targetColorSwatch").classList.remove("has-color");
+  document.getElementById("targetColorHex").textContent =
+    "Click a quadrant to pick color";
+  document.getElementById("waterFixQuadrant").textContent = "";
+  // Reset button state
+  const btn = document.getElementById("applyWaterFixBtn");
+  btn.disabled = true;
+  btn.classList.remove("loading");
+  btn.textContent = "Apply Fix";
+  document.querySelectorAll(".tile.water-fix-selected").forEach((tile) => {
+    tile.classList.remove("water-fix-selected");
+  });
+}
+
+function cancelWaterFix() {
+  if (fixWaterToolActive) {
+    toggleFixWaterTool();
+  }
+}
+
+function rgbToHex(r, g, b) {
+  return (
+    "#" +
+    [r, g, b]
+      .map((x) => {
+        const hex = x.toString(16);
+        return hex.length === 1 ? "0" + hex : hex;
+      })
+      .join("")
+      .toUpperCase()
+  );
+}
+
+function getPixelColorFromImage(img, x, y) {
+  // Create an off-screen canvas
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+
+  // Get the pixel data at the clicked position
+  const pixelData = ctx.getImageData(x, y, 1, 1).data;
+
+  return {
+    r: pixelData[0],
+    g: pixelData[1],
+    b: pixelData[2],
+    a: pixelData[3],
+  };
+}
+
+function handleFixWaterClick(tileEl, e) {
+  if (!fixWaterToolActive) return;
+
+  const img = tileEl.querySelector("img");
+  if (!img) {
+    showToast("error", "No image", "This quadrant has no generation to fix");
+    return;
+  }
+
+  // Get coordinates
+  const coords = tileEl.dataset.coords.split(",").map(Number);
+  const [qx, qy] = coords;
+
+  // Calculate click position relative to the image
+  const rect = img.getBoundingClientRect();
+  const clickX = e.clientX - rect.left;
+  const clickY = e.clientY - rect.top;
+
+  // Scale to natural image dimensions
+  const scaleX = img.naturalWidth / rect.width;
+  const scaleY = img.naturalHeight / rect.height;
+  const imgX = Math.floor(clickX * scaleX);
+  const imgY = Math.floor(clickY * scaleY);
+
+  // Ensure we're within bounds
+  if (
+    imgX < 0 ||
+    imgX >= img.naturalWidth ||
+    imgY < 0 ||
+    imgY >= img.naturalHeight
+  ) {
+    console.log("Click outside image bounds");
+    return;
+  }
+
+  try {
+    // Get the pixel color
+    const color = getPixelColorFromImage(img, imgX, imgY);
+    const hex = rgbToHex(color.r, color.g, color.b);
+
+    console.log(
+      `Picked color at (${imgX}, ${imgY}) in quadrant (${qx}, ${qy}): RGB(${color.r}, ${color.g}, ${color.b}) = ${hex}`
+    );
+
+    // Update state
+    fixWaterTargetColor = hex;
+    fixWaterQuadrant = { x: qx, y: qy };
+
+    // Update UI
+    document.getElementById("targetColorSwatch").style.background = hex;
+    document.getElementById("targetColorSwatch").classList.add("has-color");
+    document.getElementById(
+      "targetColorHex"
+    ).textContent = `${hex} — RGB(${color.r}, ${color.g}, ${color.b})`;
+    document.getElementById(
+      "waterFixQuadrant"
+    ).textContent = `Quadrant (${qx}, ${qy})`;
+    document.getElementById("applyWaterFixBtn").disabled = false;
+
+    // Update selected tile visual
+    document.querySelectorAll(".tile.water-fix-selected").forEach((tile) => {
+      tile.classList.remove("water-fix-selected");
+    });
+    tileEl.classList.add("water-fix-selected");
+
+    showToast("info", "Color picked", `Target color: ${hex} at (${qx}, ${qy})`);
+  } catch (error) {
+    console.error("Error picking color:", error);
+    showToast(
+      "error",
+      "Error picking color",
+      "Could not read pixel color. Try again."
+    );
+  }
+}
+
+async function applyWaterFix() {
+  if (!fixWaterTargetColor || !fixWaterQuadrant) {
+    showToast("error", "No color selected", "Pick a color first");
+    return;
+  }
+
+  // Default replacement color - a nice blue water color
+  const replacementColor = "#2A4A5F";
+
+  const btn = document.getElementById("applyWaterFixBtn");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  btn.textContent = "Applying...";
+
+  showToast(
+    "loading",
+    "Applying water fix...",
+    `Replacing ${fixWaterTargetColor} in (${fixWaterQuadrant.x}, ${fixWaterQuadrant.y})`
+  );
+
+  try {
+    const response = await fetch("/api/fix-water", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        x: fixWaterQuadrant.x,
+        y: fixWaterQuadrant.y,
+        target_color: fixWaterTargetColor,
+        replacement_color: replacementColor,
+      }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    if (result.success) {
+      showToast(
+        "success",
+        "Water fix applied!",
+        result.message || "Color replaced successfully"
+      );
+
+      // Refresh the specific tile image immediately with cache-busting
+      const { x, y } = fixWaterQuadrant;
+      const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+      if (tile) {
+        const img = tile.querySelector("img");
+        if (img) {
+          // Add timestamp to bust browser cache
+          const currentSrc = new URL(img.src);
+          currentSrc.searchParams.set("_t", Date.now());
+          img.src = currentSrc.toString();
+        }
+      }
+
+      // Reset the tool after a short delay
+      setTimeout(() => {
+        cancelWaterFix();
+      }, 1000);
+    } else {
+      showToast("error", "Water fix failed", result.error || "Unknown error");
+      btn.disabled = false;
+      btn.classList.remove("loading");
+      btn.textContent = "Apply Fix";
+    }
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Water fix error:", error);
+    showToast("error", "Request failed", error.message);
+    btn.disabled = false;
+    btn.classList.remove("loading");
+    btn.textContent = "Apply Fix";
+  }
+}
+
+// Water Fill tool - fills entire quadrant with water color
+let waterFillToolActive = false;
+
+function toggleWaterFillTool() {
+  // Deactivate other tools
+  if (selectToolActive) {
+    toggleSelectTool();
+  }
+  if (fixWaterToolActive) {
+    cancelWaterFix();
+  }
+
+  waterFillToolActive = !waterFillToolActive;
+  const btn = document.getElementById("waterFillTool");
+  const tiles = document.querySelectorAll(".tile");
+  const selectionStatus = document.getElementById("selectionStatus");
+  const waterFillStatus = document.getElementById("waterFillStatus");
+
+  if (waterFillToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => {
+      tile.classList.add("water-fill-selectable");
+    });
+    // Show water fill status bar, hide selection status
+    selectionStatus.style.display = "none";
+    waterFillStatus.style.display = "flex";
+    saveSelectedTool("waterfill");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => {
+      tile.classList.remove("water-fill-selectable");
+    });
+    // Hide water fill status bar, show selection status
+    selectionStatus.style.display = "flex";
+    waterFillStatus.style.display = "none";
+    saveSelectedTool("");
+  }
+}
+
+function cancelWaterFill() {
+  if (waterFillToolActive) {
+    toggleWaterFillTool();
+  }
+}
+
+async function handleWaterFillClick(tileEl) {
+  if (!waterFillToolActive) return;
+
+  const coords = tileEl.dataset.coords.split(",").map(Number);
+  const [qx, qy] = coords;
+
+  // Confirm action
+  if (!confirm(`Fill quadrant (${qx}, ${qy}) entirely with water color?`)) {
+    return;
+  }
+
+  const instruction = document.getElementById("waterFillInstruction");
+  instruction.textContent = `Filling (${qx}, ${qy})...`;
+
+  showToast(
+    "loading",
+    "Filling with water...",
+    `Processing quadrant (${qx}, ${qy})`
+  );
+
+  try {
+    const response = await fetch("/api/water-fill", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ x: qx, y: qy }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    if (result.success) {
+      showToast("success", "Water fill complete!", result.message);
+
+      // Refresh the tile image
+      const img = tileEl.querySelector("img");
+      if (img) {
+        const currentSrc = new URL(img.src);
+        currentSrc.searchParams.set("_t", Date.now());
+        img.src = currentSrc.toString();
+      }
+
+      instruction.textContent = "Click a quadrant to fill with water";
+    } else {
+      showToast("error", "Water fill failed", result.error || "Unknown error");
+      instruction.textContent = "Click a quadrant to fill with water";
+    }
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Water fill error:", error);
+    showToast("error", "Request failed", error.message);
+    instruction.textContent = "Click a quadrant to fill with water";
+  }
+}
+
+function updateSelectionStatus(serverStatus = null) {
+  const count = selectedQuadrants.size;
+  const countEl = document.getElementById("selectionCount");
+  const limitEl = document.querySelector(".selection-limit");
+  const statusEl = document.getElementById("selectionStatus");
+  const deselectBtn = document.getElementById("deselectAllBtn");
+  const deleteBtn = document.getElementById("deleteBtn");
+  const renderBtn = document.getElementById("renderBtn");
+  const generateBtn = document.getElementById("generateBtn");
+  const generateRectBtn = document.getElementById("generateRectBtn");
+
+  let statusParts = [];
+
+  // Show current processing status from server
+  if (serverStatus) {
+    // Show all active models generating
+    const activeModels = serverStatus.active_models || [];
+    const processingQuadrants =
+      serverStatus.all_processing_quadrants || serverStatus.quadrants || [];
+
+    if (activeModels.length > 0 && processingQuadrants.length > 0) {
+      // Show which models are actively generating with their queue counts
+      const queueByModel = serverStatus.queue_by_model || {};
+
+      if (activeModels.length === 1) {
+        const modelId = activeModels[0];
+        const modelName = getModelDisplayName(modelId) || modelId || "default";
+        const modelInfo = queueByModel[modelId];
+        const queueCount = modelInfo
+          ? modelInfo.pending_count + (modelInfo.is_processing ? 1 : 0)
+          : 0;
+        // Create clickable coordinate links
+        const coordsHtml = processingQuadrants
+          .map(
+            ([x, y]) =>
+              `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+          )
+          .join(" ");
+        const countStr = queueCount > 0 ? ` [${queueCount}]` : "";
+        statusParts.push({
+          html: `🔄 ${modelName}${countStr}: ${coordsHtml}`,
+        });
+      } else {
+        // Multiple models generating in parallel - show each with queue count and coords
+        const queueByModel = serverStatus.queue_by_model || {};
+        const modelPartsHtml = activeModels.map((modelId) => {
+          const name = getModelDisplayName(modelId) || modelId || "default";
+          const modelInfo = queueByModel[modelId];
+          const queueCount = modelInfo
+            ? modelInfo.pending_count + (modelInfo.is_processing ? 1 : 0)
+            : 0;
+          // Get quadrants for this specific model
+          const modelQuadrants =
+            modelInfo && modelInfo.current_item
+              ? modelInfo.current_item.quadrants || []
+              : [];
+          const coordsHtml =
+            modelQuadrants.length > 0
+              ? " " +
+                modelQuadrants
+                  .map(
+                    ([x, y]) =>
+                      `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+                  )
+                  .join(" ")
+              : "";
+          const countStr = queueCount > 0 ? ` [${queueCount}]` : "";
+          return `${name}${countStr}${coordsHtml}`;
+        });
+        statusParts.push({ html: `🔄 ${modelPartsHtml.join(", ")}` });
+      }
+    } else if (
+      serverStatus.is_generating &&
+      serverStatus.quadrants &&
+      serverStatus.quadrants.length > 0
+    ) {
+      // Fallback to old behavior with clickable coords
+      const action =
+        serverStatus.status === "rendering" ? "Rendering" : "Generating";
+      const coordsHtml = serverStatus.quadrants
+        .map(
+          ([x, y]) =>
+            `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+        )
+        .join(" ");
+      statusParts.push({ html: `${action} ${coordsHtml}` });
+    }
+
+    // Show per-model queue counts (only models with items)
+    if (serverStatus.queue_by_model) {
+      const modelQueues = Object.entries(serverStatus.queue_by_model);
+      const queueParts = modelQueues
+        .map(([modelId, info]) => {
+          const name = getModelDisplayName(modelId) || modelId;
+          const count = info.pending_count + (info.is_processing ? 1 : 0);
+          return { name, count };
+        })
+        .filter(({ count }) => count > 0)
+        .map(({ name, count }) => `${name}: ${count}`);
+
+      if (queueParts.length > 0) {
+        statusParts.push(`📋 ${queueParts.join(", ")}`);
+      }
+    }
+  }
+
+  // Update selection display in toolbar-info (separate from status)
+  const selectedDisplay = document.getElementById("selectedQuadrantsDisplay");
+  if (selectedDisplay) {
+    if (count > 0) {
+      const coordsStr = Array.from(selectedQuadrants)
+        .map((key) => {
+          const [x, y] = key.split(",");
+          return `(${x},${y})`;
+        })
+        .join(" ");
+      selectedDisplay.textContent = `✓ ${coordsStr}`;
+      selectedDisplay.style.display = "";
+    } else {
+      selectedDisplay.textContent = "";
+      selectedDisplay.style.display = "none";
+    }
+  }
+
+  // Build status display - some parts may be HTML objects, others plain strings
+  if (statusParts.length > 0) {
+    const statusHtml = statusParts
+      .map((part) => (typeof part === "object" && part.html ? part.html : part))
+      .join(" • ");
+    countEl.innerHTML = statusHtml;
+
+    // Add click handlers for coordinate links
+    countEl.querySelectorAll(".coord-link").forEach((link) => {
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        const x = parseInt(link.dataset.x, 10);
+        const y = parseInt(link.dataset.y, 10);
+        navigateToCoord(x, y);
+      });
+    });
+  } else {
+    countEl.textContent = `${count} selected`;
+  }
+
+  // Update status bar styling
+  const isProcessing =
+    serverStatus &&
+    (serverStatus.is_generating || serverStatus.queue_length > 0);
+  if (isProcessing) {
+    if (limitEl) limitEl.style.display = "none";
+    statusEl.classList.remove("empty");
+    statusEl.classList.add("generating");
+  } else {
+    if (limitEl) limitEl.style.display = "";
+    statusEl.classList.toggle("empty", count === 0);
+    statusEl.classList.remove("generating");
+  }
+
+  // Enable buttons for selection (can add to queue even during processing)
+  deselectBtn.disabled = count === 0;
+  deleteBtn.disabled = count === 0;
+  renderBtn.disabled = count === 0;
+  generateBtn.disabled = count === 0;
+  // Generate with prompt button
+  const generateWithPromptBtn = document.getElementById(
+    "generateWithPromptBtn"
+  );
+  if (generateWithPromptBtn) {
+    generateWithPromptBtn.disabled = count === 0;
+  }
+  // Generate Rectangle requires exactly 2 selected
+  generateRectBtn.disabled = count !== 2;
+}
+
+// Toast notification system
+function showToast(type, title, message, duration = 5000) {
+  const container = document.getElementById("toastContainer");
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+
+  const icons = {
+    success: "✅",
+    error: "❌",
+    info: "ℹ️",
+    loading: "⏳",
+  };
+
+  toast.innerHTML = `
+    <span class="toast-icon">${icons[type] || "ℹ️"}</span>
+    <div class="toast-content">
+      <div class="toast-title">${title}</div>
+      ${message ? `<div class="toast-message">${message}</div>` : ""}
+    </div>
+    <button class="toast-close" onclick="this.parentElement.remove()">×</button>
+  `;
+
+  container.appendChild(toast);
+
+  // Auto-remove after duration (except for loading toasts)
+  if (type !== "loading" && duration > 0) {
+    setTimeout(() => {
+      toast.classList.add("removing");
+      setTimeout(() => toast.remove(), 300);
+    }, duration);
+  }
+
+  return toast;
+}
+
+function clearLoadingToasts() {
+  document.querySelectorAll(".toast.loading").forEach((t) => t.remove());
+}
+
+// Generation/Render state (tracked from server)
+let isGenerating = false;
+let isRendering = false;
+
+async function deleteSelected() {
+  if (selectedQuadrants.size === 0) return;
+
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return [x, y];
+  });
+
+  // Confirm deletion
+  const coordsStr = coords.map(([x, y]) => `(${x},${y})`).join(", ");
+  if (!confirm(`Delete generation data for ${coordsStr}?`)) {
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quadrants: coords }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast("success", "Deleted", result.message);
+      // Deselect and refresh
+      deselectAll();
+      location.reload();
+    } else {
+      showToast("error", "Delete failed", result.error);
+    }
+  } catch (error) {
+    console.error("Delete error:", error);
+    showToast("error", "Delete failed", error.message);
+  }
+}
+
+async function clearQueue() {
+  // Get current queue info first
+  try {
+    const statusResponse = await fetch("/api/status");
+    const status = await statusResponse.json();
+
+    const queueLength = status.queue_length || 0;
+    const isGenerating = status.is_generating || false;
+
+    if (queueLength === 0 && !isGenerating) {
+      showToast(
+        "info",
+        "Nothing to clear",
+        "There are no pending items or active generations."
+      );
+      return;
+    }
+
+    // Build confirm message based on what will be cancelled
+    let confirmMessage = "Are you sure you want to clear the queue?";
+    const parts = [];
+    if (queueLength > 0) {
+      parts.push(`${queueLength} pending item(s)`);
+    }
+    if (isGenerating) {
+      parts.push("the current generation in progress");
+    }
+    if (parts.length > 0) {
+      confirmMessage = `Are you sure you want to cancel ${parts.join(
+        " and "
+      )}?`;
+    }
+
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    // Clear the queue
+    const response = await fetch("/api/queue/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast(
+        "success",
+        "Queue cleared",
+        result.message || `Cleared ${result.cleared_count} item(s)`
+      );
+      // Refresh status
+      await checkGenerationStatus();
+    } else {
+      showToast(
+        "error",
+        "Failed to clear queue",
+        result.error || "Unknown error"
+      );
+    }
+  } catch (error) {
+    console.error("Clear queue error:", error);
+    showToast("error", "Request failed", error.message);
+  }
+}
+
+// Prompt dialog functions
+function showPromptDialog() {
+  if (selectedQuadrants.size === 0) return;
+  const dialog = document.getElementById("promptDialog");
+  const input = document.getElementById("promptInput");
+  if (dialog && input) {
+    input.value = "";
+    dialog.style.display = "flex";
+    input.focus();
+  }
+}
+
+function hidePromptDialog() {
+  const dialog = document.getElementById("promptDialog");
+  if (dialog) {
+    dialog.style.display = "none";
+  }
+}
+
+async function submitPromptGeneration() {
+  const input = document.getElementById("promptInput");
+  const prompt = input ? input.value.trim() : "";
+  hidePromptDialog();
+  await generateSelected(prompt);
+}
+
+async function generateSelected(prompt = null) {
+  if (selectedQuadrants.size === 0) return;
+
+  // Separate selected quadrants into those that need generation vs those that already have it
+  const toGenerate = [];
+  const contextQuadrants = [];
+
+  Array.from(selectedQuadrants).forEach((s) => {
+    const [x, y] = s.split(",").map(Number);
+    const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+
+    if (tile && !tile.classList.contains("placeholder")) {
+      // This quadrant already has a generation - use as context
+      contextQuadrants.push([x, y]);
+    } else {
+      // This quadrant needs generation
+      toGenerate.push([x, y]);
+    }
+  });
+
+  // If nothing needs generation, inform the user
+  if (toGenerate.length === 0) {
+    showToast(
+      "info",
+      "Already generated",
+      "All selected quadrants already have generations. Select at least one empty quadrant."
+    );
+    return;
+  }
+
+  const modelId = getSelectedModelId();
+
+  console.log(
+    "Generate requested for:",
+    toGenerate,
+    "with context:",
+    contextQuadrants,
+    "model:",
+    modelId
+  );
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+
+  // Build context info for toast
+  const contextMsg =
+    contextQuadrants.length > 0
+      ? ` (using ${contextQuadrants.length} as context)`
+      : "";
+  const promptMsg = prompt ? " with prompt" : "";
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const requestBody = {
+      quadrants: toGenerate,
+      model_id: modelId,
+    };
+
+    // Include context quadrants if any
+    if (contextQuadrants.length > 0) {
+      requestBody.context = contextQuadrants;
+    }
+
+    // Include prompt if provided
+    if (prompt) {
+      requestBody.prompt = prompt;
+    }
+
+    const response = await fetch("/api/generate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    const result = await response.json();
+
+    if (result.queued) {
+      console.log(
+        "Generation queued at position:",
+        result.position,
+        "model:",
+        result.model_id
+      );
+      // Get model name for display
+      const modelName = getModelDisplayName(result.model_id);
+      const modelInfo = modelName ? ` (${modelName})` : "";
+      showToast(
+        "success",
+        "Added to queue",
+        `${toGenerate.length} quadrant(s)${promptMsg}${contextMsg} → position ${result.position}${modelInfo}`
+      );
+    } else if (!result.success) {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    console.error("Generation error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+  }
+}
+
+async function renderSelected() {
+  if (selectedQuadrants.size === 0) return;
+
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return [x, y];
+  });
+
+  console.log("Render requested for:", coords);
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+
+  // Show immediate feedback
+  showToast(
+    "info",
+    "Adding to queue...",
+    `Queueing ${coords.length} quadrant(s) for render`
+  );
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const response = await fetch("/api/render", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ quadrants: coords }),
+    });
+
+    const result = await response.json();
+
+    if (result.queued) {
+      console.log("Render queued at position:", result.position);
+      showToast(
+        "success",
+        "Added to queue",
+        `Render queued at position ${result.position}.`
+      );
+    } else if (!result.success) {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    console.error("Render error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+  }
+}
+
+async function generateRectangle() {
+  if (selectedQuadrants.size !== 2) {
+    showToast(
+      "error",
+      "Invalid selection",
+      "Please select exactly 2 quadrants to define the rectangle corners."
+    );
+    return;
+  }
+
+  // Get the two selected coordinates
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return { x, y };
+  });
+
+  // Calculate rectangle bounds (top-left and bottom-right)
+  const minX = Math.min(coords[0].x, coords[1].x);
+  const maxX = Math.max(coords[0].x, coords[1].x);
+  const minY = Math.min(coords[0].y, coords[1].y);
+  const maxY = Math.max(coords[0].y, coords[1].y);
+
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const totalQuadrants = width * height;
+
+  // Build confirmation message
+  const confirmMessage =
+    `Generate rectangle from (${minX}, ${minY}) to (${maxX}, ${maxY})?\n\n` +
+    `Size: ${width} × ${height} = ${totalQuadrants} quadrant(s)\n\n` +
+    `This will create a generation plan and queue all steps.\n` +
+    `Pre-existing generations will be skipped.`;
+
+  if (!confirm(confirmMessage)) {
+    return;
+  }
+
+  const modelId = getSelectedModelId();
+
+  console.log(
+    "Generate rectangle requested:",
+    { tl: [minX, minY], br: [maxX, maxY] },
+    "with model:",
+    modelId
+  );
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+
+  // Show immediate feedback
+  const btn = document.getElementById("generateRectBtn");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  btn.innerHTML = 'Queueing...<span class="spinner"></span>';
+
+  showToast(
+    "loading",
+    "Creating generation plan...",
+    `Rectangle (${minX}, ${minY}) to (${maxX}, ${maxY})`
+  );
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const response = await fetch("/api/generate-rectangle", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        tl: [minX, minY],
+        br: [maxX, maxY],
+        model_id: modelId,
+      }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    // Reset button
+    btn.classList.remove("loading");
+    btn.innerHTML = "Generate Rectangle";
+
+    if (result.success) {
+      if (result.queued_count === 0) {
+        showToast(
+          "info",
+          "Nothing to generate",
+          result.message || "All quadrants already generated."
+        );
+      } else {
+        console.log("Rectangle generation queued:", result);
+        const summary = result.plan_summary || {};
+        const stepTypes = summary.steps_by_type || {};
+        const typeInfo = Object.entries(stepTypes)
+          .map(([type, count]) => `${count}× ${type}`)
+          .join(", ");
+
+        showToast(
+          "success",
+          "Rectangle queued!",
+          `${result.queued_count} step(s) for ${
+            summary.total_quadrants || "?"
+          } quadrant(s)` + (typeInfo ? ` (${typeInfo})` : "")
+        );
+      }
+    } else {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Generate rectangle error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+
+    // Reset button
+    btn.classList.remove("loading");
+    btn.innerHTML = "Generate Rectangle";
+  }
+}
+
+function deselectAll() {
+  selectedQuadrants.clear();
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+  console.log("Deselected all quadrants");
+}
+
+function toggleTileSelection(tileEl, qx, qy) {
+  if (!selectToolActive) return;
+
+  // Check if this tile is currently being generated or in the queue
+  const key = `${qx},${qy}`;
+  if (
+    tileEl.classList.contains("locked") ||
+    tileEl.classList.contains("queued")
+  ) {
+    console.log(
+      `Cannot select quadrant (${qx}, ${qy}) - currently generating or in queue`
+    );
+    return;
+  }
+
+  if (selectedQuadrants.has(key)) {
+    selectedQuadrants.delete(key);
+    tileEl.classList.remove("selected");
+    console.log(`Deselected quadrant (${qx}, ${qy})`);
+  } else {
+    // Check if we've hit the max selection limit
+    if (selectedQuadrants.size >= MAX_SELECTION) {
+      console.log(`Cannot select more than ${MAX_SELECTION} quadrants`);
+      return;
+    }
+    selectedQuadrants.add(key);
+    tileEl.classList.add("selected");
+    console.log(`Selected quadrant (${qx}, ${qy})`);
+  }
+
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+
+  // Log current selection
+  if (selectedQuadrants.size > 0) {
+    console.log("Selected:", Array.from(selectedQuadrants).join("; "));
+  }
+}
+
+// Setup tile click handlers
+document.querySelectorAll(".tile").forEach((tile) => {
+  tile.addEventListener("click", (e) => {
+    // Handle fix water tool clicks
+    if (fixWaterToolActive) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleFixWaterClick(tile, e);
+      return;
+    }
+
+    // Handle water fill tool clicks
+    if (waterFillToolActive) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleWaterFillClick(tile);
+      return;
+    }
+
+    // Handle select tool clicks
+    if (!selectToolActive) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const coords = tile.dataset.coords.split(",").map(Number);
+    toggleTileSelection(tile, coords[0], coords[1]);
+  });
+});
+
+// Initialize selection status
+updateSelectionStatus();
+
+// Status polling for generation progress
+let statusPollInterval = null;
+let lastStatus = null;
+let lastProcessingQuadrants = new Set(); // Track quadrants that were processing
+
+function startStatusPolling() {
+  if (statusPollInterval) return;
+  statusPollInterval = setInterval(checkGenerationStatus, 1000);
+}
+
+// Refresh a specific tile's image (or add image if it was a placeholder)
+function refreshTileImage(qx, qy) {
+  const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+  if (!tile) return;
+
+  const showRender = document.getElementById("showRender")?.checked ? "1" : "0";
+  const timestamp = Date.now();
+  const imgUrl = `/tile/${qx}/${qy}?render=${showRender}&_t=${timestamp}`;
+
+  let img = tile.querySelector("img");
+  if (img) {
+    // Update existing image
+    img.src = imgUrl;
+  } else {
+    // Create new image for placeholder tile
+    img = document.createElement("img");
+    img.src = imgUrl;
+    img.alt = `Tile ${qx},${qy}`;
+    img.onload = () => {
+      // Remove placeholder class once image loads
+      tile.classList.remove("placeholder");
+    };
+    tile.appendChild(img);
+  }
+}
+
+function stopStatusPolling() {
+  if (statusPollInterval) {
+    clearInterval(statusPollInterval);
+    statusPollInterval = null;
+  }
+}
+
+async function checkGenerationStatus() {
+  try {
+    const response = await fetch("/api/status");
+    const status = await response.json();
+
+    console.log("Status poll:", status);
+
+    // Track state changes - consider active_model_count for parallel processing
+    const wasGenerating = isGenerating || isRendering;
+    const hasActiveModels = (status.active_model_count || 0) > 0;
+    isGenerating =
+      (status.is_generating || hasActiveModels) &&
+      status.status !== "rendering";
+    isRendering = status.is_generating && status.status === "rendering";
+    const nowProcessing = isGenerating || isRendering;
+
+    // Get current processing quadrants
+    const currentProcessingQuadrants = new Set(
+      (status.all_processing_quadrants || status.quadrants || []).map(
+        ([x, y]) => `${x},${y}`
+      )
+    );
+
+    // Detect quadrants that just finished processing (were processing, now not)
+    const completedQuadrants = [];
+    lastProcessingQuadrants.forEach((coordKey) => {
+      if (!currentProcessingQuadrants.has(coordKey)) {
+        completedQuadrants.push(coordKey);
+      }
+    });
+
+    // Refresh tiles for completed quadrants
+    if (completedQuadrants.length > 0) {
+      console.log("Refreshing completed quadrants:", completedQuadrants);
+      completedQuadrants.forEach((coordKey) => {
+        const [qx, qy] = coordKey.split(",").map(Number);
+        refreshTileImage(qx, qy);
+      });
+    }
+
+    // Update tracking for next poll
+    lastProcessingQuadrants = currentProcessingQuadrants;
+
+    // Apply visual styles based on server status
+    applyStatusStyles(status);
+
+    // Update render button based on state
+    const renderBtn = document.getElementById("renderBtn");
+
+    if (nowProcessing) {
+      // Show loading state on render button only (generate state is shown in toolbar)
+      if (isRendering) {
+        renderBtn.classList.add("loading");
+        renderBtn.innerHTML = 'Rendering<span class="spinner"></span>';
+      } else {
+        renderBtn.classList.remove("loading");
+        renderBtn.innerHTML = "Render";
+      }
+
+      // Show toast if not already showing
+      if (document.querySelectorAll(".toast.loading").length === 0) {
+        const opName = isRendering ? "Render" : "Generation";
+        showToast(
+          "loading",
+          `${opName} in progress...`,
+          status.message || "Please wait..."
+        );
+      }
+
+      // Update the loading toast message
+      const loadingToast = document.querySelector(
+        ".toast.loading .toast-message"
+      );
+      if (loadingToast && status.message) {
+        loadingToast.textContent = status.message;
+      }
+    } else {
+      // Reset render button
+      renderBtn.classList.remove("loading");
+      renderBtn.innerHTML = "Render";
+    }
+
+    // Handle status transitions
+    if (status.status === "complete" && wasGenerating && !nowProcessing) {
+      clearLoadingToasts();
+      showToast("success", "Complete!", status.message);
+
+      // Check if there are more items in queue
+      if (status.queue_length > 0) {
+        // Build per-model queue message
+        let queueMsg = "";
+        if (status.queue_by_model) {
+          const parts = Object.entries(status.queue_by_model)
+            .map(([modelId, info]) => {
+              const name = getModelDisplayName(modelId) || modelId;
+              const count = info.pending_count + (info.is_processing ? 1 : 0);
+              return { name, count };
+            })
+            .filter(({ count }) => count > 0)
+            .map(({ name, count }) => `${name}: ${count}`);
+          if (parts.length > 0) {
+            queueMsg = parts.join(", ");
+          }
+        }
+        if (queueMsg) {
+          showToast("info", "Processing queue", queueMsg);
+        }
+      } else {
+        // No more items - tiles already refreshed, just stop polling
+        stopStatusPolling();
+      }
+    } else if (status.status === "error" && status.error) {
+      clearLoadingToasts();
+      showToast("error", "Error", status.error);
+
+      // Continue polling if there are more items in queue
+      if (status.queue_length === 0) {
+        stopStatusPolling();
+      }
+    } else if (
+      status.status === "idle" &&
+      status.queue_length === 0 &&
+      !nowProcessing
+    ) {
+      // Idle with no queue - stop polling
+      stopStatusPolling();
+    }
+
+    // Update selection status with server info
+    updateSelectionStatus(status);
+    lastStatus = status;
+  } catch (error) {
+    console.error("Status check failed:", error);
+  }
+}
+
+// Restore saved tool on page load
+function restoreSavedTool() {
+  const savedTool = getSavedTool();
+  if (!savedTool) return;
+
+  // Check if the tool button exists before activating
+  switch (savedTool) {
+    case "select":
+      if (document.getElementById("selectTool")) {
+        toggleSelectTool();
+      }
+      break;
+    case "fixwater":
+      if (document.getElementById("fixWaterTool")) {
+        toggleFixWaterTool();
+      }
+      break;
+    case "waterfill":
+      if (document.getElementById("waterFillTool")) {
+        toggleWaterFillTool();
+      }
+      break;
+    default:
+      // Unknown tool, clear saved state
+      saveSelectedTool("");
+      break;
+  }
+}
+
+// Restore saved quadrant selections on page load
+function restoreSavedQuadrants() {
+  const savedQuadrants = getSavedQuadrants();
+  if (!savedQuadrants || savedQuadrants.length === 0) return;
+
+  let restoredCount = 0;
+
+  savedQuadrants.forEach((key) => {
+    // Check if this quadrant tile exists on the current page
+    const tile = document.querySelector(`.tile[data-coords="${key}"]`);
+    if (tile) {
+      // Don't restore if tile is locked or queued
+      if (
+        !tile.classList.contains("locked") &&
+        !tile.classList.contains("queued")
+      ) {
+        selectedQuadrants.add(key);
+        tile.classList.add("selected");
+        restoredCount++;
+      }
+    }
+  });
+
+  if (restoredCount > 0) {
+    console.log(`Restored ${restoredCount} selected quadrant(s)`);
+    // Update localStorage to only contain valid selections
+    saveSelectedQuadrants();
+    updateSelectionStatus();
+  } else if (savedQuadrants.length > 0) {
+    // Had saved selections but none are on current page - clear storage
+    saveSelectedQuadrants();
+  }
+}
+
+// Initialize on page load
+(async function initialize() {
+  // Initialize model selector
+  initModelSelector();
+
+  // Restore saved tool
+  restoreSavedTool();
+
+  // Restore saved quadrant selections
+  restoreSavedQuadrants();
+
+  try {
+    const response = await fetch("/api/status");
+    const status = await response.json();
+
+    // Apply initial status styles
+    applyStatusStyles(status);
+
+    if (status.is_generating || status.queue_length > 0) {
+      console.log(
+        "Processing in progress or queue non-empty, starting polling..."
+      );
+      isGenerating = status.is_generating && status.status !== "rendering";
+      isRendering = status.is_generating && status.status === "rendering";
+      startStatusPolling();
+    }
+
+    updateSelectionStatus(status);
+  } catch (error) {
+    console.error("Initial status check failed:", error);
+  }
+})();
+
+```
+
+Let me also check and fix the `renderSelected` function:
+
+```javascript
+// Get config from data attributes
+const config = JSON.parse(document.getElementById("app-config").dataset.config);
+
+// LocalStorage keys for persistence
+const STORAGE_KEY_MODEL = "viewer_selected_model";
+const STORAGE_KEY_TOOL = "viewer_selected_tool";
+const STORAGE_KEY_SELECTION = "viewer_selected_quadrants";
+
+// Save selected model ID to localStorage
+function saveSelectedModel(modelId) {
+  try {
+    localStorage.setItem(STORAGE_KEY_MODEL, modelId);
+  } catch (e) {
+    console.warn("Could not save model to localStorage:", e);
+  }
+}
+
+// Get saved model ID from localStorage
+function getSavedModel() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_MODEL);
+  } catch (e) {
+    return null;
+  }
+}
+
+// Save selected tool to localStorage
+function saveSelectedTool(toolName) {
+  try {
+    localStorage.setItem(STORAGE_KEY_TOOL, toolName || "");
+  } catch (e) {
+    console.warn("Could not save tool to localStorage:", e);
+  }
+}
+
+// Get saved tool from localStorage
+function getSavedTool() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_TOOL) || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+// Save selected quadrants to localStorage
+function saveSelectedQuadrants() {
+  try {
+    const quadrantsArray = Array.from(selectedQuadrants);
+    localStorage.setItem(STORAGE_KEY_SELECTION, JSON.stringify(quadrantsArray));
+  } catch (e) {
+    console.warn("Could not save selection to localStorage:", e);
+  }
+}
+
+// Get saved quadrants from localStorage
+function getSavedQuadrants() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_SELECTION);
+    return saved ? JSON.parse(saved) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+// Initialize model selector
+function initModelSelector() {
+  const select = document.getElementById("modelSelect");
+  if (!select || !config.models || config.models.length === 0) {
+    return;
+  }
+
+  // Clear existing options
+  select.innerHTML = "";
+
+  // Check if saved model ID exists in available models
+  const savedModelId = getSavedModel();
+  const savedModelExists =
+    savedModelId && config.models.some((m) => m.model_id === savedModelId);
+
+  // Add options for each model
+  config.models.forEach((model, index) => {
+    const option = document.createElement("option");
+    option.value = model.model_id;
+    option.textContent = model.name;
+
+    // Select saved model if it exists, otherwise use default or first
+    if (savedModelExists && model.model_id === savedModelId) {
+      option.selected = true;
+    } else if (
+      !savedModelExists &&
+      model.model_id === config.default_model_id
+    ) {
+      option.selected = true;
+    } else if (!savedModelExists && !config.default_model_id && index === 0) {
+      option.selected = true;
+    }
+    select.appendChild(option);
+  });
+
+  // Auto-blur after selection and save to localStorage
+  select.addEventListener("change", () => {
+    saveSelectedModel(select.value);
+    select.blur();
+  });
+}
+
+// Get the currently selected model ID
+function getSelectedModelId() {
+  const select = document.getElementById("modelSelect");
+  return select ? select.value : null;
+}
+
+// Get display name for a model ID
+function getModelDisplayName(modelId) {
+  if (!modelId) return null;
+  const configEl = document.getElementById("app-config");
+  if (!configEl) return modelId;
+  try {
+    const config = JSON.parse(configEl.dataset.config);
+    const models = config.models || [];
+    const model = models.find((m) => m.model_id === modelId);
+    return model ? model.name : modelId;
+  } catch {
+    return modelId;
+  }
+}
+
+// Apply locked/queued styles based on server status
+function applyStatusStyles(status) {
+  // Clear all existing locked/queued styles first
+  document.querySelectorAll(".tile.locked, .tile.queued").forEach((tile) => {
+    tile.classList.remove("locked", "queued");
+  });
+
+  // Apply locked style to ALL currently processing quadrants (from all models)
+  const processingQuadrants =
+    status.all_processing_quadrants || status.quadrants || [];
+  const isProcessing = status.is_generating || status.active_model_count > 0;
+
+  if (isProcessing && processingQuadrants.length > 0) {
+    document.body.classList.add("generating");
+    processingQuadrants.forEach(([qx, qy]) => {
+      const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+      if (tile) {
+        tile.classList.add("locked");
+      }
+    });
+  } else if (!isProcessing) {
+    document.body.classList.remove("generating");
+  }
+
+  // Apply queued style to pending queue items AND create overlays
+  // Also create overlays for processing items
+  const processingItems = getProcessingItems(status);
+  updateQueueOverlays(status.queue || [], processingItems);
+}
+
+// Extract currently processing items from status
+function getProcessingItems(status) {
+  const processingItems = [];
+  if (status.queue_by_model) {
+    Object.entries(status.queue_by_model).forEach(([modelId, info]) => {
+      if (info.is_processing && info.current_item) {
+        processingItems.push({
+          ...info.current_item,
+          model_id: modelId,
+          _isProcessing: true,
+        });
+      }
+    });
+  }
+  return processingItems;
+}
+
+// Create/update overlays for pending queue items and processing items
+function updateQueueOverlays(queueItems, processingItems = []) {
+  // Remove existing overlays
+  document.querySelectorAll(".queue-overlay").forEach((el) => el.remove());
+
+  // Also clear queued class from all tiles
+  document.querySelectorAll(".tile.queued").forEach((tile) => {
+    tile.classList.remove("queued");
+  });
+
+  const hasItems =
+    (queueItems && queueItems.length > 0) ||
+    (processingItems && processingItems.length > 0);
+  if (!hasItems) return;
+
+  const grid = document.querySelector(".grid");
+  if (!grid) return;
+
+  // Get grid dimensions from config
+  const gridX = config.x;
+  const gridY = config.y;
+  const sizePx = config.size_px;
+  const showLines = document.getElementById("showLines")?.checked || false;
+  const gap = showLines ? 2 : 0;
+
+  // Helper function to create an overlay for an item
+  function createOverlay(item, options = {}) {
+    const { isProcessing = false, queuePosition = null } = options;
+
+    if (!item.quadrants || item.quadrants.length === 0) return null;
+
+    // Calculate bounding box for this generation
+    const quadrants = item.quadrants;
+    let minCol = Infinity,
+      maxCol = -Infinity;
+    let minRow = Infinity,
+      maxRow = -Infinity;
+
+    // Track which tiles are visible in the current view
+    const visibleQuadrants = [];
+
+    quadrants.forEach(([qx, qy]) => {
+      const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+      if (tile) {
+        visibleQuadrants.push([qx, qy]);
+        const col = qx - gridX;
+        const row = qy - gridY;
+        minCol = Math.min(minCol, col);
+        maxCol = Math.max(maxCol, col);
+        minRow = Math.min(minRow, row);
+        maxRow = Math.max(maxRow, row);
+
+        // Add appropriate class to tile
+        if (isProcessing) {
+          tile.classList.add("locked");
+        } else if (!tile.classList.contains("locked")) {
+          tile.classList.add("queued");
+        }
+      }
+    });
+
+    if (visibleQuadrants.length === 0) return null;
+
+    // Create overlay element
+    const overlay = document.createElement("div");
+    overlay.className = isProcessing
+      ? "queue-overlay processing"
+      : "queue-overlay";
+    overlay.dataset.itemId = item.id;
+
+    // Calculate position and size
+    const left = minCol * (sizePx + gap);
+    const top = minRow * (sizePx + gap);
+    const width = (maxCol - minCol + 1) * sizePx + (maxCol - minCol) * gap;
+    const height = (maxRow - minRow + 1) * sizePx + (maxRow - minRow) * gap;
+
+    overlay.style.left = `${left}px`;
+    overlay.style.top = `${top}px`;
+    overlay.style.width = `${width}px`;
+    overlay.style.height = `${height}px`;
+
+    // Badge: spinner for processing, number for queued
+    const badge = document.createElement("div");
+    badge.className = isProcessing ? "queue-badge processing" : "queue-badge";
+    if (isProcessing) {
+      badge.innerHTML = `<svg class="processing-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+      </svg>`;
+    } else {
+      badge.textContent = queuePosition;
+    }
+    overlay.appendChild(badge);
+
+    // Model name label
+    if (item.model_id) {
+      const modelLabel = document.createElement("div");
+      modelLabel.className = "queue-model-label";
+      modelLabel.textContent =
+        getModelDisplayName(item.model_id) || item.model_id;
+      overlay.appendChild(modelLabel);
+    }
+
+    // Cancel button (visible on hover) - for both processing and queued
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className = "queue-cancel-btn";
+    cancelBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+      <line x1="10" y1="11" x2="10" y2="17"/>
+      <line x1="14" y1="11" x2="14" y2="17"/>
+    </svg>`;
+    cancelBtn.title = isProcessing
+      ? "Cancel this generation (in progress)"
+      : "Cancel this generation";
+    cancelBtn.onclick = (e) => {
+      e.stopPropagation();
+      cancelQueueItem(item.id);
+    };
+    overlay.appendChild(cancelBtn);
+
+    return overlay;
+  }
+
+  // First, create overlays for processing items (with spinner)
+  processingItems.forEach((item) => {
+    const overlay = createOverlay(item, { isProcessing: true });
+    if (overlay) {
+      grid.appendChild(overlay);
+    }
+  });
+
+  // Then, create overlays for queued items (with per-model position numbers)
+  // Track position within each model's queue
+  const modelPositionCounters = {};
+
+  queueItems.forEach((item) => {
+    const modelId = item.model_id || "default";
+    // Initialize or increment the counter for this model
+    if (!modelPositionCounters[modelId]) {
+      modelPositionCounters[modelId] = 1;
+    }
+    const positionInModelQueue = modelPositionCounters[modelId];
+    modelPositionCounters[modelId]++;
+
+    const overlay = createOverlay(item, {
+      queuePosition: positionInModelQueue,
+    });
+    if (overlay) {
+      grid.appendChild(overlay);
+    }
+  });
+}
+
+// Cancel a specific queue item
+async function cancelQueueItem(itemId) {
+  try {
+    const response = await fetch(`/api/queue/cancel/${itemId}`, {
+      method: "POST",
+    });
+    const result = await response.json();
+
+    if (result.success && result.cancelled) {
+      showToast("success", "Cancelled", result.message);
+      // Trigger immediate status update
+      checkGenerationStatus();
+    } else if (result.success && !result.cancelled) {
+      showToast("info", "Not found", result.message);
+    } else {
+      showToast("error", "Error", result.error || "Failed to cancel");
+    }
+  } catch (error) {
+    console.error("Cancel queue item failed:", error);
+    showToast("error", "Error", "Failed to cancel queue item");
+  }
+}
+
+function getParams() {
+  const x = document.getElementById("x").value;
+  const y = document.getElementById("y").value;
+  const nx = document.getElementById("nx").value;
+  const ny = document.getElementById("ny").value;
+  const sizePx = document.getElementById("sizePx").value;
+  const showLines = document.getElementById("showLines").checked ? "1" : "0";
+  const showCoords = document.getElementById("showCoords").checked ? "1" : "0";
+  const showRender = document.getElementById("showRender").checked ? "1" : "0";
+  return { x, y, nx, ny, sizePx, showLines, showCoords, showRender };
+}
+
+function goTo() {
+  const { x, y, nx, ny, sizePx, showLines, showCoords, showRender } =
+    getParams();
+  window.location.href = `?x=${x}&y=${y}&nx=${nx}&ny=${ny}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
+}
+
+function navigate(dx, dy) {
+  const params = getParams();
+  const x = parseInt(params.x) + dx;
+  const y = parseInt(params.y) + dy;
+  window.location.href = `?x=${x}&y=${y}&nx=${params.nx}&ny=${params.ny}&size=${params.sizePx}&lines=${params.showLines}&coords=${params.showCoords}&render=${params.showRender}`;
+}
+
+// Navigate to center the view on a specific coordinate
+function navigateToCoord(targetX, targetY) {
+  const params = getParams();
+  const nx = parseInt(params.nx);
+  const ny = parseInt(params.ny);
+  // Center the target coordinate in the view
+  const x = targetX - Math.floor(nx / 2);
+  const y = targetY - Math.floor(ny / 2);
+  window.location.href = `?x=${x}&y=${y}&nx=${params.nx}&ny=${params.ny}&size=${params.sizePx}&lines=${params.showLines}&coords=${params.showCoords}&render=${params.showRender}`;
+}
+
+// Hard refresh - clear image cache and reload page
+function hardRefresh() {
+  // Add cache-busting timestamp to all tile images to force reload
+  const timestamp = Date.now();
+
+  // Update all tile image sources to bust cache
+  document.querySelectorAll(".tile img").forEach((img) => {
+    const url = new URL(img.src);
+    url.searchParams.set("_t", timestamp);
+    img.src = url.toString();
+  });
+
+  // Also reload the page with cache bypass
+  // The true parameter forces reload from server, not cache
+  window.location.reload(true);
+}
+
+function toggleLines() {
+  const container = document.getElementById("gridContainer");
+  const showLines = document.getElementById("showLines").checked;
+  container.classList.toggle("show-lines", showLines);
+
+  // Update URL without reload
+  const url = new URL(window.location);
+  url.searchParams.set("lines", showLines ? "1" : "0");
+  history.replaceState({}, "", url);
+}
+
+function toggleCoords() {
+  const container = document.getElementById("gridContainer");
+  const showCoords = document.getElementById("showCoords").checked;
+  container.classList.toggle("show-coords", showCoords);
+
+  // Update URL without reload
+  const url = new URL(window.location);
+  url.searchParams.set("coords", showCoords ? "1" : "0");
+  history.replaceState({}, "", url);
+}
+
+function toggleRender() {
+  // This requires a page reload to fetch different data
+  const { x, y, nx, ny, sizePx, showLines, showCoords, showRender } =
+    getParams();
+  window.location.href = `?x=${x}&y=${y}&nx=${nx}&ny=${ny}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
+}
+
+// Keyboard navigation
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+
+  // Ignore keyboard shortcuts when prompt dialog is open
+  const promptDialog = document.getElementById("promptDialog");
+  if (promptDialog && promptDialog.style.display !== "none") return;
+
+  switch (e.key) {
+    case "ArrowLeft":
+      navigate(-1, 0);
+      break;
+    case "ArrowRight":
+      navigate(1, 0);
+      break;
+    case "ArrowUp":
+      navigate(0, -1);
+      break;
+    case "ArrowDown":
+      navigate(0, 1);
+      break;
+    case "l":
+    case "L":
+      document.getElementById("showLines").click();
+      break;
+    case "c":
+    case "C":
+      document.getElementById("showCoords").click();
+      break;
+    case "d":
+    case "D":
+      document.getElementById("showRender").click();
+      break;
+    case "g":
+    case "G":
+      generateSelected();
+      break;
+    case "s":
+    case "S":
+      toggleSelectTool();
+      break;
+    case "w":
+    case "W":
+      toggleFixWaterTool();
+      break;
+    case "f":
+    case "F":
+      toggleWaterFillTool();
+      break;
+    case "Escape":
+      if (selectToolActive) toggleSelectTool();
+      if (fixWaterToolActive) cancelWaterFix();
+      if (waterFillToolActive) cancelWaterFill();
+      break;
+  }
+});
+
+// Select tool state
+let selectToolActive = false;
+const selectedQuadrants = new Set();
+const MAX_SELECTION = 4;
+
+function toggleSelectTool() {
+  // Deactivate other tools if active
+  if (fixWaterToolActive) {
+    cancelWaterFix();
+  }
+  if (waterFillToolActive) {
+    cancelWaterFill();
+  }
+
+  selectToolActive = !selectToolActive;
+  const btn = document.getElementById("selectTool");
+  const tiles = document.querySelectorAll(".tile");
+
+  if (selectToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => tile.classList.add("selectable"));
+    saveSelectedTool("select");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => tile.classList.remove("selectable"));
+    saveSelectedTool("");
+  }
+}
+
+// Fix water tool state
+let fixWaterToolActive = false;
+let fixWaterTargetColor = null;
+let fixWaterQuadrant = null;
+
+function toggleFixWaterTool() {
+  // Deactivate other tools if active
+  if (selectToolActive) {
+    toggleSelectTool();
+  }
+  if (waterFillToolActive) {
+    cancelWaterFill();
+  }
+
+  fixWaterToolActive = !fixWaterToolActive;
+  const btn = document.getElementById("fixWaterTool");
+  const tiles = document.querySelectorAll(".tile");
+  const selectionStatus = document.getElementById("selectionStatus");
+  const waterFixStatus = document.getElementById("waterFixStatus");
+
+  if (fixWaterToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => {
+      // Only make tiles with images selectable
+      if (tile.querySelector("img")) {
+        tile.classList.add("fix-water-selectable");
+      }
+    });
+    // Show water fix status bar, hide selection status
+    selectionStatus.style.display = "none";
+    waterFixStatus.style.display = "flex";
+    // Reset state
+    resetWaterFixState();
+    saveSelectedTool("fixwater");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => {
+      tile.classList.remove("fix-water-selectable");
+      tile.classList.remove("water-fix-selected");
+    });
+    // Hide water fix status bar, show selection status
+    selectionStatus.style.display = "flex";
+    waterFixStatus.style.display = "none";
+    saveSelectedTool("");
+  }
+}
+
+function resetWaterFixState() {
+  fixWaterTargetColor = null;
+  fixWaterQuadrant = null;
+  document.getElementById("targetColorSwatch").style.background = "#333";
+  document.getElementById("targetColorSwatch").classList.remove("has-color");
+  document.getElementById("targetColorHex").textContent =
+    "Click a quadrant to pick color";
+  document.getElementById("waterFixQuadrant").textContent = "";
+  // Reset button state
+  const btn = document.getElementById("applyWaterFixBtn");
+  btn.disabled = true;
+  btn.classList.remove("loading");
+  btn.textContent = "Apply Fix";
+  document.querySelectorAll(".tile.water-fix-selected").forEach((tile) => {
+    tile.classList.remove("water-fix-selected");
+  });
+}
+
+function cancelWaterFix() {
+  if (fixWaterToolActive) {
+    toggleFixWaterTool();
+  }
+}
+
+function rgbToHex(r, g, b) {
+  return (
+    "#" +
+    [r, g, b]
+      .map((x) => {
+        const hex = x.toString(16);
+        return hex.length === 1 ? "0" + hex : hex;
+      })
+      .join("")
+      .toUpperCase()
+  );
+}
+
+function getPixelColorFromImage(img, x, y) {
+  // Create an off-screen canvas
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+
+  // Get the pixel data at the clicked position
+  const pixelData = ctx.getImageData(x, y, 1, 1).data;
+
+  return {
+    r: pixelData[0],
+    g: pixelData[1],
+    b: pixelData[2],
+    a: pixelData[3],
+  };
+}
+
+function handleFixWaterClick(tileEl, e) {
+  if (!fixWaterToolActive) return;
+
+  const img = tileEl.querySelector("img");
+  if (!img) {
+    showToast("error", "No image", "This quadrant has no generation to fix");
+    return;
+  }
+
+  // Get coordinates
+  const coords = tileEl.dataset.coords.split(",").map(Number);
+  const [qx, qy] = coords;
+
+  // Calculate click position relative to the image
+  const rect = img.getBoundingClientRect();
+  const clickX = e.clientX - rect.left;
+  const clickY = e.clientY - rect.top;
+
+  // Scale to natural image dimensions
+  const scaleX = img.naturalWidth / rect.width;
+  const scaleY = img.naturalHeight / rect.height;
+  const imgX = Math.floor(clickX * scaleX);
+  const imgY = Math.floor(clickY * scaleY);
+
+  // Ensure we're within bounds
+  if (
+    imgX < 0 ||
+    imgX >= img.naturalWidth ||
+    imgY < 0 ||
+    imgY >= img.naturalHeight
+  ) {
+    console.log("Click outside image bounds");
+    return;
+  }
+
+  try {
+    // Get the pixel color
+    const color = getPixelColorFromImage(img, imgX, imgY);
+    const hex = rgbToHex(color.r, color.g, color.b);
+
+    console.log(
+      `Picked color at (${imgX}, ${imgY}) in quadrant (${qx}, ${qy}): RGB(${color.r}, ${color.g}, ${color.b}) = ${hex}`
+    );
+
+    // Update state
+    fixWaterTargetColor = hex;
+    fixWaterQuadrant = { x: qx, y: qy };
+
+    // Update UI
+    document.getElementById("targetColorSwatch").style.background = hex;
+    document.getElementById("targetColorSwatch").classList.add("has-color");
+    document.getElementById(
+      "targetColorHex"
+    ).textContent = `${hex} — RGB(${color.r}, ${color.g}, ${color.b})`;
+    document.getElementById(
+      "waterFixQuadrant"
+    ).textContent = `Quadrant (${qx}, ${qy})`;
+    document.getElementById("applyWaterFixBtn").disabled = false;
+
+    // Update selected tile visual
+    document.querySelectorAll(".tile.water-fix-selected").forEach((tile) => {
+      tile.classList.remove("water-fix-selected");
+    });
+    tileEl.classList.add("water-fix-selected");
+
+    showToast("info", "Color picked", `Target color: ${hex} at (${qx}, ${qy})`);
+  } catch (error) {
+    console.error("Error picking color:", error);
+    showToast(
+      "error",
+      "Error picking color",
+      "Could not read pixel color. Try again."
+    );
+  }
+}
+
+async function applyWaterFix() {
+  if (!fixWaterTargetColor || !fixWaterQuadrant) {
+    showToast("error", "No color selected", "Pick a color first");
+    return;
+  }
+
+  // Default replacement color - a nice blue water color
+  const replacementColor = "#2A4A5F";
+
+  const btn = document.getElementById("applyWaterFixBtn");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  btn.textContent = "Applying...";
+
+  showToast(
+    "loading",
+    "Applying water fix...",
+    `Replacing ${fixWaterTargetColor} in (${fixWaterQuadrant.x}, ${fixWaterQuadrant.y})`
+  );
+
+  try {
+    const response = await fetch("/api/fix-water", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        x: fixWaterQuadrant.x,
+        y: fixWaterQuadrant.y,
+        target_color: fixWaterTargetColor,
+        replacement_color: replacementColor,
+      }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    if (result.success) {
+      showToast(
+        "success",
+        "Water fix applied!",
+        result.message || "Color replaced successfully"
+      );
+
+      // Refresh the specific tile image immediately with cache-busting
+      const { x, y } = fixWaterQuadrant;
+      const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+      if (tile) {
+        const img = tile.querySelector("img");
+        if (img) {
+          // Add timestamp to bust browser cache
+          const currentSrc = new URL(img.src);
+          currentSrc.searchParams.set("_t", Date.now());
+          img.src = currentSrc.toString();
+        }
+      }
+
+      // Reset the tool after a short delay
+      setTimeout(() => {
+        cancelWaterFix();
+      }, 1000);
+    } else {
+      showToast("error", "Water fix failed", result.error || "Unknown error");
+      btn.disabled = false;
+      btn.classList.remove("loading");
+      btn.textContent = "Apply Fix";
+    }
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Water fix error:", error);
+    showToast("error", "Request failed", error.message);
+    btn.disabled = false;
+    btn.classList.remove("loading");
+    btn.textContent = "Apply Fix";
+  }
+}
+
+// Water Fill tool - fills entire quadrant with water color
+let waterFillToolActive = false;
+
+function toggleWaterFillTool() {
+  // Deactivate other tools
+  if (selectToolActive) {
+    toggleSelectTool();
+  }
+  if (fixWaterToolActive) {
+    cancelWaterFix();
+  }
+
+  waterFillToolActive = !waterFillToolActive;
+  const btn = document.getElementById("waterFillTool");
+  const tiles = document.querySelectorAll(".tile");
+  const selectionStatus = document.getElementById("selectionStatus");
+  const waterFillStatus = document.getElementById("waterFillStatus");
+
+  if (waterFillToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => {
+      tile.classList.add("water-fill-selectable");
+    });
+    // Show water fill status bar, hide selection status
+    selectionStatus.style.display = "none";
+    waterFillStatus.style.display = "flex";
+    saveSelectedTool("waterfill");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => {
+      tile.classList.remove("water-fill-selectable");
+    });
+    // Hide water fill status bar, show selection status
+    selectionStatus.style.display = "flex";
+    waterFillStatus.style.display = "none";
+    saveSelectedTool("");
+  }
+}
+
+function cancelWaterFill() {
+  if (waterFillToolActive) {
+    toggleWaterFillTool();
+  }
+}
+
+async function handleWaterFillClick(tileEl) {
+  if (!waterFillToolActive) return;
+
+  const coords = tileEl.dataset.coords.split(",").map(Number);
+  const [qx, qy] = coords;
+
+  // Confirm action
+  if (!confirm(`Fill quadrant (${qx}, ${qy}) entirely with water color?`)) {
+    return;
+  }
+
+  const instruction = document.getElementById("waterFillInstruction");
+  instruction.textContent = `Filling (${qx}, ${qy})...`;
+
+  showToast(
+    "loading",
+    "Filling with water...",
+    `Processing quadrant (${qx}, ${qy})`
+  );
+
+  try {
+    const response = await fetch("/api/water-fill", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ x: qx, y: qy }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    if (result.success) {
+      showToast("success", "Water fill complete!", result.message);
+
+      // Refresh the tile image
+      const img = tileEl.querySelector("img");
+      if (img) {
+        const currentSrc = new URL(img.src);
+        currentSrc.searchParams.set("_t", Date.now());
+        img.src = currentSrc.toString();
+      }
+
+      instruction.textContent = "Click a quadrant to fill with water";
+    } else {
+      showToast("error", "Water fill failed", result.error || "Unknown error");
+      instruction.textContent = "Click a quadrant to fill with water";
+    }
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Water fill error:", error);
+    showToast("error", "Request failed", error.message);
+    instruction.textContent = "Click a quadrant to fill with water";
+  }
+}
+
+function updateSelectionStatus(serverStatus = null) {
+  const count = selectedQuadrants.size;
+  const countEl = document.getElementById("selectionCount");
+  const limitEl = document.querySelector(".selection-limit");
+  const statusEl = document.getElementById("selectionStatus");
+  const deselectBtn = document.getElementById("deselectAllBtn");
+  const deleteBtn = document.getElementById("deleteBtn");
+  const renderBtn = document.getElementById("renderBtn");
+  const generateBtn = document.getElementById("generateBtn");
+  const generateRectBtn = document.getElementById("generateRectBtn");
+
+  let statusParts = [];
+
+  // Show current processing status from server
+  if (serverStatus) {
+    // Show all active models generating
+    const activeModels = serverStatus.active_models || [];
+    const processingQuadrants =
+      serverStatus.all_processing_quadrants || serverStatus.quadrants || [];
+
+    if (activeModels.length > 0 && processingQuadrants.length > 0) {
+      // Show which models are actively generating with their queue counts
+      const queueByModel = serverStatus.queue_by_model || {};
+
+      if (activeModels.length === 1) {
+        const modelId = activeModels[0];
+        const modelName = getModelDisplayName(modelId) || modelId || "default";
+        const modelInfo = queueByModel[modelId];
+        const queueCount = modelInfo
+          ? modelInfo.pending_count + (modelInfo.is_processing ? 1 : 0)
+          : 0;
+        // Create clickable coordinate links
+        const coordsHtml = processingQuadrants
+          .map(
+            ([x, y]) =>
+              `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+          )
+          .join(" ");
+        const countStr = queueCount > 0 ? ` [${queueCount}]` : "";
+        statusParts.push({
+          html: `🔄 ${modelName}${countStr}: ${coordsHtml}`,
+        });
+      } else {
+        // Multiple models generating in parallel - show each with queue count and coords
+        const queueByModel = serverStatus.queue_by_model || {};
+        const modelPartsHtml = activeModels.map((modelId) => {
+          const name = getModelDisplayName(modelId) || modelId || "default";
+          const modelInfo = queueByModel[modelId];
+          const queueCount = modelInfo
+            ? modelInfo.pending_count + (modelInfo.is_processing ? 1 : 0)
+            : 0;
+          // Get quadrants for this specific model
+          const modelQuadrants =
+            modelInfo && modelInfo.current_item
+              ? modelInfo.current_item.quadrants || []
+              : [];
+          const coordsHtml =
+            modelQuadrants.length > 0
+              ? " " +
+                modelQuadrants
+                  .map(
+                    ([x, y]) =>
+                      `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+                  )
+                  .join(" ")
+              : "";
+          const countStr = queueCount > 0 ? ` [${queueCount}]` : "";
+          return `${name}${countStr}${coordsHtml}`;
+        });
+        statusParts.push({ html: `🔄 ${modelPartsHtml.join(", ")}` });
+      }
+    } else if (
+      serverStatus.is_generating &&
+      serverStatus.quadrants &&
+      serverStatus.quadrants.length > 0
+    ) {
+      // Fallback to old behavior with clickable coords
+      const action =
+        serverStatus.status === "rendering" ? "Rendering" : "Generating";
+      const coordsHtml = serverStatus.quadrants
+        .map(
+          ([x, y]) =>
+            `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+        )
+        .join(" ");
+      statusParts.push({ html: `${action} ${coordsHtml}` });
+    }
+
+    // Show per-model queue counts (only models with items)
+    if (serverStatus.queue_by_model) {
+      const modelQueues = Object.entries(serverStatus.queue_by_model);
+      const queueParts = modelQueues
+        .map(([modelId, info]) => {
+          const name = getModelDisplayName(modelId) || modelId;
+          const count = info.pending_count + (info.is_processing ? 1 : 0);
+          return { name, count };
+        })
+        .filter(({ count }) => count > 0)
+        .map(({ name, count }) => `${name}: ${count}`);
+
+      if (queueParts.length > 0) {
+        statusParts.push(`📋 ${queueParts.join(", ")}`);
+      }
+    }
+  }
+
+  // Update selection display in toolbar-info (separate from status)
+  const selectedDisplay = document.getElementById("selectedQuadrantsDisplay");
+  if (selectedDisplay) {
+    if (count > 0) {
+      const coordsStr = Array.from(selectedQuadrants)
+        .map((key) => {
+          const [x, y] = key.split(",");
+          return `(${x},${y})`;
+        })
+        .join(" ");
+      selectedDisplay.textContent = `✓ ${coordsStr}`;
+      selectedDisplay.style.display = "";
+    } else {
+      selectedDisplay.textContent = "";
+      selectedDisplay.style.display = "none";
+    }
+  }
+
+  // Build status display - some parts may be HTML objects, others plain strings
+  if (statusParts.length > 0) {
+    const statusHtml = statusParts
+      .map((part) => (typeof part === "object" && part.html ? part.html : part))
+      .join(" • ");
+    countEl.innerHTML = statusHtml;
+
+    // Add click handlers for coordinate links
+    countEl.querySelectorAll(".coord-link").forEach((link) => {
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        const x = parseInt(link.dataset.x, 10);
+        const y = parseInt(link.dataset.y, 10);
+        navigateToCoord(x, y);
+      });
+    });
+  } else {
+    countEl.textContent = `${count} selected`;
+  }
+
+  // Update status bar styling
+  const isProcessing =
+    serverStatus &&
+    (serverStatus.is_generating || serverStatus.queue_length > 0);
+  if (isProcessing) {
+    if (limitEl) limitEl.style.display = "none";
+    statusEl.classList.remove("empty");
+    statusEl.classList.add("generating");
+  } else {
+    if (limitEl) limitEl.style.display = "";
+    statusEl.classList.toggle("empty", count === 0);
+    statusEl.classList.remove("generating");
+  }
+
+  // Enable buttons for selection (can add to queue even during processing)
+  deselectBtn.disabled = count === 0;
+  deleteBtn.disabled = count === 0;
+  renderBtn.disabled = count === 0;
+  generateBtn.disabled = count === 0;
+  // Generate with prompt button
+  const generateWithPromptBtn = document.getElementById(
+    "generateWithPromptBtn"
+  );
+  if (generateWithPromptBtn) {
+    generateWithPromptBtn.disabled = count === 0;
+  }
+  // Generate Rectangle requires exactly 2 selected
+  generateRectBtn.disabled = count !== 2;
+}
+
+// Toast notification system
+function showToast(type, title, message, duration = 5000) {
+  const container = document.getElementById("toastContainer");
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+
+  const icons = {
+    success: "✅",
+    error: "❌",
+    info: "ℹ️",
+    loading: "⏳",
+  };
+
+  toast.innerHTML = `
+    <span class="toast-icon">${icons[type] || "ℹ️"}</span>
+    <div class="toast-content">
+      <div class="toast-title">${title}</div>
+      ${message ? `<div class="toast-message">${message}</div>` : ""}
+    </div>
+    <button class="toast-close" onclick="this.parentElement.remove()">×</button>
+  `;
+
+  container.appendChild(toast);
+
+  // Auto-remove after duration (except for loading toasts)
+  if (type !== "loading" && duration > 0) {
+    setTimeout(() => {
+      toast.classList.add("removing");
+      setTimeout(() => toast.remove(), 300);
+    }, duration);
+  }
+
+  return toast;
+}
+
+function clearLoadingToasts() {
+  document.querySelectorAll(".toast.loading").forEach((t) => t.remove());
+}
+
+// Generation/Render state (tracked from server)
+let isGenerating = false;
+let isRendering = false;
+
+async function deleteSelected() {
+  if (selectedQuadrants.size === 0) return;
+
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return [x, y];
+  });
+
+  // Confirm deletion
+  const coordsStr = coords.map(([x, y]) => `(${x},${y})`).join(", ");
+  if (!confirm(`Delete generation data for ${coordsStr}?`)) {
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quadrants: coords }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast("success", "Deleted", result.message);
+      // Deselect and refresh
+      deselectAll();
+      location.reload();
+    } else {
+      showToast("error", "Delete failed", result.error);
+    }
+  } catch (error) {
+    console.error("Delete error:", error);
+    showToast("error", "Delete failed", error.message);
+  }
+}
+
+async function clearQueue() {
+  // Get current queue info first
+  try {
+    const statusResponse = await fetch("/api/status");
+    const status = await statusResponse.json();
+
+    const queueLength = status.queue_length || 0;
+    const isGenerating = status.is_generating || false;
+
+    if (queueLength === 0 && !isGenerating) {
+      showToast(
+        "info",
+        "Nothing to clear",
+        "There are no pending items or active generations."
+      );
+      return;
+    }
+
+    // Build confirm message based on what will be cancelled
+    let confirmMessage = "Are you sure you want to clear the queue?";
+    const parts = [];
+    if (queueLength > 0) {
+      parts.push(`${queueLength} pending item(s)`);
+    }
+    if (isGenerating) {
+      parts.push("the current generation in progress");
+    }
+    if (parts.length > 0) {
+      confirmMessage = `Are you sure you want to cancel ${parts.join(
+        " and "
+      )}?`;
+    }
+
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    // Clear the queue
+    const response = await fetch("/api/queue/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast(
+        "success",
+        "Queue cleared",
+        result.message || `Cleared ${result.cleared_count} item(s)`
+      );
+      // Refresh status
+      await checkGenerationStatus();
+    } else {
+      showToast(
+        "error",
+        "Failed to clear queue",
+        result.error || "Unknown error"
+      );
+    }
+  } catch (error) {
+    console.error("Clear queue error:", error);
+    showToast("error", "Request failed", error.message);
+  }
+}
+
+// Prompt dialog functions
+function showPromptDialog() {
+  if (selectedQuadrants.size === 0) return;
+  const dialog = document.getElementById("promptDialog");
+  const input = document.getElementById("promptInput");
+  if (dialog && input) {
+    input.value = "";
+    dialog.style.display = "flex";
+    input.focus();
+  }
+}
+
+function hidePromptDialog() {
+  const dialog = document.getElementById("promptDialog");
+  if (dialog) {
+    dialog.style.display = "none";
+  }
+}
+
+async function submitPromptGeneration() {
+  const input = document.getElementById("promptInput");
+  const prompt = input ? input.value.trim() : "";
+  hidePromptDialog();
+  await generateSelected(prompt);
+}
+
+async function generateSelected(prompt = null) {
+  if (selectedQuadrants.size === 0) return;
+
+  // Separate selected quadrants into those that need generation vs those that already have it
+  const toGenerate = [];
+  const contextQuadrants = [];
+
+  Array.from(selectedQuadrants).forEach((s) => {
+    const [x, y] = s.split(",").map(Number);
+    const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+
+    if (tile && !tile.classList.contains("placeholder")) {
+      // This quadrant already has a generation - use as context
+      contextQuadrants.push([x, y]);
+    } else {
+      // This quadrant needs generation
+      toGenerate.push([x, y]);
+    }
+  });
+
+  // If nothing needs generation, inform the user
+  if (toGenerate.length === 0) {
+    showToast(
+      "info",
+      "Already generated",
+      "All selected quadrants already have generations. Select at least one empty quadrant."
+    );
+    return;
+  }
+
+  const modelId = getSelectedModelId();
+
+  console.log(
+    "Generate requested for:",
+    toGenerate,
+    "with context:",
+    contextQuadrants,
+    "model:",
+    modelId
+  );
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+
+  // Build context info for toast
+  const contextMsg =
+    contextQuadrants.length > 0
+      ? ` (using ${contextQuadrants.length} as context)`
+      : "";
+  const promptMsg = prompt ? " with prompt" : "";
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const requestBody = {
+      quadrants: toGenerate,
+      model_id: modelId,
+    };
+
+    // Include context quadrants if any
+    if (contextQuadrants.length > 0) {
+      requestBody.context = contextQuadrants;
+    }
+
+    // Include prompt if provided
+    if (prompt) {
+      requestBody.prompt = prompt;
+    }
+
+    const response = await fetch("/api/generate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    const result = await response.json();
+
+    if (result.queued) {
+      console.log(
+        "Generation queued at position:",
+        result.position,
+        "model:",
+        result.model_id
+      );
+      // Get model name for display
+      const modelName = getModelDisplayName(result.model_id);
+      const modelInfo = modelName ? ` (${modelName})` : "";
+      showToast(
+        "success",
+        "Added to queue",
+        `${toGenerate.length} quadrant(s)${promptMsg}${contextMsg} → position ${result.position}${modelInfo}`
+      );
+    } else if (!result.success) {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    console.error("Generation error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+  }
+}
+
+async function renderSelected() {
+  if (selectedQuadrants.size === 0) return;
+
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return [x, y];
+  });
+
+  console.log("Render requested for:", coords);
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const response = await fetch("/api/render", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ quadrants: coords }),
+    });
+
+    const result = await response.json();
+
+    if (result.queued) {
+      console.log("Render queued at position:", result.position);
+      showToast(
+        "success",
+        "Added to queue",
+        `${coords.length} quadrant(s) for render → position ${result.position}`
+      );
+    } else if (!result.success) {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    console.error("Render error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+  }
+}
+
+async function generateRectangle() {
+  if (selectedQuadrants.size !== 2) {
+    showToast(
+      "error",
+      "Invalid selection",
+      "Please select exactly 2 quadrants to define the rectangle corners."
+    );
+    return;
+  }
+
+  // Get the two selected coordinates
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return { x, y };
+  });
+
+  // Calculate rectangle bounds (top-left and bottom-right)
+  const minX = Math.min(coords[0].x, coords[1].x);
+  const maxX = Math.max(coords[0].x, coords[1].x);
+  const minY = Math.min(coords[0].y, coords[1].y);
+  const maxY = Math.max(coords[0].y, coords[1].y);
+
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const totalQuadrants = width * height;
+
+  // Build confirmation message
+  const confirmMessage =
+    `Generate rectangle from (${minX}, ${minY}) to (${maxX}, ${maxY})?\n\n` +
+    `Size: ${width} × ${height} = ${totalQuadrants} quadrant(s)\n\n` +
+    `This will create a generation plan and queue all steps.\n` +
+    `Pre-existing generations will be skipped.`;
+
+  if (!confirm(confirmMessage)) {
+    return;
+  }
+
+  const modelId = getSelectedModelId();
+
+  console.log(
+    "Generate rectangle requested:",
+    { tl: [minX, minY], br: [maxX, maxY] },
+    "with model:",
+    modelId
+  );
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+
+  // Show immediate feedback
+  const btn = document.getElementById("generateRectBtn");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  btn.innerHTML = 'Queueing...<span class="spinner"></span>';
+
+  showToast(
+    "loading",
+    "Creating generation plan...",
+    `Rectangle (${minX}, ${minY}) to (${maxX}, ${maxY})`
+  );
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const response = await fetch("/api/generate-rectangle", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        tl: [minX, minY],
+        br: [maxX, maxY],
+        model_id: modelId,
+      }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    // Reset button
+    btn.classList.remove("loading");
+    btn.innerHTML = "Generate Rectangle";
+
+    if (result.success) {
+      if (result.queued_count === 0) {
+        showToast(
+          "info",
+          "Nothing to generate",
+          result.message || "All quadrants already generated."
+        );
+      } else {
+        console.log("Rectangle generation queued:", result);
+        const summary = result.plan_summary || {};
+        const stepTypes = summary.steps_by_type || {};
+        const typeInfo = Object.entries(stepTypes)
+          .map(([type, count]) => `${count}× ${type}`)
+          .join(", ");
+
+        showToast(
+          "success",
+          "Rectangle queued!",
+          `${result.queued_count} step(s) for ${
+            summary.total_quadrants || "?"
+          } quadrant(s)` + (typeInfo ? ` (${typeInfo})` : "")
+        );
+      }
+    } else {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Generate rectangle error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+
+    // Reset button
+    btn.classList.remove("loading");
+    btn.innerHTML = "Generate Rectangle";
+  }
+}
+
+function deselectAll() {
+  selectedQuadrants.clear();
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+  console.log("Deselected all quadrants");
+}
+
+function toggleTileSelection(tileEl, qx, qy) {
+  if (!selectToolActive) return;
+
+  // Check if this tile is currently being generated or in the queue
+  const key = `${qx},${qy}`;
+  if (
+    tileEl.classList.contains("locked") ||
+    tileEl.classList.contains("queued")
+  ) {
+    console.log(
+      `Cannot select quadrant (${qx}, ${qy}) - currently generating or in queue`
+    );
+    return;
+  }
+
+  if (selectedQuadrants.has(key)) {
+    selectedQuadrants.delete(key);
+    tileEl.classList.remove("selected");
+    console.log(`Deselected quadrant (${qx}, ${qy})`);
+  } else {
+    // Check if we've hit the max selection limit
+    if (selectedQuadrants.size >= MAX_SELECTION) {
+      console.log(`Cannot select more than ${MAX_SELECTION} quadrants`);
+      return;
+    }
+    selectedQuadrants.add(key);
+    tileEl.classList.add("selected");
+    console.log(`Selected quadrant (${qx}, ${qy})`);
+  }
+
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+
+  // Log current selection
+  if (selectedQuadrants.size > 0) {
+    console.log("Selected:", Array.from(selectedQuadrants).join("; "));
+  }
+}
+
+// Setup tile click handlers
+document.querySelectorAll(".tile").forEach((tile) => {
+  tile.addEventListener("click", (e) => {
+    // Handle fix water tool clicks
+    if (fixWaterToolActive) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleFixWaterClick(tile, e);
+      return;
+    }
+
+    // Handle water fill tool clicks
+    if (waterFillToolActive) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleWaterFillClick(tile);
+      return;
+    }
+
+    // Handle select tool clicks
+    if (!selectToolActive) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const coords = tile.dataset.coords.split(",").map(Number);
+    toggleTileSelection(tile, coords[0], coords[1]);
+  });
+});
+
+// Initialize selection status
+updateSelectionStatus();
+
+// Status polling for generation progress
+let statusPollInterval = null;
+let lastStatus = null;
+let lastProcessingQuadrants = new Set(); // Track quadrants that were processing
+
+function startStatusPolling() {
+  if (statusPollInterval) return;
+  statusPollInterval = setInterval(checkGenerationStatus, 1000);
+}
+
+// Refresh a specific tile's image (or add image if it was a placeholder)
+function refreshTileImage(qx, qy) {
+  const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+  if (!tile) return;
+
+  const showRender = document.getElementById("showRender")?.checked ? "1" : "0";
+  const timestamp = Date.now();
+  const imgUrl = `/tile/${qx}/${qy}?render=${showRender}&_t=${timestamp}`;
+
+  let img = tile.querySelector("img");
+  if (img) {
+    // Update existing image
+    img.src = imgUrl;
+  } else {
+    // Create new image for placeholder tile
+    img = document.createElement("img");
+    img.src = imgUrl;
+    img.alt = `Tile ${qx},${qy}`;
+    img.onload = () => {
+      // Remove placeholder class once image loads
+      tile.classList.remove("placeholder");
+    };
+    tile.appendChild(img);
+  }
+}
+
+function stopStatusPolling() {
+  if (statusPollInterval) {
+    clearInterval(statusPollInterval);
+    statusPollInterval = null;
+  }
+}
+
+async function checkGenerationStatus() {
+  try {
+    const response = await fetch("/api/status");
+    const status = await response.json();
+
+    console.log("Status poll:", status);
+
+    // Track state changes - consider active_model_count for parallel processing
+    const wasGenerating = isGenerating || isRendering;
+    const hasActiveModels = (status.active_model_count || 0) > 0;
+    isGenerating =
+      (status.is_generating || hasActiveModels) &&
+      status.status !== "rendering";
+    isRendering = status.is_generating && status.status === "rendering";
+    const nowProcessing = isGenerating || isRendering;
+
+    // Get current processing quadrants
+    const currentProcessingQuadrants = new Set(
+      (status.all_processing_quadrants || status.quadrants || []).map(
+        ([x, y]) => `${x},${y}`
+      )
+    );
+
+    // Detect quadrants that just finished processing (were processing, now not)
+    const completedQuadrants = [];
+    lastProcessingQuadrants.forEach((coordKey) => {
+      if (!currentProcessingQuadrants.has(coordKey)) {
+        completedQuadrants.push(coordKey);
+      }
+    });
+
+    // Refresh tiles for completed quadrants
+    if (completedQuadrants.length > 0) {
+      console.log("Refreshing completed quadrants:", completedQuadrants);
+      completedQuadrants.forEach((coordKey) => {
+        const [qx, qy] = coordKey.split(",").map(Number);
+        refreshTileImage(qx, qy);
+      });
+    }
+
+    // Update tracking for next poll
+    lastProcessingQuadrants = currentProcessingQuadrants;
+
+    // Apply visual styles based on server status
+    applyStatusStyles(status);
+
+    // Update render button based on state
+    const renderBtn = document.getElementById("renderBtn");
+
+    if (nowProcessing) {
+      // Show loading state on render button only (generate state is shown in toolbar)
+      if (isRendering) {
+        renderBtn.classList.add("loading");
+        renderBtn.innerHTML = 'Rendering<span class="spinner"></span>';
+      } else {
+        renderBtn.classList.remove("loading");
+        renderBtn.innerHTML = "Render";
+      }
+
+      // Show toast if not already showing
+      if (document.querySelectorAll(".toast.loading").length === 0) {
+        const opName = isRendering ? "Render" : "Generation";
+        showToast(
+          "loading",
+          `${opName} in progress...`,
+          status.message || "Please wait..."
+        );
+      }
+
+      // Update the loading toast message
+      const loadingToast = document.querySelector(
+        ".toast.loading .toast-message"
+      );
+      if (loadingToast && status.message) {
+        loadingToast.textContent = status.message;
+      }
+    } else {
+      // Reset render button
+      renderBtn.classList.remove("loading");
+      renderBtn.innerHTML = "Render";
+    }
+
+    // Handle status transitions
+    if (status.status === "complete" && wasGenerating && !nowProcessing) {
+      clearLoadingToasts();
+      showToast("success", "Complete!", status.message);
+
+      // Check if there are more items in queue
+      if (status.queue_length > 0) {
+        // Build per-model queue message
+        let queueMsg = "";
+        if (status.queue_by_model) {
+          const parts = Object.entries(status.queue_by_model)
+            .map(([modelId, info]) => {
+              const name = getModelDisplayName(modelId) || modelId;
+              const count = info.pending_count + (info.is_processing ? 1 : 0);
+              return { name, count };
+            })
+            .filter(({ count }) => count > 0)
+            .map(({ name, count }) => `${name}: ${count}`);
+          if (parts.length > 0) {
+            queueMsg = parts.join(", ");
+          }
+        }
+        if (queueMsg) {
+          showToast("info", "Processing queue", queueMsg);
+        }
+      } else {
+        // No more items - tiles already refreshed, just stop polling
+        stopStatusPolling();
+      }
+    } else if (status.status === "error" && status.error) {
+      clearLoadingToasts();
+      showToast("error", "Error", status.error);
+
+      // Continue polling if there are more items in queue
+      if (status.queue_length === 0) {
+        stopStatusPolling();
+      }
+    } else if (
+      status.status === "idle" &&
+      status.queue_length === 0 &&
+      !nowProcessing
+    ) {
+      // Idle with no queue - stop polling
+      stopStatusPolling();
+    }
+
+    // Update selection status with server info
+    updateSelectionStatus(status);
+    lastStatus = status;
+  } catch (error) {
+    console.error("Status check failed:", error);
+  }
+}
+
+// Restore saved tool on page load
+function restoreSavedTool() {
+  const savedTool = getSavedTool();
+  if (!savedTool) return;
+
+  // Check if the tool button exists before activating
+  switch (savedTool) {
+    case "select":
+      if (document.getElementById("selectTool")) {
+        toggleSelectTool();
+      }
+      break;
+    case "fixwater":
+      if (document.getElementById("fixWaterTool")) {
+        toggleFixWaterTool();
+      }
+      break;
+    case "waterfill":
+      if (document.getElementById("waterFillTool")) {
+        toggleWaterFillTool();
+      }
+      break;
+    default:
+      // Unknown tool, clear saved state
+      saveSelectedTool("");
+      break;
+  }
+}
+
+// Restore saved quadrant selections on page load
+function restoreSavedQuadrants() {
+  const savedQuadrants = getSavedQuadrants();
+  if (!savedQuadrants || savedQuadrants.length === 0) return;
+
+  let restoredCount = 0;
+
+  savedQuadrants.forEach((key) => {
+    // Check if this quadrant tile exists on the current page
+    const tile = document.querySelector(`.tile[data-coords="${key}"]`);
+    if (tile) {
+      // Don't restore if tile is locked or queued
+      if (
+        !tile.classList.contains("locked") &&
+        !tile.classList.contains("queued")
+      ) {
+        selectedQuadrants.add(key);
+        tile.classList.add("selected");
+        restoredCount++;
+      }
+    }
+  });
+
+  if (restoredCount > 0) {
+    console.log(`Restored ${restoredCount} selected quadrant(s)`);
+    // Update localStorage to only contain valid selections
+    saveSelectedQuadrants();
+    updateSelectionStatus();
+  } else if (savedQuadrants.length > 0) {
+    // Had saved selections but none are on current page - clear storage
+    saveSelectedQuadrants();
+  }
+}
+
+// Initialize on page load
+(async function initialize() {
+  // Initialize model selector
+  initModelSelector();
+
+  // Restore saved tool
+  restoreSavedTool();
+
+  // Restore saved quadrant selections
+  restoreSavedQuadrants();
+
+  try {
+    const response = await fetch("/api/status");
+    const status = await response.json();
+
+    // Apply initial status styles
+    applyStatusStyles(status);
+
+    if (status.is_generating || status.queue_length > 0) {
+      console.log(
+        "Processing in progress or queue non-empty, starting polling..."
+      );
+      isGenerating = status.is_generating && status.status !== "rendering";
+      isRendering = status.is_generating && status.status === "rendering";
+      startStatusPolling();
+    }
+
+    updateSelectionStatus(status);
+  } catch (error) {
+    console.error("Initial status check failed:", error);
+  }
+})();
+
+```
+
+Let me also check the `generateRectangle` function:
+
+The `generateRectangle` function is fine - it uses a "loading" toast that gets cleared and replaced by the success toast. That's the correct pattern for longer operations. Let me check for lint errors:
+
+Done! Now when adding to the queue:
+
+- **Generate/Render**: Shows only one "Added to queue" success toast with the details
+- **Generate Rectangle**: Still shows a "Creating generation plan..." loading toast (appropriate since it can take a moment), which is then replaced by the success toast
+
+---
+
+**User**
+
+Please place the "refresh" button on the top row of controls, not the second
+
+---
+
+**Cursor**
+
+I'll move the refresh button from the second row to the top row. First, let me remove it from its current location:
+
+```html
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Generated Tiles Viewer</title>
+    <link rel="stylesheet" href="/static/viewer.css" />
+    <style>
+      /* Dynamic grid sizing based on template variables */
+      .grid {
+        grid-template-columns: repeat({{ nx }}, {{ size_px }}px);
+        grid-auto-rows: {{ size_px }}px;
+      }
+      .tile.placeholder {
+        min-width: {{ size_px }}px;
+        min-height: {{ size_px }}px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Config data for JS -->
+    <script
+      id="app-config"
+      type="application/json"
+      data-config='{"x": {{ x }}, "y": {{ y }}, "nx": {{ nx }}, "ny": {{ ny }}, "size_px": {{ size_px }}, "models": {{ models_config | safe }}, "default_model_id": "{{ default_model_id }}"}'
+    ></script>
+
+    <!-- Toast notification container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Fixed toolbar -->
+    <div class="toolbar">
+      <div class="toolbar-row">
+        <div class="controls">
+          <label>X: <input type="number" id="x" value="{{ x }}" /></label>
+          <label>Y: <input type="number" id="y" value="{{ y }}" /></label>
+          <label
+            >NX: <input type="number" id="nx" value="{{ nx }}" min="1" max="20"
+          /></label>
+          <label
+            >NY: <input type="number" id="ny" value="{{ ny }}" min="1" max="20"
+          /></label>
+          <label
+            >Size:
+            <input type="number" id="sizePx" value="{{ size_px }}" step="32"
+          /></label>
+          <button onclick="goTo()">Go</button>
+          <div class="toggle-group">
+            <label
+              ><input
+                type="checkbox"
+                id="showLines"
+                {%
+                if
+                show_lines
+                %}checked{%
+                endif
+                %}
+                onchange="toggleLines()"
+              />
+              Lines</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                id="showCoords"
+                {%
+                if
+                show_coords
+                %}checked{%
+                endif
+                %}
+                onchange="toggleCoords()"
+              />
+              Coords</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                id="showRender"
+                {%
+                if
+                show_render
+                %}checked{%
+                endif
+                %}
+                onchange="toggleRender()"
+              />
+              Renders</label
+            >
+          </div>
+          <div class="toggle-group model-group">
+            <label class="model-label"
+              >Model:
+              <select id="modelSelect" class="model-select">
+                <!-- Populated by JavaScript -->
+              </select>
+            </label>
+          </div>
+          <div class="toggle-group tools-group">
+            <span class="tools-label">Tools:</span>
+            <button
+              id="selectTool"
+              class="tool-btn"
+              onclick="toggleSelectTool()"
+              title="Select quadrants (S)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"></path>
+                <path d="M13 13l6 6"></path>
+              </svg>
+              Select
+            </button>
+            <button
+              id="fixWaterTool"
+              class="tool-btn"
+              onclick="toggleFixWaterTool()"
+              title="Fix water color (W)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+              </svg>
+              Fix Water
+            </button>
+            <button
+              id="waterFillTool"
+              class="tool-btn"
+              onclick="toggleWaterFillTool()"
+              title="Fill quadrant with water (F)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                <path d="M12 8v8"></path>
+                <path d="M8 12h8"></path>
+              </svg>
+              Water Fill
+            </button>
+          </div>
+        </div>
+        <div class="toolbar-info">
+          <span>({{ x }}, {{ y }}) → ({{ x + nx - 1 }}, {{ y + ny - 1 }})</span>
+          <span id="selectedQuadrantsDisplay" class="selected-quadrants"></span>
+          <span>{{ generation_dir }}</span>
+        </div>
+      </div>
+      <div class="selection-status" id="selectionStatus">
+        <span id="selectionCount">0 quadrants selected</span>
+        <span class="selection-limit">(max 4)</span>
+        <button
+          id="deselectAllBtn"
+          class="deselect-btn"
+          onclick="deselectAll()"
+          disabled
+        >
+          Deselect All
+        </button>
+        <button
+          id="deleteBtn"
+          class="delete-btn"
+          onclick="deleteSelected()"
+          disabled
+        >
+          Delete
+        </button>
+        <button
+          id="renderBtn"
+          class="render-btn"
+          onclick="renderSelected()"
+          disabled
+        >
+          Render
+        </button>
+        <button
+          id="generateBtn"
+          class="generate-btn"
+          onclick="generateSelected()"
+          disabled
+        >
+          Generate
+        </button>
+        <button
+          id="generateWithPromptBtn"
+          class="generate-prompt-btn"
+          onclick="showPromptDialog()"
+          disabled
+          title="Generate with additional prompt text"
+        >
+          + Prompt
+        </button>
+        <button
+          id="generateRectBtn"
+          class="generate-rect-btn"
+          onclick="generateRectangle()"
+          disabled
+          title="Select exactly 2 quadrants to define rectangle corners"
+        >
+          Generate Rectangle
+        </button>
+        <button
+          id="clearQueueBtn"
+          class="clear-queue-btn"
+          onclick="clearQueue()"
+          title="Clear all pending items from the generation queue"
+        >
+          Clear Queue
+        </button>
+      </div>
+      <div class="water-fix-status" id="waterFixStatus" style="display: none">
+        <span class="water-fix-label">Target Color:</span>
+        <span class="color-swatch" id="targetColorSwatch"></span>
+        <span class="color-hex" id="targetColorHex"
+          >Click a quadrant to pick color</span
+        >
+        <span class="water-fix-quadrant" id="waterFixQuadrant"></span>
+        <button
+          id="applyWaterFixBtn"
+          class="apply-water-fix-btn"
+          onclick="applyWaterFix()"
+          disabled
+        >
+          Apply Fix
+        </button>
+        <button
+          id="cancelWaterFixBtn"
+          class="cancel-water-fix-btn"
+          onclick="cancelWaterFix()"
+        >
+          Cancel
+        </button>
+      </div>
+      <div class="water-fill-status" id="waterFillStatus" style="display: none">
+        <span class="water-fill-label">Water Fill:</span>
+        <span class="color-swatch water-color-preview"></span>
+        <span class="water-fill-instruction" id="waterFillInstruction"
+          >Click a quadrant to fill with water</span
+        >
+        <button
+          id="cancelWaterFillBtn"
+          class="cancel-water-fix-btn"
+          onclick="cancelWaterFill()"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+
+    <div
+      class="grid-container {% if show_lines %}show-lines{% endif %} {% if show_coords %}show-coords{% endif %}"
+      id="gridContainer"
+    >
+      <div class="grid">
+        {% for dy in range(ny) %} {% for dx in range(nx) %} {% set qx = x + dx
+        %} {% set qy = y + dy %} {% set has_gen = tiles.get((dx, dy), False) %}
+        <div
+          class="tile {% if not has_gen %}placeholder{% endif %}"
+          data-coords="{{ qx }},{{ qy }}"
+        >
+          <span class="coords">({{ qx }}, {{ qy }})</span>
+          {% if has_gen %}
+          <img
+            src="/tile/{{ qx }}/{{ qy }}?render={{ '1' if show_render else '0' }}"
+            alt="Tile {{ qx }},{{ qy }}"
+          />
+          {% endif %}
+        </div>
+        {% endfor %} {% endfor %}
+      </div>
+    </div>
+
+    <!-- Prompt Dialog -->
+    <div id="promptDialog" class="dialog-overlay" style="display: none">
+      <div class="dialog-content">
+        <h3>Generate with Prompt</h3>
+        <p class="dialog-description">
+          Add additional instructions for the generation:
+        </p>
+        <textarea
+          id="promptInput"
+          class="prompt-input"
+          placeholder="e.g., 'Add more trees' or 'Make the water darker'"
+          rows="3"
+        ></textarea>
+        <div class="dialog-buttons">
+          <button class="dialog-cancel-btn" onclick="hidePromptDialog()">
+            Cancel
+          </button>
+          <button class="dialog-submit-btn" onclick="submitPromptGeneration()">
+            Generate
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/viewer.js"></script>
+  </body>
+</html>
+
+```
+
+Now add it to the top row after the tools group:
+
+```html
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Generated Tiles Viewer</title>
+    <link rel="stylesheet" href="/static/viewer.css" />
+    <style>
+      /* Dynamic grid sizing based on template variables */
+      .grid {
+        grid-template-columns: repeat({{ nx }}, {{ size_px }}px);
+        grid-auto-rows: {{ size_px }}px;
+      }
+      .tile.placeholder {
+        min-width: {{ size_px }}px;
+        min-height: {{ size_px }}px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Config data for JS -->
+    <script
+      id="app-config"
+      type="application/json"
+      data-config='{"x": {{ x }}, "y": {{ y }}, "nx": {{ nx }}, "ny": {{ ny }}, "size_px": {{ size_px }}, "models": {{ models_config | safe }}, "default_model_id": "{{ default_model_id }}"}'
+    ></script>
+
+    <!-- Toast notification container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Fixed toolbar -->
+    <div class="toolbar">
+      <div class="toolbar-row">
+        <div class="controls">
+          <label>X: <input type="number" id="x" value="{{ x }}" /></label>
+          <label>Y: <input type="number" id="y" value="{{ y }}" /></label>
+          <label
+            >NX: <input type="number" id="nx" value="{{ nx }}" min="1" max="20"
+          /></label>
+          <label
+            >NY: <input type="number" id="ny" value="{{ ny }}" min="1" max="20"
+          /></label>
+          <label
+            >Size:
+            <input type="number" id="sizePx" value="{{ size_px }}" step="32"
+          /></label>
+          <button onclick="goTo()">Go</button>
+          <div class="toggle-group">
+            <label
+              ><input
+                type="checkbox"
+                id="showLines"
+                {%
+                if
+                show_lines
+                %}checked{%
+                endif
+                %}
+                onchange="toggleLines()"
+              />
+              Lines</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                id="showCoords"
+                {%
+                if
+                show_coords
+                %}checked{%
+                endif
+                %}
+                onchange="toggleCoords()"
+              />
+              Coords</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                id="showRender"
+                {%
+                if
+                show_render
+                %}checked{%
+                endif
+                %}
+                onchange="toggleRender()"
+              />
+              Renders</label
+            >
+          </div>
+          <div class="toggle-group model-group">
+            <label class="model-label"
+              >Model:
+              <select id="modelSelect" class="model-select">
+                <!-- Populated by JavaScript -->
+              </select>
+            </label>
+          </div>
+          <div class="toggle-group tools-group">
+            <span class="tools-label">Tools:</span>
+            <button
+              id="selectTool"
+              class="tool-btn"
+              onclick="toggleSelectTool()"
+              title="Select quadrants (S)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"></path>
+                <path d="M13 13l6 6"></path>
+              </svg>
+              Select
+            </button>
+            <button
+              id="fixWaterTool"
+              class="tool-btn"
+              onclick="toggleFixWaterTool()"
+              title="Fix water color (W)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+              </svg>
+              Fix Water
+            </button>
+            <button
+              id="waterFillTool"
+              class="tool-btn"
+              onclick="toggleWaterFillTool()"
+              title="Fill quadrant with water (F)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                <path d="M12 8v8"></path>
+                <path d="M8 12h8"></path>
+              </svg>
+              Water Fill
+            </button>
+          </div>
+          <button
+            id="hardRefreshBtn"
+            class="hard-refresh-btn"
+            onclick="hardRefresh()"
+            title="Clear image cache and reload page"
+          >
+            ↻ Refresh
+          </button>
+        </div>
+        <div class="toolbar-info">
+          <span>({{ x }}, {{ y }}) → ({{ x + nx - 1 }}, {{ y + ny - 1 }})</span>
+          <span id="selectedQuadrantsDisplay" class="selected-quadrants"></span>
+          <span>{{ generation_dir }}</span>
+        </div>
+      </div>
+      <div class="selection-status" id="selectionStatus">
+        <span id="selectionCount">0 quadrants selected</span>
+        <span class="selection-limit">(max 4)</span>
+        <button
+          id="deselectAllBtn"
+          class="deselect-btn"
+          onclick="deselectAll()"
+          disabled
+        >
+          Deselect All
+        </button>
+        <button
+          id="deleteBtn"
+          class="delete-btn"
+          onclick="deleteSelected()"
+          disabled
+        >
+          Delete
+        </button>
+        <button
+          id="renderBtn"
+          class="render-btn"
+          onclick="renderSelected()"
+          disabled
+        >
+          Render
+        </button>
+        <button
+          id="generateBtn"
+          class="generate-btn"
+          onclick="generateSelected()"
+          disabled
+        >
+          Generate
+        </button>
+        <button
+          id="generateWithPromptBtn"
+          class="generate-prompt-btn"
+          onclick="showPromptDialog()"
+          disabled
+          title="Generate with additional prompt text"
+        >
+          + Prompt
+        </button>
+        <button
+          id="generateRectBtn"
+          class="generate-rect-btn"
+          onclick="generateRectangle()"
+          disabled
+          title="Select exactly 2 quadrants to define rectangle corners"
+        >
+          Generate Rectangle
+        </button>
+        <button
+          id="clearQueueBtn"
+          class="clear-queue-btn"
+          onclick="clearQueue()"
+          title="Clear all pending items from the generation queue"
+        >
+          Clear Queue
+        </button>
+      </div>
+      <div class="water-fix-status" id="waterFixStatus" style="display: none">
+        <span class="water-fix-label">Target Color:</span>
+        <span class="color-swatch" id="targetColorSwatch"></span>
+        <span class="color-hex" id="targetColorHex"
+          >Click a quadrant to pick color</span
+        >
+        <span class="water-fix-quadrant" id="waterFixQuadrant"></span>
+        <button
+          id="applyWaterFixBtn"
+          class="apply-water-fix-btn"
+          onclick="applyWaterFix()"
+          disabled
+        >
+          Apply Fix
+        </button>
+        <button
+          id="cancelWaterFixBtn"
+          class="cancel-water-fix-btn"
+          onclick="cancelWaterFix()"
+        >
+          Cancel
+        </button>
+      </div>
+      <div class="water-fill-status" id="waterFillStatus" style="display: none">
+        <span class="water-fill-label">Water Fill:</span>
+        <span class="color-swatch water-color-preview"></span>
+        <span class="water-fill-instruction" id="waterFillInstruction"
+          >Click a quadrant to fill with water</span
+        >
+        <button
+          id="cancelWaterFillBtn"
+          class="cancel-water-fix-btn"
+          onclick="cancelWaterFill()"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+
+    <div
+      class="grid-container {% if show_lines %}show-lines{% endif %} {% if show_coords %}show-coords{% endif %}"
+      id="gridContainer"
+    >
+      <div class="grid">
+        {% for dy in range(ny) %} {% for dx in range(nx) %} {% set qx = x + dx
+        %} {% set qy = y + dy %} {% set has_gen = tiles.get((dx, dy), False) %}
+        <div
+          class="tile {% if not has_gen %}placeholder{% endif %}"
+          data-coords="{{ qx }},{{ qy }}"
+        >
+          <span class="coords">({{ qx }}, {{ qy }})</span>
+          {% if has_gen %}
+          <img
+            src="/tile/{{ qx }}/{{ qy }}?render={{ '1' if show_render else '0' }}"
+            alt="Tile {{ qx }},{{ qy }}"
+          />
+          {% endif %}
+        </div>
+        {% endfor %} {% endfor %}
+      </div>
+    </div>
+
+    <!-- Prompt Dialog -->
+    <div id="promptDialog" class="dialog-overlay" style="display: none">
+      <div class="dialog-content">
+        <h3>Generate with Prompt</h3>
+        <p class="dialog-description">
+          Add additional instructions for the generation:
+        </p>
+        <textarea
+          id="promptInput"
+          class="prompt-input"
+          placeholder="e.g., 'Add more trees' or 'Make the water darker'"
+          rows="3"
+        ></textarea>
+        <div class="dialog-buttons">
+          <button class="dialog-cancel-btn" onclick="hidePromptDialog()">
+            Cancel
+          </button>
+          <button class="dialog-submit-btn" onclick="submitPromptGeneration()">
+            Generate
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/viewer.js"></script>
+  </body>
+</html>
+
+```
+
+Done! The "↻ Refresh" button is now in the top row of controls, placed after the Tools group.
+
+---
+
+**User**
+
+Put it on the *second* row actually, it's making an entirely new row since it doesn't fit
+
+---
+
+**Cursor**
+
+```html
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Generated Tiles Viewer</title>
+    <link rel="stylesheet" href="/static/viewer.css" />
+    <style>
+      /* Dynamic grid sizing based on template variables */
+      .grid {
+        grid-template-columns: repeat({{ nx }}, {{ size_px }}px);
+        grid-auto-rows: {{ size_px }}px;
+      }
+      .tile.placeholder {
+        min-width: {{ size_px }}px;
+        min-height: {{ size_px }}px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Config data for JS -->
+    <script
+      id="app-config"
+      type="application/json"
+      data-config='{"x": {{ x }}, "y": {{ y }}, "nx": {{ nx }}, "ny": {{ ny }}, "size_px": {{ size_px }}, "models": {{ models_config | safe }}, "default_model_id": "{{ default_model_id }}"}'
+    ></script>
+
+    <!-- Toast notification container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Fixed toolbar -->
+    <div class="toolbar">
+      <div class="toolbar-row">
+        <div class="controls">
+          <label>X: <input type="number" id="x" value="{{ x }}" /></label>
+          <label>Y: <input type="number" id="y" value="{{ y }}" /></label>
+          <label
+            >NX: <input type="number" id="nx" value="{{ nx }}" min="1" max="20"
+          /></label>
+          <label
+            >NY: <input type="number" id="ny" value="{{ ny }}" min="1" max="20"
+          /></label>
+          <label
+            >Size:
+            <input type="number" id="sizePx" value="{{ size_px }}" step="32"
+          /></label>
+          <button onclick="goTo()">Go</button>
+          <div class="toggle-group">
+            <label
+              ><input
+                type="checkbox"
+                id="showLines"
+                {%
+                if
+                show_lines
+                %}checked{%
+                endif
+                %}
+                onchange="toggleLines()"
+              />
+              Lines</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                id="showCoords"
+                {%
+                if
+                show_coords
+                %}checked{%
+                endif
+                %}
+                onchange="toggleCoords()"
+              />
+              Coords</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                id="showRender"
+                {%
+                if
+                show_render
+                %}checked{%
+                endif
+                %}
+                onchange="toggleRender()"
+              />
+              Renders</label
+            >
+          </div>
+          <div class="toggle-group model-group">
+            <label class="model-label"
+              >Model:
+              <select id="modelSelect" class="model-select">
+                <!-- Populated by JavaScript -->
+              </select>
+            </label>
+          </div>
+          <div class="toggle-group tools-group">
+            <span class="tools-label">Tools:</span>
+            <button
+              id="selectTool"
+              class="tool-btn"
+              onclick="toggleSelectTool()"
+              title="Select quadrants (S)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"></path>
+                <path d="M13 13l6 6"></path>
+              </svg>
+              Select
+            </button>
+            <button
+              id="fixWaterTool"
+              class="tool-btn"
+              onclick="toggleFixWaterTool()"
+              title="Fix water color (W)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+              </svg>
+              Fix Water
+            </button>
+            <button
+              id="waterFillTool"
+              class="tool-btn"
+              onclick="toggleWaterFillTool()"
+              title="Fill quadrant with water (F)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                <path d="M12 8v8"></path>
+                <path d="M8 12h8"></path>
+              </svg>
+              Water Fill
+            </button>
+          </div>
+        </div>
+        <div class="toolbar-info">
+          <span>({{ x }}, {{ y }}) → ({{ x + nx - 1 }}, {{ y + ny - 1 }})</span>
+          <span id="selectedQuadrantsDisplay" class="selected-quadrants"></span>
+          <span>{{ generation_dir }}</span>
+        </div>
+      </div>
+      <div class="selection-status" id="selectionStatus">
+        <span id="selectionCount">0 quadrants selected</span>
+        <span class="selection-limit">(max 4)</span>
+        <button
+          id="deselectAllBtn"
+          class="deselect-btn"
+          onclick="deselectAll()"
+          disabled
+        >
+          Deselect All
+        </button>
+        <button
+          id="deleteBtn"
+          class="delete-btn"
+          onclick="deleteSelected()"
+          disabled
+        >
+          Delete
+        </button>
+        <button
+          id="renderBtn"
+          class="render-btn"
+          onclick="renderSelected()"
+          disabled
+        >
+          Render
+        </button>
+        <button
+          id="generateBtn"
+          class="generate-btn"
+          onclick="generateSelected()"
+          disabled
+        >
+          Generate
+        </button>
+        <button
+          id="generateWithPromptBtn"
+          class="generate-prompt-btn"
+          onclick="showPromptDialog()"
+          disabled
+          title="Generate with additional prompt text"
+        >
+          + Prompt
+        </button>
+        <button
+          id="generateRectBtn"
+          class="generate-rect-btn"
+          onclick="generateRectangle()"
+          disabled
+          title="Select exactly 2 quadrants to define rectangle corners"
+        >
+          Generate Rectangle
+        </button>
+        <button
+          id="clearQueueBtn"
+          class="clear-queue-btn"
+          onclick="clearQueue()"
+          title="Clear all pending items from the generation queue"
+        >
+          Clear Queue
+        </button>
+      </div>
+      <div class="water-fix-status" id="waterFixStatus" style="display: none">
+        <span class="water-fix-label">Target Color:</span>
+        <span class="color-swatch" id="targetColorSwatch"></span>
+        <span class="color-hex" id="targetColorHex"
+          >Click a quadrant to pick color</span
+        >
+        <span class="water-fix-quadrant" id="waterFixQuadrant"></span>
+        <button
+          id="applyWaterFixBtn"
+          class="apply-water-fix-btn"
+          onclick="applyWaterFix()"
+          disabled
+        >
+          Apply Fix
+        </button>
+        <button
+          id="cancelWaterFixBtn"
+          class="cancel-water-fix-btn"
+          onclick="cancelWaterFix()"
+        >
+          Cancel
+        </button>
+      </div>
+      <div class="water-fill-status" id="waterFillStatus" style="display: none">
+        <span class="water-fill-label">Water Fill:</span>
+        <span class="color-swatch water-color-preview"></span>
+        <span class="water-fill-instruction" id="waterFillInstruction"
+          >Click a quadrant to fill with water</span
+        >
+        <button
+          id="cancelWaterFillBtn"
+          class="cancel-water-fix-btn"
+          onclick="cancelWaterFill()"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+
+    <div
+      class="grid-container {% if show_lines %}show-lines{% endif %} {% if show_coords %}show-coords{% endif %}"
+      id="gridContainer"
+    >
+      <div class="grid">
+        {% for dy in range(ny) %} {% for dx in range(nx) %} {% set qx = x + dx
+        %} {% set qy = y + dy %} {% set has_gen = tiles.get((dx, dy), False) %}
+        <div
+          class="tile {% if not has_gen %}placeholder{% endif %}"
+          data-coords="{{ qx }},{{ qy }}"
+        >
+          <span class="coords">({{ qx }}, {{ qy }})</span>
+          {% if has_gen %}
+          <img
+            src="/tile/{{ qx }}/{{ qy }}?render={{ '1' if show_render else '0' }}"
+            alt="Tile {{ qx }},{{ qy }}"
+          />
+          {% endif %}
+        </div>
+        {% endfor %} {% endfor %}
+      </div>
+    </div>
+
+    <!-- Prompt Dialog -->
+    <div id="promptDialog" class="dialog-overlay" style="display: none">
+      <div class="dialog-content">
+        <h3>Generate with Prompt</h3>
+        <p class="dialog-description">
+          Add additional instructions for the generation:
+        </p>
+        <textarea
+          id="promptInput"
+          class="prompt-input"
+          placeholder="e.g., 'Add more trees' or 'Make the water darker'"
+          rows="3"
+        ></textarea>
+        <div class="dialog-buttons">
+          <button class="dialog-cancel-btn" onclick="hidePromptDialog()">
+            Cancel
+          </button>
+          <button class="dialog-submit-btn" onclick="submitPromptGeneration()">
+            Generate
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/viewer.js"></script>
+  </body>
+</html>
+
+```
+
+```html
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Generated Tiles Viewer</title>
+    <link rel="stylesheet" href="/static/viewer.css" />
+    <style>
+      /* Dynamic grid sizing based on template variables */
+      .grid {
+        grid-template-columns: repeat({{ nx }}, {{ size_px }}px);
+        grid-auto-rows: {{ size_px }}px;
+      }
+      .tile.placeholder {
+        min-width: {{ size_px }}px;
+        min-height: {{ size_px }}px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Config data for JS -->
+    <script
+      id="app-config"
+      type="application/json"
+      data-config='{"x": {{ x }}, "y": {{ y }}, "nx": {{ nx }}, "ny": {{ ny }}, "size_px": {{ size_px }}, "models": {{ models_config | safe }}, "default_model_id": "{{ default_model_id }}"}'
+    ></script>
+
+    <!-- Toast notification container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Fixed toolbar -->
+    <div class="toolbar">
+      <div class="toolbar-row">
+        <div class="controls">
+          <label>X: <input type="number" id="x" value="{{ x }}" /></label>
+          <label>Y: <input type="number" id="y" value="{{ y }}" /></label>
+          <label
+            >NX: <input type="number" id="nx" value="{{ nx }}" min="1" max="20"
+          /></label>
+          <label
+            >NY: <input type="number" id="ny" value="{{ ny }}" min="1" max="20"
+          /></label>
+          <label
+            >Size:
+            <input type="number" id="sizePx" value="{{ size_px }}" step="32"
+          /></label>
+          <button onclick="goTo()">Go</button>
+          <div class="toggle-group">
+            <label
+              ><input
+                type="checkbox"
+                id="showLines"
+                {%
+                if
+                show_lines
+                %}checked{%
+                endif
+                %}
+                onchange="toggleLines()"
+              />
+              Lines</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                id="showCoords"
+                {%
+                if
+                show_coords
+                %}checked{%
+                endif
+                %}
+                onchange="toggleCoords()"
+              />
+              Coords</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                id="showRender"
+                {%
+                if
+                show_render
+                %}checked{%
+                endif
+                %}
+                onchange="toggleRender()"
+              />
+              Renders</label
+            >
+          </div>
+          <div class="toggle-group model-group">
+            <label class="model-label"
+              >Model:
+              <select id="modelSelect" class="model-select">
+                <!-- Populated by JavaScript -->
+              </select>
+            </label>
+          </div>
+          <div class="toggle-group tools-group">
+            <span class="tools-label">Tools:</span>
+            <button
+              id="selectTool"
+              class="tool-btn"
+              onclick="toggleSelectTool()"
+              title="Select quadrants (S)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"></path>
+                <path d="M13 13l6 6"></path>
+              </svg>
+              Select
+            </button>
+            <button
+              id="fixWaterTool"
+              class="tool-btn"
+              onclick="toggleFixWaterTool()"
+              title="Fix water color (W)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+              </svg>
+              Fix Water
+            </button>
+            <button
+              id="waterFillTool"
+              class="tool-btn"
+              onclick="toggleWaterFillTool()"
+              title="Fill quadrant with water (F)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                <path d="M12 8v8"></path>
+                <path d="M8 12h8"></path>
+              </svg>
+              Water Fill
+            </button>
+          </div>
+        </div>
+        <div class="toolbar-info">
+          <span>({{ x }}, {{ y }}) → ({{ x + nx - 1 }}, {{ y + ny - 1 }})</span>
+          <span id="selectedQuadrantsDisplay" class="selected-quadrants"></span>
+          <span>{{ generation_dir }}</span>
+        </div>
+      </div>
+      <div class="selection-status" id="selectionStatus">
+        <span id="selectionCount">0 quadrants selected</span>
+        <span class="selection-limit">(max 4)</span>
+        <button
+          id="deselectAllBtn"
+          class="deselect-btn"
+          onclick="deselectAll()"
+          disabled
+        >
+          Deselect All
+        </button>
+        <button
+          id="deleteBtn"
+          class="delete-btn"
+          onclick="deleteSelected()"
+          disabled
+        >
+          Delete
+        </button>
+        <button
+          id="renderBtn"
+          class="render-btn"
+          onclick="renderSelected()"
+          disabled
+        >
+          Render
+        </button>
+        <button
+          id="generateBtn"
+          class="generate-btn"
+          onclick="generateSelected()"
+          disabled
+        >
+          Generate
+        </button>
+        <button
+          id="generateWithPromptBtn"
+          class="generate-prompt-btn"
+          onclick="showPromptDialog()"
+          disabled
+          title="Generate with additional prompt text"
+        >
+          + Prompt
+        </button>
+        <button
+          id="generateRectBtn"
+          class="generate-rect-btn"
+          onclick="generateRectangle()"
+          disabled
+          title="Select exactly 2 quadrants to define rectangle corners"
+        >
+          Generate Rectangle
+        </button>
+        <button
+          id="clearQueueBtn"
+          class="clear-queue-btn"
+          onclick="clearQueue()"
+          title="Clear all pending items from the generation queue"
+        >
+          Clear Queue
+        </button>
+        <button
+          id="hardRefreshBtn"
+          class="hard-refresh-btn"
+          onclick="hardRefresh()"
+          title="Clear image cache and reload page"
+        >
+          ↻ Refresh
+        </button>
+      </div>
+      <div class="water-fix-status" id="waterFixStatus" style="display: none">
+        <span class="water-fix-label">Target Color:</span>
+        <span class="color-swatch" id="targetColorSwatch"></span>
+        <span class="color-hex" id="targetColorHex"
+          >Click a quadrant to pick color</span
+        >
+        <span class="water-fix-quadrant" id="waterFixQuadrant"></span>
+        <button
+          id="applyWaterFixBtn"
+          class="apply-water-fix-btn"
+          onclick="applyWaterFix()"
+          disabled
+        >
+          Apply Fix
+        </button>
+        <button
+          id="cancelWaterFixBtn"
+          class="cancel-water-fix-btn"
+          onclick="cancelWaterFix()"
+        >
+          Cancel
+        </button>
+      </div>
+      <div class="water-fill-status" id="waterFillStatus" style="display: none">
+        <span class="water-fill-label">Water Fill:</span>
+        <span class="color-swatch water-color-preview"></span>
+        <span class="water-fill-instruction" id="waterFillInstruction"
+          >Click a quadrant to fill with water</span
+        >
+        <button
+          id="cancelWaterFillBtn"
+          class="cancel-water-fix-btn"
+          onclick="cancelWaterFill()"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+
+    <div
+      class="grid-container {% if show_lines %}show-lines{% endif %} {% if show_coords %}show-coords{% endif %}"
+      id="gridContainer"
+    >
+      <div class="grid">
+        {% for dy in range(ny) %} {% for dx in range(nx) %} {% set qx = x + dx
+        %} {% set qy = y + dy %} {% set has_gen = tiles.get((dx, dy), False) %}
+        <div
+          class="tile {% if not has_gen %}placeholder{% endif %}"
+          data-coords="{{ qx }},{{ qy }}"
+        >
+          <span class="coords">({{ qx }}, {{ qy }})</span>
+          {% if has_gen %}
+          <img
+            src="/tile/{{ qx }}/{{ qy }}?render={{ '1' if show_render else '0' }}"
+            alt="Tile {{ qx }},{{ qy }}"
+          />
+          {% endif %}
+        </div>
+        {% endfor %} {% endfor %}
+      </div>
+    </div>
+
+    <!-- Prompt Dialog -->
+    <div id="promptDialog" class="dialog-overlay" style="display: none">
+      <div class="dialog-content">
+        <h3>Generate with Prompt</h3>
+        <p class="dialog-description">
+          Add additional instructions for the generation:
+        </p>
+        <textarea
+          id="promptInput"
+          class="prompt-input"
+          placeholder="e.g., 'Add more trees' or 'Make the water darker'"
+          rows="3"
+        ></textarea>
+        <div class="dialog-buttons">
+          <button class="dialog-cancel-btn" onclick="hidePromptDialog()">
+            Cancel
+          </button>
+          <button class="dialog-submit-btn" onclick="submitPromptGeneration()">
+            Generate
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/viewer.js"></script>
+  </body>
+</html>
+
+```
+
+Done! Moved the "↻ Refresh" button back to the second row, next to the "Clear Queue" button.
+
+---
+
+**User**
+
+OK next - add a feature to "flag" a given quadrant(s) - if the user selects the "flag" button on the frontend, save a "flagged" column to the database for all quadrants in that selection
+
+---
+
+**Cursor**
+
+I'll need to add the flag feature across the frontend and backend. Let me first explore the database structure to understand how quadrants are stored:
+
+Now I'll implement the flag feature. Let me start by adding the API endpoint and database migration in `app.py`:
+
+```python
+"""
+Simple web app to view generated tiles in an nx×ny grid.
+
+Usage:
+  uv run python src/isometric_nyc/e2e_generation/view_generations.py <generation_dir>
+
+Then open http://localhost:8080/?x=0&y=0 in your browser.
+
+URL Parameters:
+  x, y   - Starting coordinates (default: 0, 0)
+  nx, ny - Grid size nx×ny (default: 2, max: 20)
+  lines  - Show grid lines: 1=on, 0=off (default: 1)
+  coords - Show coordinates: 1=on, 0=off (default: 1)
+  render - Show renders instead of generations: 1=renders, 0=generations (default: 0)
+
+Keyboard shortcuts:
+  Arrow keys - Navigate the grid
+  L          - Toggle lines
+  C          - Toggle coords
+  R          - Toggle render/generation mode
+  G          - Generate selected quadrants
+  S          - Toggle select tool
+"""
+
+import argparse
+import hashlib
+import json
+import logging
+import sqlite3
+import threading
+import time
+import traceback
+from pathlib import Path
+
+from dotenv import load_dotenv
+from flask import Flask, Response, jsonify, render_template, request
+
+from isometric_nyc.e2e_generation.generate_omni import run_generation_for_quadrants
+from isometric_nyc.e2e_generation.make_rectangle_plan import (
+  Point,
+  RectBounds,
+  create_rectangle_plan,
+  get_plan_summary,
+  validate_plan,
+)
+from isometric_nyc.e2e_generation.model_config import AppConfig, load_app_config
+from isometric_nyc.e2e_generation.queue_db import (
+  QueueItemType,
+  add_to_queue,
+  cancel_processing_items,
+  cancel_queue_item_by_id,
+  clear_completed_items,
+  clear_pending_queue,
+  get_next_pending_item_for_available_model,
+  get_pending_queue,
+  get_queue_position_for_model,
+  get_queue_status,
+  get_queue_status_by_model,
+  init_queue_table,
+  mark_item_complete,
+  mark_item_error,
+  mark_item_processing,
+  reset_all_processing_items,
+)
+from isometric_nyc.e2e_generation.replace_color import hex_to_rgb
+from isometric_nyc.e2e_generation.replace_color import (
+  process_quadrant as process_color_replacement,
+)
+from isometric_nyc.e2e_generation.shared import DEFAULT_WEB_PORT, get_generation_config
+from isometric_nyc.e2e_generation.web_renderer import (
+  start_global_renderer,
+  stop_global_renderer,
+)
+
+# Load environment variables
+load_dotenv()
+
+# Setup Flask with template and static folders relative to this file
+VIEWER_DIR = Path(__file__).parent
+app = Flask(
+  __name__,
+  template_folder=str(VIEWER_DIR / "templates"),
+  static_folder=str(VIEWER_DIR / "static"),
+)
+
+
+# =============================================================================
+# Logging Configuration - Suppress noisy tile request logs
+# =============================================================================
+class TileRequestFilter(logging.Filter):
+  """Filter out noisy tile and static file requests from logs."""
+
+  def filter(self, record: logging.LogRecord) -> bool:
+    message = record.getMessage()
+    # Filter out tile requests, static files, and api/status polling
+    if "/tile/" in message:
+      return False
+    if "/static/" in message:
+      return False
+    if "/api/status" in message:
+      return False
+    return True
+
+
+# Apply filter to werkzeug logger (Flask's HTTP request logger)
+werkzeug_logger = logging.getLogger("werkzeug")
+werkzeug_logger.addFilter(TileRequestFilter())
+
+# Generation lock - protects generation_state updates
+generation_lock = threading.Lock()
+
+# Per-model generation states
+# Key is model_id (None for default), value is state dict
+model_generation_states: dict[str | None, dict] = {}
+
+# Legacy global generation_state for backwards compatibility with API
+generation_state = {
+  "is_generating": False,
+  "quadrants": [],  # List of quadrant coords being generated
+  "status": "idle",  # idle, validating, rendering, uploading, generating, saving, complete, error
+  "message": "",
+  "error": None,
+  "started_at": None,
+  "current_item_id": None,
+  "model_id": None,
+}
+
+# Track which models are currently processing
+busy_models: set[str | None] = set()
+busy_models_lock = threading.Lock()
+
+# Queue worker thread
+queue_worker_thread: threading.Thread | None = None
+queue_worker_running = False
+
+# Cancellation flag - set to True to cancel all generations
+generation_cancelled = False
+
+# Will be set by main()
+GENERATION_DIR: Path | None = None
+WEB_SERVER_PORT: int = DEFAULT_WEB_PORT
+APP_CONFIG: AppConfig | None = None
+
+
+def get_db_connection() -> sqlite3.Connection:
+  """Get a connection to the quadrants database."""
+  if GENERATION_DIR is None:
+    raise RuntimeError("GENERATION_DIR not set")
+  db_path = GENERATION_DIR / "quadrants.db"
+  return sqlite3.connect(db_path)
+
+
+def ensure_flagged_column_exists(conn: sqlite3.Connection) -> None:
+  """Ensure the flagged column exists in the quadrants table (migration)."""
+  cursor = conn.cursor()
+  # Check if column exists
+  cursor.execute("PRAGMA table_info(quadrants)")
+  columns = [row[1] for row in cursor.fetchall()]
+  if "flagged" not in columns:
+    cursor.execute("ALTER TABLE quadrants ADD COLUMN flagged INTEGER DEFAULT 0")
+    conn.commit()
+    print("📝 Added 'flagged' column to quadrants table")
+
+
+def get_quadrant_generation(x: int, y: int) -> bytes | None:
+  """Get the generation bytes for a quadrant."""
+  conn = get_db_connection()
+  try:
+    cursor = conn.cursor()
+    cursor.execute(
+      "SELECT generation FROM quadrants WHERE quadrant_x = ? AND quadrant_y = ?",
+      (x, y),
+    )
+    row = cursor.fetchone()
+    return row[0] if row and row[0] else None
+  finally:
+    conn.close()
+
+
+def get_quadrant_render(x: int, y: int) -> bytes | None:
+  """Get the render bytes for a quadrant."""
+  conn = get_db_connection()
+  try:
+    cursor = conn.cursor()
+    cursor.execute(
+      "SELECT render FROM quadrants WHERE quadrant_x = ? AND quadrant_y = ?",
+      (x, y),
+    )
+    row = cursor.fetchone()
+    return row[0] if row and row[0] else None
+  finally:
+    conn.close()
+
+
+def get_quadrant_data(x: int, y: int, use_render: bool = False) -> bytes | None:
+  """Get either render or generation bytes for a quadrant."""
+  if use_render:
+    return get_quadrant_render(x, y)
+  return get_quadrant_generation(x, y)
+
+
+@app.route("/")
+def index():
+  """Main page showing nx×ny grid of tiles."""
+  x = request.args.get("x", 0, type=int)
+  y = request.args.get("y", 0, type=int)
+  # Default fallback if nx/ny not present
+  n_default = request.args.get("n", 2, type=int)
+  nx = request.args.get("nx", n_default, type=int)
+  ny = request.args.get("ny", n_default, type=int)
+  size_px = request.args.get("size", 256, type=int)
+  show_lines = request.args.get("lines", "1") == "1"
+  show_coords = request.args.get("coords", "1") == "1"
+  show_render = request.args.get("render", "0") == "1"
+
+  # Clamp nx/ny to reasonable bounds
+  nx = max(1, min(nx, 20))
+  ny = max(1, min(ny, 20))
+
+  # Check which tiles have data (generation or render based on mode)
+  tiles = {}
+  for dx in range(nx):
+    for dy in range(ny):
+      qx, qy = x + dx, y + dy
+      data = get_quadrant_data(qx, qy, use_render=show_render)
+      tiles[(dx, dy)] = data is not None
+
+  # Get model configuration for the frontend
+  models_config = []
+  default_model_id = None
+  if APP_CONFIG:
+    models_config = [m.to_dict() for m in APP_CONFIG.models]
+    default_model_id = APP_CONFIG.default_model_id
+
+  return render_template(
+    "viewer.html",
+    x=x,
+    y=y,
+    nx=nx,
+    ny=ny,
+    size_px=size_px,
+    show_lines=show_lines,
+    show_coords=show_coords,
+    show_render=show_render,
+    tiles=tiles,
+    generation_dir=str(GENERATION_DIR),
+    models_config=json.dumps(models_config),
+    default_model_id=default_model_id,
+  )
+
+
+@app.route("/tile/<x>/<y>")
+def tile(x: str, y: str):
+  """Serve a tile image (generation or render based on query param)."""
+  try:
+    qx, qy = int(x), int(y)
+  except ValueError:
+    return Response("Invalid coordinates", status=400)
+
+  use_render = request.args.get("render", "0") == "1"
+  data = get_quadrant_data(qx, qy, use_render=use_render)
+
+  if data is None:
+    return Response("Not found", status=404)
+
+  # Generate ETag from content hash for caching
+  etag = hashlib.md5(data).hexdigest()
+
+  # Check if client has cached version
+  if_none_match = request.headers.get("If-None-Match")
+  if if_none_match and if_none_match == etag:
+    return Response(status=304)  # Not Modified
+
+  response = Response(data, mimetype="image/png")
+  response.headers["ETag"] = etag
+  response.headers["Cache-Control"] = "public, max-age=3600"  # Cache for 1 hour
+  return response
+
+
+# =============================================================================
+# Generation API
+# =============================================================================
+
+
+def update_generation_state(
+  status: str, message: str = "", error: str | None = None
+) -> None:
+  """Update the global generation state."""
+  global generation_state
+  generation_state["status"] = status
+  generation_state["message"] = message
+  if error:
+    generation_state["error"] = error
+
+
+def calculate_context_quadrants(
+  conn: sqlite3.Connection,
+  selected_quadrants: list[tuple[int, int]],
+) -> list[tuple[int, int]]:
+  """
+  Calculate context quadrants lazily at execution time.
+
+  This determines which adjacent quadrants have existing generations
+  that can provide context for the current generation.
+
+  For a valid generation, we need at least a 2x2 block where all 4 quadrants
+  are either being generated or already generated.
+
+  Args:
+    conn: Database connection
+    selected_quadrants: The quadrants being generated
+
+  Returns:
+    List of quadrant coordinates that have existing generations and can
+    provide context for the current generation.
+  """
+  from isometric_nyc.e2e_generation.shared import (
+    get_quadrant_generation as shared_get_quadrant_generation,
+  )
+
+  selected_set = set(selected_quadrants)
+  context = []
+
+  # Find all quadrants adjacent to the selection that have generations
+  # Check all potential 2x2 blocks that include any selected quadrant
+  checked = set()
+
+  for qx, qy in selected_quadrants:
+    # Check all neighbors that could form a 2x2 block with this quadrant
+    # A quadrant can be in 4 different 2x2 blocks (as TL, TR, BL, BR corner)
+    potential_context = [
+      # Neighbors for 2x2 where (qx, qy) is top-left
+      (qx + 1, qy),
+      (qx, qy + 1),
+      (qx + 1, qy + 1),
+      # Neighbors for 2x2 where (qx, qy) is top-right
+      (qx - 1, qy),
+      (qx - 1, qy + 1),
+      (qx, qy + 1),
+      # Neighbors for 2x2 where (qx, qy) is bottom-left
+      (qx, qy - 1),
+      (qx + 1, qy - 1),
+      (qx + 1, qy),
+      # Neighbors for 2x2 where (qx, qy) is bottom-right
+      (qx - 1, qy - 1),
+      (qx, qy - 1),
+      (qx - 1, qy),
+    ]
+
+    for nx, ny in potential_context:
+      coord = (nx, ny)
+      if coord in checked or coord in selected_set:
+        continue
+      checked.add(coord)
+
+      # Check if this quadrant has an existing generation
+      gen = shared_get_quadrant_generation(conn, nx, ny)
+      if gen is not None:
+        context.append(coord)
+
+  return context
+
+
+def run_generation(
+  conn: sqlite3.Connection,
+  config: dict,
+  selected_quadrants: list[tuple[int, int]],
+  model_id: str | None = None,
+  context_quadrants: list[tuple[int, int]] | None = None,
+  prompt: str | None = None,
+) -> dict:
+  """
+  Run the full generation pipeline for selected quadrants.
+
+  This is a wrapper around run_generation_for_quadrants that ensures
+  the web server is running and updates the global generation state.
+
+  Args:
+    conn: Database connection
+    config: Generation config dict
+    selected_quadrants: List of (x, y) quadrant coordinates to generate
+    model_id: Optional model ID for generation
+    context_quadrants: Optional list of (x, y) quadrant coordinates to use as
+      context. These quadrants provide surrounding pixel art context for the
+      generation.
+    prompt: Optional additional prompt text for generation
+
+  Returns dict with success status and message/error.
+  """
+  # Get model configuration if specified
+  model_config = None
+  if model_id and APP_CONFIG:
+    model_config = APP_CONFIG.get_model(model_id)
+  elif APP_CONFIG:
+    model_config = APP_CONFIG.get_default_model()
+
+  # Create status callback that updates global state
+  def status_callback(status: str, message: str) -> None:
+    update_generation_state(status, message)
+
+  # Use the shared library function
+  return run_generation_for_quadrants(
+    conn=conn,
+    config=config,
+    selected_quadrants=selected_quadrants,
+    port=WEB_SERVER_PORT,
+    status_callback=status_callback,
+    model_config=model_config,
+    context_quadrants=context_quadrants,
+    prompt=prompt,
+  )
+
+
+def render_quadrant_with_renderer(
+  conn: sqlite3.Connection,
+  config: dict,
+  x: int,
+  y: int,
+) -> bytes | None:
+  """
+  Render a quadrant using the global web renderer.
+
+  Returns the PNG bytes of the rendered quadrant.
+  """
+  from isometric_nyc.e2e_generation.shared import (
+    ensure_quadrant_exists,
+    save_quadrant_render,
+  )
+  from isometric_nyc.e2e_generation.web_renderer import get_web_renderer
+
+  # Ensure the quadrant exists in the database
+  quadrant = ensure_quadrant_exists(conn, config, x, y)
+
+  print(f"   🎨 Rendering tile for quadrant ({x}, {y})...")
+
+  renderer = get_web_renderer(port=WEB_SERVER_PORT)
+
+  # Render the tile
+  quadrant_images = renderer.render_quadrant(
+    quadrant_x=x,
+    quadrant_y=y,
+    lat=quadrant["lat"],
+    lng=quadrant["lng"],
+    width_px=config["width_px"],
+    height_px=config["height_px"],
+    camera_azimuth_degrees=config["camera_azimuth_degrees"],
+    camera_elevation_degrees=config["camera_elevation_degrees"],
+    view_height_meters=config.get("view_height_meters", 200),
+  )
+
+  # Save all quadrants to database
+  result_bytes = None
+  for (dx, dy), png_bytes in quadrant_images.items():
+    qx, qy = x + dx, y + dy
+    save_quadrant_render(conn, config, qx, qy, png_bytes)
+    print(f"      ✓ Saved render for ({qx}, {qy})")
+
+    # Return the specific quadrant we were asked for
+    if qx == x and qy == y:
+      result_bytes = png_bytes
+
+  return result_bytes
+
+
+def process_queue_item_from_db(item_id: int) -> dict:
+  """Process a single queue item from the database."""
+  global generation_state
+
+  conn = get_db_connection()
+  try:
+    # Get item details
+    cursor = conn.cursor()
+    cursor.execute(
+      """
+      SELECT item_type, quadrants, model_id, context_quadrants, prompt
+      FROM generation_queue
+      WHERE id = ?
+      """,
+      (item_id,),
+    )
+    row = cursor.fetchone()
+    if not row:
+      return {"success": False, "error": "Item not found"}
+
+    item_type = QueueItemType(row[0])
+    quadrants = json.loads(row[1])
+    model_id = row[2]
+    context_quadrants_raw = json.loads(row[3]) if row[3] else None
+    prompt = row[4]
+
+    # Convert to list of tuples
+    selected_quadrants = [(q[0], q[1]) for q in quadrants]
+
+    # Calculate context lazily if not explicitly provided
+    # This ensures we use the most up-to-date context based on what's
+    # actually generated at execution time (not queue time)
+    if context_quadrants_raw:
+      context_quadrants = [(q[0], q[1]) for q in context_quadrants_raw]
+      print(
+        f"   📋 Using explicit context from queue: {len(context_quadrants)} quadrant(s)"
+      )
+    else:
+      # Calculate context lazily based on current generation state
+      context_quadrants = calculate_context_quadrants(conn, selected_quadrants)
+      if context_quadrants:
+        print(f"   📋 Calculated lazy context: {len(context_quadrants)} quadrant(s)")
+      else:
+        print(
+          "   📋 No context quadrants (2x2 self-contained or no adjacent generations)"
+        )
+
+    # Mark item as processing
+    mark_item_processing(conn, item_id)
+
+    # Initialize generation state
+    generation_state["is_generating"] = True
+    generation_state["quadrants"] = selected_quadrants
+    generation_state["status"] = (
+      "starting" if item_type == QueueItemType.GENERATE else "rendering"
+    )
+    generation_state["message"] = f"Starting {item_type.value}..."
+    generation_state["error"] = None
+    generation_state["started_at"] = time.time()
+    generation_state["current_item_id"] = item_id
+    generation_state["model_id"] = model_id
+
+    print(f"\n{'=' * 60}")
+    emoji = "🎯" if item_type == QueueItemType.GENERATE else "🎨"
+    print(
+      f"{emoji} {item_type.value.title()} request (item {item_id}): {selected_quadrants}"
+    )
+    if model_id:
+      print(f"   Model: {model_id}")
+    if context_quadrants:
+      print(f"   Context: {context_quadrants}")
+    if prompt:
+      print(f"   Prompt: {prompt}")
+    print(f"{'=' * 60}")
+
+    config = get_generation_config(conn)
+
+    if item_type == QueueItemType.GENERATE:
+      result = run_generation(
+        conn, config, selected_quadrants, model_id, context_quadrants, prompt
+      )
+      if result["success"]:
+        print(f"✅ Generation complete: {result['message']}")
+        generation_state["status"] = "complete"
+        generation_state["message"] = result["message"]
+        mark_item_complete(conn, item_id, result["message"])
+      else:
+        print(f"❌ Generation failed: {result['error']}")
+        generation_state["status"] = "error"
+        generation_state["error"] = result["error"]
+        mark_item_error(conn, item_id, result["error"])
+      return result
+
+    else:  # render
+      update_generation_state("rendering", "Starting render...")
+
+      rendered_count = 0
+      total = len(selected_quadrants)
+
+      for i, (qx, qy) in enumerate(selected_quadrants):
+        update_generation_state(
+          "rendering", f"Rendering quadrant ({qx}, {qy})... ({i + 1}/{total})"
+        )
+        print(f"   🎨 Rendering quadrant ({qx}, {qy})...")
+
+        try:
+          render_bytes = render_quadrant_with_renderer(conn, config, qx, qy)
+          if render_bytes:
+            rendered_count += 1
+            print(f"      ✓ Rendered quadrant ({qx}, {qy})")
+          else:
+            print(f"      ⚠️ No render output for ({qx}, {qy})")
+        except Exception as e:
+          print(f"      ❌ Failed to render ({qx}, {qy}): {e}")
+          traceback.print_exc()
+
+      result_message = f"Rendered {rendered_count} quadrant(s)"
+      update_generation_state("complete", result_message)
+      print(f"✅ Render complete: {rendered_count}/{total} quadrants")
+      mark_item_complete(conn, item_id, result_message)
+
+      return {
+        "success": True,
+        "message": f"Rendered {rendered_count} quadrant{'s' if rendered_count != 1 else ''}",
+        "quadrants": selected_quadrants,
+      }
+
+  except Exception as e:
+    traceback.print_exc()
+    generation_state["status"] = "error"
+    generation_state["error"] = str(e)
+    mark_item_error(conn, item_id, str(e))
+    return {"success": False, "error": str(e)}
+  finally:
+    conn.close()
+
+
+def process_model_item(item_id: int, model_id: str | None):
+  """Process a single queue item for a specific model in its own thread."""
+  global generation_state, generation_cancelled
+
+  try:
+    # Check cancellation before starting
+    if generation_cancelled:
+      print(f"⚠️  Item {item_id} cancelled before processing")
+      return
+
+    process_queue_item_from_db(item_id)
+
+  except Exception as e:
+    print(f"❌ Model worker error for {model_id}: {e}")
+    traceback.print_exc()
+  finally:
+    # Remove model from busy set
+    with busy_models_lock:
+      busy_models.discard(model_id)
+
+    # Update global state if this was the active model
+    with generation_lock:
+      if generation_state.get("model_id") == model_id:
+        generation_state["is_generating"] = False
+        generation_state["current_item_id"] = None
+
+    # Remove from per-model states
+    if model_id in model_generation_states:
+      del model_generation_states[model_id]
+
+
+def queue_worker():
+  """Background worker that processes the generation queue from the database.
+
+  This worker supports parallel processing of different models - each model
+  can have one active generation at a time, but different models can run
+  concurrently.
+  """
+  global generation_state, queue_worker_running, generation_cancelled
+
+  print("🔄 Queue worker started (parallel model support)")
+
+  while queue_worker_running:
+    conn = None
+    try:
+      # Check if we were cancelled
+      if generation_cancelled:
+        print("⚠️  Generation cancelled, resetting flags...")
+        generation_cancelled = False
+        with generation_lock:
+          generation_state["is_generating"] = False
+          generation_state["current_item_id"] = None
+        with busy_models_lock:
+          busy_models.clear()
+        model_generation_states.clear()
+        time.sleep(0.5)
+        continue
+
+      conn = get_db_connection()
+
+      # Get current busy models
+      with busy_models_lock:
+        current_busy = busy_models.copy()
+
+      # Get next pending item for an available model
+      item = get_next_pending_item_for_available_model(conn, current_busy)
+
+      if item is None:
+        # No items available (either queue empty or all models busy)
+        conn.close()
+        time.sleep(0.5)
+        continue
+
+      item_id = item.id
+      model_id = item.model_id
+      conn.close()
+      conn = None
+
+      # Mark this model as busy
+      with busy_models_lock:
+        if model_id in busy_models:
+          # Another thread grabbed this model, skip
+          continue
+        busy_models.add(model_id)
+
+      # Update global state for display (use most recent)
+      with generation_lock:
+        generation_state["is_generating"] = True
+        generation_state["model_id"] = model_id
+
+      # Initialize per-model state
+      model_generation_states[model_id] = {
+        "is_generating": True,
+        "item_id": item_id,
+        "started_at": time.time(),
+      }
+
+      # Spawn a thread to process this model's item
+      model_name = model_id or "default"
+      worker_thread = threading.Thread(
+        target=process_model_item,
+        args=(item_id, model_id),
+        name=f"model-worker-{model_name}",
+        daemon=True,
+      )
+      worker_thread.start()
+
+      print(f"🚀 Started worker for model '{model_name}' (item {item_id})")
+
+      # Small delay before checking for more work
+      time.sleep(0.2)
+
+    except Exception as e:
+      print(f"❌ Queue worker error: {e}")
+      traceback.print_exc()
+      time.sleep(1.0)
+    finally:
+      if conn:
+        conn.close()
+
+  print("🛑 Queue worker stopped")
+
+
+def start_queue_worker():
+  """Start the queue worker thread if not already running."""
+  global queue_worker_thread, queue_worker_running
+
+  if queue_worker_thread is not None and queue_worker_thread.is_alive():
+    return  # Already running
+
+  queue_worker_running = True
+  queue_worker_thread = threading.Thread(target=queue_worker, daemon=True)
+  queue_worker_thread.start()
+
+
+def stop_queue_worker():
+  """Stop the queue worker thread."""
+  global queue_worker_running
+  queue_worker_running = False
+
+
+def add_to_queue_db(
+  quadrants: list[tuple[int, int]],
+  item_type: str,
+  model_id: str | None = None,
+  context_quadrants: list[tuple[int, int]] | None = None,
+  prompt: str | None = None,
+) -> dict:
+  """Add a generation/render request to the database queue."""
+  conn = get_db_connection()
+  try:
+    queue_item = add_to_queue(
+      conn,
+      QueueItemType(item_type),
+      quadrants,
+      model_id,
+      context_quadrants,
+      prompt,
+    )
+
+    # Get model-specific queue position
+    model_position = get_queue_position_for_model(conn, queue_item.id, model_id)
+
+    # Get total queue length for backwards compatibility
+    pending = get_pending_queue(conn)
+    total_position = len(pending)
+
+    # Ensure the queue worker is running
+    start_queue_worker()
+
+    return {
+      "success": True,
+      "queued": True,
+      "position": model_position,  # Position within this model's queue
+      "total_position": total_position,  # Overall queue position
+      "model_id": model_id,
+      "item_id": queue_item.id,
+      "message": f"Added to queue at position {model_position}",
+    }
+  finally:
+    conn.close()
+
+
+@app.route("/api/status")
+def api_status():
+  """API endpoint to check generation status including queue info."""
+  conn = get_db_connection()
+  try:
+    queue_status = get_queue_status(conn)
+    model_status = get_queue_status_by_model(conn)
+
+    # Get list of currently busy models
+    with busy_models_lock:
+      active_models = list(busy_models)
+
+    # Build the response
+    response = {
+      **generation_state,
+      "queue": queue_status["pending_items"],
+      "queue_length": queue_status["pending_count"],
+      # Per-model queue info
+      "queue_by_model": model_status["by_model"],
+      "processing_models": model_status["processing_models"],
+      # All currently processing models (for parallel processing)
+      "active_models": active_models,
+      "active_model_count": len(active_models),
+      # All quadrants being processed across all models
+      "all_processing_quadrants": model_status["all_processing_quadrants"],
+    }
+
+    # Set is_generating based on whether any models are active
+    response["is_generating"] = len(active_models) > 0
+
+    # Include current processing item info if available
+    if queue_status["current_item"]:
+      response["current_item"] = queue_status["current_item"]
+
+    return jsonify(response)
+  finally:
+    conn.close()
+
+
+@app.route("/api/queue/clear", methods=["POST"])
+def api_clear_queue():
+  """
+  API endpoint to clear all items from the generation queue,
+  including cancelling any currently running generation.
+
+  Returns:
+    {
+      "success": true,
+      "cleared_count": N,
+      "cancelled_count": M,
+      "message": "Cleared N pending item(s), cancelled M in-progress item(s)"
+    }
+  """
+  global generation_state, generation_cancelled
+
+  print(f"\n{'=' * 60}")
+  print("🗑️  Clear queue request received")
+  print(f"{'=' * 60}")
+
+  conn = get_db_connection()
+  try:
+    # Clear pending items
+    cleared_count = clear_pending_queue(conn)
+
+    # Cancel any in-progress items
+    cancelled_count = cancel_processing_items(conn)
+
+    # Set the cancellation flag so the worker knows to stop
+    if cancelled_count > 0:
+      generation_cancelled = True
+
+    # Clear busy models
+    with busy_models_lock:
+      busy_models.clear()
+
+    # Clear per-model states
+    model_generation_states.clear()
+
+    # Reset the generation state
+    generation_state["is_generating"] = False
+    generation_state["quadrants"] = []
+    generation_state["status"] = "idle"
+    generation_state["message"] = "Queue cleared"
+    generation_state["error"] = None
+    generation_state["current_item_id"] = None
+
+    if cleared_count > 0 or cancelled_count > 0:
+      print(
+        f"✅ Cleared {cleared_count} pending, cancelled {cancelled_count} in-progress"
+      )
+    else:
+      print("ℹ️  Queue was already empty")
+
+    message_parts = []
+    if cleared_count > 0:
+      message_parts.append(f"Cleared {cleared_count} pending item(s)")
+    if cancelled_count > 0:
+      message_parts.append(f"cancelled {cancelled_count} in-progress item(s)")
+    message = ", ".join(message_parts) if message_parts else "Queue was already empty"
+
+    return jsonify(
+      {
+        "success": True,
+        "cleared_count": cleared_count,
+        "cancelled_count": cancelled_count,
+        "message": message,
+      }
+    )
+  except Exception as e:
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
+  finally:
+    conn.close()
+
+
+@app.route("/api/queue/cancel/<int:item_id>", methods=["POST"])
+def api_cancel_queue_item(item_id: int):
+  """
+  API endpoint to cancel a specific queue item by its ID.
+
+  Returns:
+    {
+      "success": true,
+      "cancelled": true,
+      "item_id": N,
+      "message": "Cancelled queue item N"
+    }
+  """
+  global generation_cancelled
+
+  print(f"\n{'=' * 60}")
+  print(f"🗑️  Cancel queue item request received: item_id={item_id}")
+  print(f"{'=' * 60}")
+
+  conn = get_db_connection()
+  try:
+    cancelled = cancel_queue_item_by_id(conn, item_id)
+
+    if cancelled:
+      # Set the cancellation flag so the worker knows to stop
+      # (in case this was a processing item)
+      generation_cancelled = True
+      print(f"✅ Cancelled queue item {item_id}")
+
+      return jsonify(
+        {
+          "success": True,
+          "cancelled": True,
+          "item_id": item_id,
+          "message": f"Cancelled queue item {item_id}",
+        }
+      )
+    else:
+      print(f"ℹ️  Queue item {item_id} not found or already completed")
+      return jsonify(
+        {
+          "success": True,
+          "cancelled": False,
+          "item_id": item_id,
+          "message": f"Queue item {item_id} not found or already completed",
+        }
+      )
+  except Exception as e:
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
+  finally:
+    conn.close()
+
+
+@app.route("/api/models")
+def api_models():
+  """API endpoint to get available models."""
+  if APP_CONFIG is None:
+    return jsonify({"models": [], "default_model_id": None})
+
+  return jsonify(
+    {
+      "models": [m.to_dict() for m in APP_CONFIG.models],
+      "default_model_id": APP_CONFIG.default_model_id,
+    }
+  )
+
+
+@app.route("/api/delete", methods=["POST"])
+def api_delete():
+  """API endpoint to delete generation data for selected quadrants."""
+  data = request.get_json()
+  if not data or "quadrants" not in data:
+    return jsonify({"success": False, "error": "No quadrants specified"})
+
+  quadrants = data["quadrants"]
+  if not quadrants:
+    return jsonify({"success": False, "error": "Empty quadrants list"})
+
+  # Connect to database (quadrants.db, not tiles.db)
+  db_path = Path(GENERATION_DIR) / "quadrants.db"
+  conn = sqlite3.connect(db_path)
+
+  try:
+    deleted_count = 0
+    for qx, qy in quadrants:
+      # Clear the generation column (set to NULL) but keep the row
+      # Columns are quadrant_x and quadrant_y
+      cursor = conn.execute(
+        """
+        UPDATE quadrants
+        SET generation = NULL
+        WHERE quadrant_x = ? AND quadrant_y = ?
+        """,
+        (qx, qy),
+      )
+      if cursor.rowcount > 0:
+        deleted_count += 1
+
+    conn.commit()
+
+    return jsonify(
+      {
+        "success": True,
+        "message": f"Deleted generation data for {deleted_count} quadrant{'s' if deleted_count != 1 else ''}",
+        "deleted": deleted_count,
+      }
+    )
+  except Exception as e:
+    return jsonify({"success": False, "error": str(e)})
+  finally:
+    conn.close()
+
+
+# Hardcoded water replacement color
+WATER_REPLACEMENT_COLOR = "#4A6372"
+DEFAULT_SOFTNESS = 30.0  # Lower = more precise color matching
+
+
+@app.route("/api/fix-water", methods=["POST"])
+def api_fix_water():
+  """API endpoint to fix water color in a quadrant using soft blending."""
+  data = request.get_json()
+  if not data:
+    return jsonify({"success": False, "error": "No data provided"}), 400
+
+  # Required fields
+  x = data.get("x")
+  y = data.get("y")
+  target_color = data.get("target_color")
+
+  if x is None or y is None:
+    return jsonify({"success": False, "error": "Missing x or y coordinate"}), 400
+
+  if not target_color:
+    return jsonify({"success": False, "error": "Missing target_color"}), 400
+
+  # Optional fields
+  softness = data.get("softness", DEFAULT_SOFTNESS)
+
+  # Parse colors
+  try:
+    target_rgb = hex_to_rgb(target_color)
+  except ValueError as e:
+    return jsonify({"success": False, "error": f"Invalid target color: {e}"}), 400
+
+  try:
+    replacement_rgb = hex_to_rgb(WATER_REPLACEMENT_COLOR)
+  except ValueError as e:
+    return jsonify({"success": False, "error": f"Invalid replacement color: {e}"}), 400
+
+  print(f"\n{'=' * 60}")
+  print(f"💧 Water fix request: quadrant ({x}, {y})")
+  print(f"   Target color: {target_color} -> RGB{target_rgb}")
+  print(f"   Replacement color: {WATER_REPLACEMENT_COLOR} -> RGB{replacement_rgb}")
+  print(f"   Softness: {softness}")
+  print(f"{'=' * 60}")
+
+  # Connect to database
+  db_path = Path(GENERATION_DIR) / "quadrants.db"
+  conn = sqlite3.connect(db_path)
+
+  try:
+    config = get_generation_config(conn)
+    exports_dir = Path(GENERATION_DIR) / "exports"
+
+    success = process_color_replacement(
+      conn=conn,
+      config=config,
+      x=int(x),
+      y=int(y),
+      target_color=target_rgb,
+      replacement_color=replacement_rgb,
+      softness=float(softness),
+      dry_run=False,  # Apply directly to database
+      exports_dir=exports_dir,
+    )
+
+    if success:
+      print(f"✅ Water fix complete for quadrant ({x}, {y})")
+      return jsonify(
+        {
+          "success": True,
+          "message": f"Fixed water color in quadrant ({x}, {y})",
+          "quadrant": {"x": x, "y": y},
+          "target_color": target_color,
+          "replacement_color": WATER_REPLACEMENT_COLOR,
+        }
+      )
+    else:
+      print(f"❌ Water fix failed for quadrant ({x}, {y})")
+      return jsonify(
+        {"success": False, "error": f"Failed to process quadrant ({x}, {y})"}
+      ), 400
+
+  except Exception as e:
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
+  finally:
+    conn.close()
+
+
+@app.route("/api/water-fill", methods=["POST"])
+def api_water_fill():
+  """API endpoint to fill an entire quadrant with the water color."""
+
+  from PIL import Image
+
+  from isometric_nyc.e2e_generation.shared import (
+    get_quadrant_generation,
+    image_to_png_bytes,
+    png_bytes_to_image,
+    save_quadrant_generation,
+  )
+
+  data = request.get_json()
+  if not data:
+    return jsonify({"success": False, "error": "No data provided"}), 400
+
+  x = data.get("x")
+  y = data.get("y")
+
+  if x is None or y is None:
+    return jsonify({"success": False, "error": "Missing x or y coordinate"}), 400
+
+  print(f"\n{'=' * 60}")
+  print(f"💧 Water fill request: quadrant ({x}, {y})")
+  print(f"   Fill color: {WATER_REPLACEMENT_COLOR}")
+  print(f"{'=' * 60}")
+
+  # Connect to database
+  db_path = Path(GENERATION_DIR) / "quadrants.db"
+  conn = sqlite3.connect(db_path)
+
+  try:
+    config = get_generation_config(conn)
+
+    # Get existing generation to determine size, or use config defaults
+    generation_bytes = get_quadrant_generation(conn, int(x), int(y))
+    if generation_bytes is not None:
+      # Get dimensions from existing image
+      existing_img = png_bytes_to_image(generation_bytes)
+      width, height = existing_img.size
+      mode = existing_img.mode
+    else:
+      # No existing generation - use quadrant size from config
+      # Quadrant is half the tile size
+      width = config.get("width_px", 512) // 2
+      height = config.get("height_px", 512) // 2
+      mode = "RGBA"
+      print(f"   No existing generation - creating new {width}x{height} image")
+
+    # Parse water color
+    water_rgb = hex_to_rgb(WATER_REPLACEMENT_COLOR)
+
+    # Create solid color image
+    if mode == "RGBA":
+      fill_color = (*water_rgb, 255)  # Add full alpha
+    else:
+      fill_color = water_rgb
+
+    filled_img = Image.new(mode, (width, height), fill_color)
+
+    # Save to database
+    png_bytes = image_to_png_bytes(filled_img)
+    save_quadrant_generation(conn, config, int(x), int(y), png_bytes)
+
+    print(f"✅ Water fill complete for quadrant ({x}, {y})")
+    return jsonify(
+      {
+        "success": True,
+        "message": f"Filled quadrant ({x}, {y}) with water color",
+        "quadrant": {"x": x, "y": y},
+        "color": WATER_REPLACEMENT_COLOR,
+      }
+    )
+
+  except Exception as e:
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
+  finally:
+    conn.close()
+
+
+@app.route("/api/render", methods=["POST"])
+def api_render():
+  """API endpoint to render tiles for selected quadrants."""
+  global generation_state
+
+  # Parse request
+  data = request.get_json()
+  if not data or "quadrants" not in data:
+    return jsonify(
+      {
+        "success": False,
+        "error": "Missing 'quadrants' in request body",
+      }
+    ), 400
+
+  quadrants = data["quadrants"]
+  if not isinstance(quadrants, list) or len(quadrants) == 0:
+    return jsonify(
+      {
+        "success": False,
+        "error": "quadrants must be a non-empty list",
+      }
+    ), 400
+
+  # Convert to list of tuples
+  selected_quadrants = []
+  for q in quadrants:
+    if isinstance(q, list) and len(q) == 2:
+      selected_quadrants.append((int(q[0]), int(q[1])))
+    elif isinstance(q, dict) and "x" in q and "y" in q:
+      selected_quadrants.append((int(q["x"]), int(q["y"])))
+    else:
+      return jsonify(
+        {
+          "success": False,
+          "error": f"Invalid quadrant format: {q}",
+        }
+      ), 400
+
+  print(f"\n{'=' * 60}")
+  print(f"🎨 Render request: {selected_quadrants}")
+  print(f"{'=' * 60}")
+
+  # Always add to queue (database-backed queue handles everything)
+  result = add_to_queue_db(selected_quadrants, "render")
+  return jsonify(result), 202  # 202 Accepted
+
+
+@app.route("/api/generate", methods=["POST"])
+def api_generate():
+  """
+  API endpoint to generate tiles for selected quadrants.
+
+  Request body:
+    {
+      "quadrants": [[x, y], ...] or [{"x": x, "y": y}, ...],
+      "model_id": "optional-model-id",
+      "context": [[x, y], ...] or [{"x": x, "y": y}, ...]  // Optional context quadrants
+    }
+
+  The context quadrants are used to provide surrounding pixel art context for
+  the generation. If a context quadrant has an existing generation, that will
+  be used; otherwise the render content will be used.
+  """
+  global generation_state
+
+  # Parse request
+  data = request.get_json()
+  if not data or "quadrants" not in data:
+    return jsonify(
+      {
+        "success": False,
+        "error": "Missing 'quadrants' in request body",
+      }
+    ), 400
+
+  quadrants = data["quadrants"]
+  if not isinstance(quadrants, list) or len(quadrants) == 0:
+    return jsonify(
+      {
+        "success": False,
+        "error": "quadrants must be a non-empty list",
+      }
+    ), 400
+
+  # Get optional model_id from request
+  model_id = data.get("model_id")
+
+  # Convert quadrants to list of tuples
+  selected_quadrants = []
+  for q in quadrants:
+    if isinstance(q, list) and len(q) == 2:
+      selected_quadrants.append((int(q[0]), int(q[1])))
+    elif isinstance(q, dict) and "x" in q and "y" in q:
+      selected_quadrants.append((int(q["x"]), int(q["y"])))
+    else:
+      return jsonify(
+        {
+          "success": False,
+          "error": f"Invalid quadrant format: {q}",
+        }
+      ), 400
+
+  # Parse optional context quadrants
+  context_quadrants = None
+  context_raw = data.get("context")
+  if context_raw:
+    if not isinstance(context_raw, list):
+      return jsonify(
+        {
+          "success": False,
+          "error": "context must be a list of quadrant coordinates",
+        }
+      ), 400
+
+    context_quadrants = []
+    for q in context_raw:
+      if isinstance(q, list) and len(q) == 2:
+        context_quadrants.append((int(q[0]), int(q[1])))
+      elif isinstance(q, dict) and "x" in q and "y" in q:
+        context_quadrants.append((int(q["x"]), int(q["y"])))
+      else:
+        return jsonify(
+          {
+            "success": False,
+            "error": f"Invalid context quadrant format: {q}",
+          }
+        ), 400
+
+  # Parse optional prompt
+  prompt = data.get("prompt")
+  if prompt and not isinstance(prompt, str):
+    return jsonify(
+      {
+        "success": False,
+        "error": "prompt must be a string",
+      }
+    ), 400
+
+  # Clean up prompt (strip whitespace, None if empty)
+  if prompt:
+    prompt = prompt.strip()
+    if not prompt:
+      prompt = None
+
+  print(f"\n{'=' * 60}")
+  print(f"🎯 Generation request: {selected_quadrants}")
+  if model_id:
+    print(f"   Model: {model_id}")
+  if context_quadrants:
+    print(f"   Context: {context_quadrants}")
+  if prompt:
+    print(f"   Prompt: {prompt}")
+  print(f"{'=' * 60}")
+
+  # Always add to queue (database-backed queue handles everything)
+  result = add_to_queue_db(
+    selected_quadrants, "generate", model_id, context_quadrants, prompt
+  )
+  return jsonify(result), 202  # 202 Accepted
+
+
+# =============================================================================
+# Rectangle Generation API
+# =============================================================================
+
+
+def load_generated_quadrants(conn: sqlite3.Connection) -> set[Point]:
+  """Load all quadrants that have generations from the database."""
+  cursor = conn.cursor()
+  cursor.execute(
+    "SELECT quadrant_x, quadrant_y FROM quadrants WHERE generation IS NOT NULL"
+  )
+  return {Point(row[0], row[1]) for row in cursor.fetchall()}
+
+
+@app.route("/api/generate-rectangle", methods=["POST"])
+def api_generate_rectangle():
+  """
+  API endpoint to generate all quadrants within a rectangle.
+
+  Request body:
+    {
+      "tl": [x, y] or {"x": x, "y": y},  // Top-left corner
+      "br": [x, y] or {"x": x, "y": y},  // Bottom-right corner
+      "model_id": "optional-model-id"    // Optional model ID
+    }
+
+  Returns:
+    {
+      "success": true,
+      "plan_summary": {...},
+      "queued_count": N,
+      "message": "Queued N generation steps"
+    }
+  """
+  global generation_state
+
+  # Parse request
+  data = request.get_json()
+  if not data:
+    return jsonify({"success": False, "error": "No JSON body provided"}), 400
+
+  # Parse top-left coordinate
+  tl_raw = data.get("tl")
+  if not tl_raw:
+    return jsonify(
+      {"success": False, "error": "Missing 'tl' (top-left) coordinate"}
+    ), 400
+
+  try:
+    if isinstance(tl_raw, list) and len(tl_raw) == 2:
+      tl = Point(int(tl_raw[0]), int(tl_raw[1]))
+    elif isinstance(tl_raw, dict) and "x" in tl_raw and "y" in tl_raw:
+      tl = Point(int(tl_raw["x"]), int(tl_raw["y"]))
+    else:
+      return jsonify({"success": False, "error": f"Invalid 'tl' format: {tl_raw}"}), 400
+  except (ValueError, TypeError) as e:
+    return jsonify({"success": False, "error": f"Invalid 'tl' coordinate: {e}"}), 400
+
+  # Parse bottom-right coordinate
+  br_raw = data.get("br")
+  if not br_raw:
+    return jsonify(
+      {"success": False, "error": "Missing 'br' (bottom-right) coordinate"}
+    ), 400
+
+  try:
+    if isinstance(br_raw, list) and len(br_raw) == 2:
+      br = Point(int(br_raw[0]), int(br_raw[1]))
+    elif isinstance(br_raw, dict) and "x" in br_raw and "y" in br_raw:
+      br = Point(int(br_raw["x"]), int(br_raw["y"]))
+    else:
+      return jsonify({"success": False, "error": f"Invalid 'br' format: {br_raw}"}), 400
+  except (ValueError, TypeError) as e:
+    return jsonify({"success": False, "error": f"Invalid 'br' coordinate: {e}"}), 400
+
+  # Validate bounds
+  if tl.x > br.x or tl.y > br.y:
+    return jsonify(
+      {
+        "success": False,
+        "error": "Invalid bounds: top-left must be above and to the left of bottom-right",
+      }
+    ), 400
+
+  # Get optional model_id
+  model_id = data.get("model_id")
+
+  print(f"\n{'=' * 60}")
+  print(f"📐 Rectangle generation request: ({tl.x},{tl.y}) to ({br.x},{br.y})")
+  if model_id:
+    print(f"   Model: {model_id}")
+  print(f"{'=' * 60}")
+
+  # Load existing generated quadrants
+  conn = get_db_connection()
+  try:
+    generated = load_generated_quadrants(conn)
+
+    # Create the rectangle plan
+    bounds = RectBounds(tl, br)
+    plan = create_rectangle_plan(bounds, generated)
+
+    # Validate the plan
+    is_valid, errors = validate_plan(plan)
+    if not is_valid:
+      print(f"❌ Invalid plan generated: {errors}")
+      return jsonify(
+        {
+          "success": False,
+          "error": f"Internal error: invalid plan generated - {errors}",
+        }
+      ), 500
+
+    # Get plan summary for response
+    summary = get_plan_summary(plan)
+
+    if len(plan.steps) == 0:
+      print("ℹ️  No quadrants to generate (all already generated)")
+      return jsonify(
+        {
+          "success": True,
+          "plan_summary": summary,
+          "queued_count": 0,
+          "message": "No quadrants to generate - all already generated",
+        }
+      )
+
+    # Queue all generation steps
+    queued_count = 0
+    for step in plan.steps:
+      quadrants = [(q.x, q.y) for q in step.quadrants]
+      add_to_queue(conn, QueueItemType.GENERATE, quadrants, model_id)
+      queued_count += 1
+
+    # Ensure queue worker is running
+    start_queue_worker()
+
+    print(f"✅ Queued {queued_count} generation step(s)")
+    print(f"   Steps by type: {summary['steps_by_type']}")
+
+    return jsonify(
+      {
+        "success": True,
+        "plan_summary": summary,
+        "queued_count": queued_count,
+        "message": f"Queued {queued_count} generation step(s) for {summary['total_quadrants']} quadrant(s)",
+      }
+    )
+
+  except Exception as e:
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
+  finally:
+    conn.close()
+
+
+def main():
+  global GENERATION_DIR, WEB_SERVER_PORT, APP_CONFIG
+
+  parser = argparse.ArgumentParser(description="View generated tiles in a grid.")
+  parser.add_argument(
+    "generation_dir",
+    type=Path,
+    help="Path to the generation directory containing quadrants.db",
+  )
+  parser.add_argument(
+    "--port",
+    type=int,
+    default=8080,
+    help="Port to run the Flask server on (default: 8080)",
+  )
+  parser.add_argument(
+    "--host",
+    default="127.0.0.1",
+    help="Host to bind to (default: 127.0.0.1)",
+  )
+  parser.add_argument(
+    "--web-port",
+    type=int,
+    default=DEFAULT_WEB_PORT,
+    help=f"Port for the Vite web server used for rendering (default: {DEFAULT_WEB_PORT})",
+  )
+  parser.add_argument(
+    "--config",
+    type=Path,
+    default=None,
+    help="Path to app_config.json (default: looks in the e2e_generation directory)",
+  )
+
+  args = parser.parse_args()
+
+  GENERATION_DIR = args.generation_dir.resolve()
+  WEB_SERVER_PORT = args.web_port
+
+  if not GENERATION_DIR.exists():
+    print(f"❌ Error: Directory not found: {GENERATION_DIR}")
+    return 1
+
+  db_path = GENERATION_DIR / "quadrants.db"
+  if not db_path.exists():
+    print(f"❌ Error: Database not found: {db_path}")
+    return 1
+
+  # Load app configuration
+  APP_CONFIG = load_app_config(args.config)
+  print(f"📦 Loaded {len(APP_CONFIG.models)} model(s) from configuration")
+  for model in APP_CONFIG.models:
+    default_marker = (
+      " (default)" if model.model_id == APP_CONFIG.default_model_id else ""
+    )
+    has_key = "✓" if model.api_key else "✗"
+    print(f"   {has_key} {model.name} ({model.model_id}){default_marker}")
+
+  # Initialize the generation queue table
+  conn = get_db_connection()
+  try:
+    init_queue_table(conn)
+    # Reset any items that were mid-processing when server shut down
+    # These will be retried automatically
+    reset_count = reset_all_processing_items(conn)
+    if reset_count > 0:
+      print(f"🔄 Reset {reset_count} interrupted generation(s) - will be retried")
+    # Clean up old completed items
+    deleted_count = clear_completed_items(conn)
+    if deleted_count > 0:
+      print(f"🧹 Cleaned up {deleted_count} old completed queue item(s)")
+  finally:
+    conn.close()
+
+  # Start the queue worker
+  start_queue_worker()
+
+  # Start the global web renderer
+  try:
+    start_global_renderer(port=WEB_SERVER_PORT)
+  except Exception as e:
+    print(f"⚠️  Failed to start web renderer: {e}")
+    print("   Rendering will start on demand")
+
+  print("🎨 Starting tile viewer...")
+  print(f"   Generation dir: {GENERATION_DIR}")
+  print(f"   Flask server: http://{args.host}:{args.port}/")
+  print(f"   Web render port: {WEB_SERVER_PORT}")
+  print("   Press Ctrl+C to stop")
+
+  try:
+    app.run(host=args.host, port=args.port, debug=True, use_reloader=False)
+  finally:
+    # Clean up queue worker
+    print("\n🛑 Stopping queue worker...")
+    stop_queue_worker()
+
+    # Clean up web renderer
+    print("🛑 Stopping web renderer...")
+    stop_global_renderer()
+
+  return 0
+
+
+if __name__ == "__main__":
+  exit(main())
+
+```
+
+Now let me add the API endpoint for flagging. Let me find a good place to add it:
+
+```python
+"""
+Simple web app to view generated tiles in an nx×ny grid.
+
+Usage:
+  uv run python src/isometric_nyc/e2e_generation/view_generations.py <generation_dir>
+
+Then open http://localhost:8080/?x=0&y=0 in your browser.
+
+URL Parameters:
+  x, y   - Starting coordinates (default: 0, 0)
+  nx, ny - Grid size nx×ny (default: 2, max: 20)
+  lines  - Show grid lines: 1=on, 0=off (default: 1)
+  coords - Show coordinates: 1=on, 0=off (default: 1)
+  render - Show renders instead of generations: 1=renders, 0=generations (default: 0)
+
+Keyboard shortcuts:
+  Arrow keys - Navigate the grid
+  L          - Toggle lines
+  C          - Toggle coords
+  R          - Toggle render/generation mode
+  G          - Generate selected quadrants
+  S          - Toggle select tool
+"""
+
+import argparse
+import hashlib
+import json
+import logging
+import sqlite3
+import threading
+import time
+import traceback
+from pathlib import Path
+
+from dotenv import load_dotenv
+from flask import Flask, Response, jsonify, render_template, request
+
+from isometric_nyc.e2e_generation.generate_omni import run_generation_for_quadrants
+from isometric_nyc.e2e_generation.make_rectangle_plan import (
+  Point,
+  RectBounds,
+  create_rectangle_plan,
+  get_plan_summary,
+  validate_plan,
+)
+from isometric_nyc.e2e_generation.model_config import AppConfig, load_app_config
+from isometric_nyc.e2e_generation.queue_db import (
+  QueueItemType,
+  add_to_queue,
+  cancel_processing_items,
+  cancel_queue_item_by_id,
+  clear_completed_items,
+  clear_pending_queue,
+  get_next_pending_item_for_available_model,
+  get_pending_queue,
+  get_queue_position_for_model,
+  get_queue_status,
+  get_queue_status_by_model,
+  init_queue_table,
+  mark_item_complete,
+  mark_item_error,
+  mark_item_processing,
+  reset_all_processing_items,
+)
+from isometric_nyc.e2e_generation.replace_color import hex_to_rgb
+from isometric_nyc.e2e_generation.replace_color import (
+  process_quadrant as process_color_replacement,
+)
+from isometric_nyc.e2e_generation.shared import DEFAULT_WEB_PORT, get_generation_config
+from isometric_nyc.e2e_generation.web_renderer import (
+  start_global_renderer,
+  stop_global_renderer,
+)
+
+# Load environment variables
+load_dotenv()
+
+# Setup Flask with template and static folders relative to this file
+VIEWER_DIR = Path(__file__).parent
+app = Flask(
+  __name__,
+  template_folder=str(VIEWER_DIR / "templates"),
+  static_folder=str(VIEWER_DIR / "static"),
+)
+
+
+# =============================================================================
+# Logging Configuration - Suppress noisy tile request logs
+# =============================================================================
+class TileRequestFilter(logging.Filter):
+  """Filter out noisy tile and static file requests from logs."""
+
+  def filter(self, record: logging.LogRecord) -> bool:
+    message = record.getMessage()
+    # Filter out tile requests, static files, and api/status polling
+    if "/tile/" in message:
+      return False
+    if "/static/" in message:
+      return False
+    if "/api/status" in message:
+      return False
+    return True
+
+
+# Apply filter to werkzeug logger (Flask's HTTP request logger)
+werkzeug_logger = logging.getLogger("werkzeug")
+werkzeug_logger.addFilter(TileRequestFilter())
+
+# Generation lock - protects generation_state updates
+generation_lock = threading.Lock()
+
+# Per-model generation states
+# Key is model_id (None for default), value is state dict
+model_generation_states: dict[str | None, dict] = {}
+
+# Legacy global generation_state for backwards compatibility with API
+generation_state = {
+  "is_generating": False,
+  "quadrants": [],  # List of quadrant coords being generated
+  "status": "idle",  # idle, validating, rendering, uploading, generating, saving, complete, error
+  "message": "",
+  "error": None,
+  "started_at": None,
+  "current_item_id": None,
+  "model_id": None,
+}
+
+# Track which models are currently processing
+busy_models: set[str | None] = set()
+busy_models_lock = threading.Lock()
+
+# Queue worker thread
+queue_worker_thread: threading.Thread | None = None
+queue_worker_running = False
+
+# Cancellation flag - set to True to cancel all generations
+generation_cancelled = False
+
+# Will be set by main()
+GENERATION_DIR: Path | None = None
+WEB_SERVER_PORT: int = DEFAULT_WEB_PORT
+APP_CONFIG: AppConfig | None = None
+
+
+def get_db_connection() -> sqlite3.Connection:
+  """Get a connection to the quadrants database."""
+  if GENERATION_DIR is None:
+    raise RuntimeError("GENERATION_DIR not set")
+  db_path = GENERATION_DIR / "quadrants.db"
+  return sqlite3.connect(db_path)
+
+
+def ensure_flagged_column_exists(conn: sqlite3.Connection) -> None:
+  """Ensure the flagged column exists in the quadrants table (migration)."""
+  cursor = conn.cursor()
+  # Check if column exists
+  cursor.execute("PRAGMA table_info(quadrants)")
+  columns = [row[1] for row in cursor.fetchall()]
+  if "flagged" not in columns:
+    cursor.execute("ALTER TABLE quadrants ADD COLUMN flagged INTEGER DEFAULT 0")
+    conn.commit()
+    print("📝 Added 'flagged' column to quadrants table")
+
+
+def get_quadrant_generation(x: int, y: int) -> bytes | None:
+  """Get the generation bytes for a quadrant."""
+  conn = get_db_connection()
+  try:
+    cursor = conn.cursor()
+    cursor.execute(
+      "SELECT generation FROM quadrants WHERE quadrant_x = ? AND quadrant_y = ?",
+      (x, y),
+    )
+    row = cursor.fetchone()
+    return row[0] if row and row[0] else None
+  finally:
+    conn.close()
+
+
+def get_quadrant_render(x: int, y: int) -> bytes | None:
+  """Get the render bytes for a quadrant."""
+  conn = get_db_connection()
+  try:
+    cursor = conn.cursor()
+    cursor.execute(
+      "SELECT render FROM quadrants WHERE quadrant_x = ? AND quadrant_y = ?",
+      (x, y),
+    )
+    row = cursor.fetchone()
+    return row[0] if row and row[0] else None
+  finally:
+    conn.close()
+
+
+def get_quadrant_data(x: int, y: int, use_render: bool = False) -> bytes | None:
+  """Get either render or generation bytes for a quadrant."""
+  if use_render:
+    return get_quadrant_render(x, y)
+  return get_quadrant_generation(x, y)
+
+
+@app.route("/")
+def index():
+  """Main page showing nx×ny grid of tiles."""
+  x = request.args.get("x", 0, type=int)
+  y = request.args.get("y", 0, type=int)
+  # Default fallback if nx/ny not present
+  n_default = request.args.get("n", 2, type=int)
+  nx = request.args.get("nx", n_default, type=int)
+  ny = request.args.get("ny", n_default, type=int)
+  size_px = request.args.get("size", 256, type=int)
+  show_lines = request.args.get("lines", "1") == "1"
+  show_coords = request.args.get("coords", "1") == "1"
+  show_render = request.args.get("render", "0") == "1"
+
+  # Clamp nx/ny to reasonable bounds
+  nx = max(1, min(nx, 20))
+  ny = max(1, min(ny, 20))
+
+  # Check which tiles have data (generation or render based on mode)
+  tiles = {}
+  for dx in range(nx):
+    for dy in range(ny):
+      qx, qy = x + dx, y + dy
+      data = get_quadrant_data(qx, qy, use_render=show_render)
+      tiles[(dx, dy)] = data is not None
+
+  # Get model configuration for the frontend
+  models_config = []
+  default_model_id = None
+  if APP_CONFIG:
+    models_config = [m.to_dict() for m in APP_CONFIG.models]
+    default_model_id = APP_CONFIG.default_model_id
+
+  return render_template(
+    "viewer.html",
+    x=x,
+    y=y,
+    nx=nx,
+    ny=ny,
+    size_px=size_px,
+    show_lines=show_lines,
+    show_coords=show_coords,
+    show_render=show_render,
+    tiles=tiles,
+    generation_dir=str(GENERATION_DIR),
+    models_config=json.dumps(models_config),
+    default_model_id=default_model_id,
+  )
+
+
+@app.route("/tile/<x>/<y>")
+def tile(x: str, y: str):
+  """Serve a tile image (generation or render based on query param)."""
+  try:
+    qx, qy = int(x), int(y)
+  except ValueError:
+    return Response("Invalid coordinates", status=400)
+
+  use_render = request.args.get("render", "0") == "1"
+  data = get_quadrant_data(qx, qy, use_render=use_render)
+
+  if data is None:
+    return Response("Not found", status=404)
+
+  # Generate ETag from content hash for caching
+  etag = hashlib.md5(data).hexdigest()
+
+  # Check if client has cached version
+  if_none_match = request.headers.get("If-None-Match")
+  if if_none_match and if_none_match == etag:
+    return Response(status=304)  # Not Modified
+
+  response = Response(data, mimetype="image/png")
+  response.headers["ETag"] = etag
+  response.headers["Cache-Control"] = "public, max-age=3600"  # Cache for 1 hour
+  return response
+
+
+# =============================================================================
+# Generation API
+# =============================================================================
+
+
+def update_generation_state(
+  status: str, message: str = "", error: str | None = None
+) -> None:
+  """Update the global generation state."""
+  global generation_state
+  generation_state["status"] = status
+  generation_state["message"] = message
+  if error:
+    generation_state["error"] = error
+
+
+def calculate_context_quadrants(
+  conn: sqlite3.Connection,
+  selected_quadrants: list[tuple[int, int]],
+) -> list[tuple[int, int]]:
+  """
+  Calculate context quadrants lazily at execution time.
+
+  This determines which adjacent quadrants have existing generations
+  that can provide context for the current generation.
+
+  For a valid generation, we need at least a 2x2 block where all 4 quadrants
+  are either being generated or already generated.
+
+  Args:
+    conn: Database connection
+    selected_quadrants: The quadrants being generated
+
+  Returns:
+    List of quadrant coordinates that have existing generations and can
+    provide context for the current generation.
+  """
+  from isometric_nyc.e2e_generation.shared import (
+    get_quadrant_generation as shared_get_quadrant_generation,
+  )
+
+  selected_set = set(selected_quadrants)
+  context = []
+
+  # Find all quadrants adjacent to the selection that have generations
+  # Check all potential 2x2 blocks that include any selected quadrant
+  checked = set()
+
+  for qx, qy in selected_quadrants:
+    # Check all neighbors that could form a 2x2 block with this quadrant
+    # A quadrant can be in 4 different 2x2 blocks (as TL, TR, BL, BR corner)
+    potential_context = [
+      # Neighbors for 2x2 where (qx, qy) is top-left
+      (qx + 1, qy),
+      (qx, qy + 1),
+      (qx + 1, qy + 1),
+      # Neighbors for 2x2 where (qx, qy) is top-right
+      (qx - 1, qy),
+      (qx - 1, qy + 1),
+      (qx, qy + 1),
+      # Neighbors for 2x2 where (qx, qy) is bottom-left
+      (qx, qy - 1),
+      (qx + 1, qy - 1),
+      (qx + 1, qy),
+      # Neighbors for 2x2 where (qx, qy) is bottom-right
+      (qx - 1, qy - 1),
+      (qx, qy - 1),
+      (qx - 1, qy),
+    ]
+
+    for nx, ny in potential_context:
+      coord = (nx, ny)
+      if coord in checked or coord in selected_set:
+        continue
+      checked.add(coord)
+
+      # Check if this quadrant has an existing generation
+      gen = shared_get_quadrant_generation(conn, nx, ny)
+      if gen is not None:
+        context.append(coord)
+
+  return context
+
+
+def run_generation(
+  conn: sqlite3.Connection,
+  config: dict,
+  selected_quadrants: list[tuple[int, int]],
+  model_id: str | None = None,
+  context_quadrants: list[tuple[int, int]] | None = None,
+  prompt: str | None = None,
+) -> dict:
+  """
+  Run the full generation pipeline for selected quadrants.
+
+  This is a wrapper around run_generation_for_quadrants that ensures
+  the web server is running and updates the global generation state.
+
+  Args:
+    conn: Database connection
+    config: Generation config dict
+    selected_quadrants: List of (x, y) quadrant coordinates to generate
+    model_id: Optional model ID for generation
+    context_quadrants: Optional list of (x, y) quadrant coordinates to use as
+      context. These quadrants provide surrounding pixel art context for the
+      generation.
+    prompt: Optional additional prompt text for generation
+
+  Returns dict with success status and message/error.
+  """
+  # Get model configuration if specified
+  model_config = None
+  if model_id and APP_CONFIG:
+    model_config = APP_CONFIG.get_model(model_id)
+  elif APP_CONFIG:
+    model_config = APP_CONFIG.get_default_model()
+
+  # Create status callback that updates global state
+  def status_callback(status: str, message: str) -> None:
+    update_generation_state(status, message)
+
+  # Use the shared library function
+  return run_generation_for_quadrants(
+    conn=conn,
+    config=config,
+    selected_quadrants=selected_quadrants,
+    port=WEB_SERVER_PORT,
+    status_callback=status_callback,
+    model_config=model_config,
+    context_quadrants=context_quadrants,
+    prompt=prompt,
+  )
+
+
+def render_quadrant_with_renderer(
+  conn: sqlite3.Connection,
+  config: dict,
+  x: int,
+  y: int,
+) -> bytes | None:
+  """
+  Render a quadrant using the global web renderer.
+
+  Returns the PNG bytes of the rendered quadrant.
+  """
+  from isometric_nyc.e2e_generation.shared import (
+    ensure_quadrant_exists,
+    save_quadrant_render,
+  )
+  from isometric_nyc.e2e_generation.web_renderer import get_web_renderer
+
+  # Ensure the quadrant exists in the database
+  quadrant = ensure_quadrant_exists(conn, config, x, y)
+
+  print(f"   🎨 Rendering tile for quadrant ({x}, {y})...")
+
+  renderer = get_web_renderer(port=WEB_SERVER_PORT)
+
+  # Render the tile
+  quadrant_images = renderer.render_quadrant(
+    quadrant_x=x,
+    quadrant_y=y,
+    lat=quadrant["lat"],
+    lng=quadrant["lng"],
+    width_px=config["width_px"],
+    height_px=config["height_px"],
+    camera_azimuth_degrees=config["camera_azimuth_degrees"],
+    camera_elevation_degrees=config["camera_elevation_degrees"],
+    view_height_meters=config.get("view_height_meters", 200),
+  )
+
+  # Save all quadrants to database
+  result_bytes = None
+  for (dx, dy), png_bytes in quadrant_images.items():
+    qx, qy = x + dx, y + dy
+    save_quadrant_render(conn, config, qx, qy, png_bytes)
+    print(f"      ✓ Saved render for ({qx}, {qy})")
+
+    # Return the specific quadrant we were asked for
+    if qx == x and qy == y:
+      result_bytes = png_bytes
+
+  return result_bytes
+
+
+def process_queue_item_from_db(item_id: int) -> dict:
+  """Process a single queue item from the database."""
+  global generation_state
+
+  conn = get_db_connection()
+  try:
+    # Get item details
+    cursor = conn.cursor()
+    cursor.execute(
+      """
+      SELECT item_type, quadrants, model_id, context_quadrants, prompt
+      FROM generation_queue
+      WHERE id = ?
+      """,
+      (item_id,),
+    )
+    row = cursor.fetchone()
+    if not row:
+      return {"success": False, "error": "Item not found"}
+
+    item_type = QueueItemType(row[0])
+    quadrants = json.loads(row[1])
+    model_id = row[2]
+    context_quadrants_raw = json.loads(row[3]) if row[3] else None
+    prompt = row[4]
+
+    # Convert to list of tuples
+    selected_quadrants = [(q[0], q[1]) for q in quadrants]
+
+    # Calculate context lazily if not explicitly provided
+    # This ensures we use the most up-to-date context based on what's
+    # actually generated at execution time (not queue time)
+    if context_quadrants_raw:
+      context_quadrants = [(q[0], q[1]) for q in context_quadrants_raw]
+      print(
+        f"   📋 Using explicit context from queue: {len(context_quadrants)} quadrant(s)"
+      )
+    else:
+      # Calculate context lazily based on current generation state
+      context_quadrants = calculate_context_quadrants(conn, selected_quadrants)
+      if context_quadrants:
+        print(f"   📋 Calculated lazy context: {len(context_quadrants)} quadrant(s)")
+      else:
+        print(
+          "   📋 No context quadrants (2x2 self-contained or no adjacent generations)"
+        )
+
+    # Mark item as processing
+    mark_item_processing(conn, item_id)
+
+    # Initialize generation state
+    generation_state["is_generating"] = True
+    generation_state["quadrants"] = selected_quadrants
+    generation_state["status"] = (
+      "starting" if item_type == QueueItemType.GENERATE else "rendering"
+    )
+    generation_state["message"] = f"Starting {item_type.value}..."
+    generation_state["error"] = None
+    generation_state["started_at"] = time.time()
+    generation_state["current_item_id"] = item_id
+    generation_state["model_id"] = model_id
+
+    print(f"\n{'=' * 60}")
+    emoji = "🎯" if item_type == QueueItemType.GENERATE else "🎨"
+    print(
+      f"{emoji} {item_type.value.title()} request (item {item_id}): {selected_quadrants}"
+    )
+    if model_id:
+      print(f"   Model: {model_id}")
+    if context_quadrants:
+      print(f"   Context: {context_quadrants}")
+    if prompt:
+      print(f"   Prompt: {prompt}")
+    print(f"{'=' * 60}")
+
+    config = get_generation_config(conn)
+
+    if item_type == QueueItemType.GENERATE:
+      result = run_generation(
+        conn, config, selected_quadrants, model_id, context_quadrants, prompt
+      )
+      if result["success"]:
+        print(f"✅ Generation complete: {result['message']}")
+        generation_state["status"] = "complete"
+        generation_state["message"] = result["message"]
+        mark_item_complete(conn, item_id, result["message"])
+      else:
+        print(f"❌ Generation failed: {result['error']}")
+        generation_state["status"] = "error"
+        generation_state["error"] = result["error"]
+        mark_item_error(conn, item_id, result["error"])
+      return result
+
+    else:  # render
+      update_generation_state("rendering", "Starting render...")
+
+      rendered_count = 0
+      total = len(selected_quadrants)
+
+      for i, (qx, qy) in enumerate(selected_quadrants):
+        update_generation_state(
+          "rendering", f"Rendering quadrant ({qx}, {qy})... ({i + 1}/{total})"
+        )
+        print(f"   🎨 Rendering quadrant ({qx}, {qy})...")
+
+        try:
+          render_bytes = render_quadrant_with_renderer(conn, config, qx, qy)
+          if render_bytes:
+            rendered_count += 1
+            print(f"      ✓ Rendered quadrant ({qx}, {qy})")
+          else:
+            print(f"      ⚠️ No render output for ({qx}, {qy})")
+        except Exception as e:
+          print(f"      ❌ Failed to render ({qx}, {qy}): {e}")
+          traceback.print_exc()
+
+      result_message = f"Rendered {rendered_count} quadrant(s)"
+      update_generation_state("complete", result_message)
+      print(f"✅ Render complete: {rendered_count}/{total} quadrants")
+      mark_item_complete(conn, item_id, result_message)
+
+      return {
+        "success": True,
+        "message": f"Rendered {rendered_count} quadrant{'s' if rendered_count != 1 else ''}",
+        "quadrants": selected_quadrants,
+      }
+
+  except Exception as e:
+    traceback.print_exc()
+    generation_state["status"] = "error"
+    generation_state["error"] = str(e)
+    mark_item_error(conn, item_id, str(e))
+    return {"success": False, "error": str(e)}
+  finally:
+    conn.close()
+
+
+def process_model_item(item_id: int, model_id: str | None):
+  """Process a single queue item for a specific model in its own thread."""
+  global generation_state, generation_cancelled
+
+  try:
+    # Check cancellation before starting
+    if generation_cancelled:
+      print(f"⚠️  Item {item_id} cancelled before processing")
+      return
+
+    process_queue_item_from_db(item_id)
+
+  except Exception as e:
+    print(f"❌ Model worker error for {model_id}: {e}")
+    traceback.print_exc()
+  finally:
+    # Remove model from busy set
+    with busy_models_lock:
+      busy_models.discard(model_id)
+
+    # Update global state if this was the active model
+    with generation_lock:
+      if generation_state.get("model_id") == model_id:
+        generation_state["is_generating"] = False
+        generation_state["current_item_id"] = None
+
+    # Remove from per-model states
+    if model_id in model_generation_states:
+      del model_generation_states[model_id]
+
+
+def queue_worker():
+  """Background worker that processes the generation queue from the database.
+
+  This worker supports parallel processing of different models - each model
+  can have one active generation at a time, but different models can run
+  concurrently.
+  """
+  global generation_state, queue_worker_running, generation_cancelled
+
+  print("🔄 Queue worker started (parallel model support)")
+
+  while queue_worker_running:
+    conn = None
+    try:
+      # Check if we were cancelled
+      if generation_cancelled:
+        print("⚠️  Generation cancelled, resetting flags...")
+        generation_cancelled = False
+        with generation_lock:
+          generation_state["is_generating"] = False
+          generation_state["current_item_id"] = None
+        with busy_models_lock:
+          busy_models.clear()
+        model_generation_states.clear()
+        time.sleep(0.5)
+        continue
+
+      conn = get_db_connection()
+
+      # Get current busy models
+      with busy_models_lock:
+        current_busy = busy_models.copy()
+
+      # Get next pending item for an available model
+      item = get_next_pending_item_for_available_model(conn, current_busy)
+
+      if item is None:
+        # No items available (either queue empty or all models busy)
+        conn.close()
+        time.sleep(0.5)
+        continue
+
+      item_id = item.id
+      model_id = item.model_id
+      conn.close()
+      conn = None
+
+      # Mark this model as busy
+      with busy_models_lock:
+        if model_id in busy_models:
+          # Another thread grabbed this model, skip
+          continue
+        busy_models.add(model_id)
+
+      # Update global state for display (use most recent)
+      with generation_lock:
+        generation_state["is_generating"] = True
+        generation_state["model_id"] = model_id
+
+      # Initialize per-model state
+      model_generation_states[model_id] = {
+        "is_generating": True,
+        "item_id": item_id,
+        "started_at": time.time(),
+      }
+
+      # Spawn a thread to process this model's item
+      model_name = model_id or "default"
+      worker_thread = threading.Thread(
+        target=process_model_item,
+        args=(item_id, model_id),
+        name=f"model-worker-{model_name}",
+        daemon=True,
+      )
+      worker_thread.start()
+
+      print(f"🚀 Started worker for model '{model_name}' (item {item_id})")
+
+      # Small delay before checking for more work
+      time.sleep(0.2)
+
+    except Exception as e:
+      print(f"❌ Queue worker error: {e}")
+      traceback.print_exc()
+      time.sleep(1.0)
+    finally:
+      if conn:
+        conn.close()
+
+  print("🛑 Queue worker stopped")
+
+
+def start_queue_worker():
+  """Start the queue worker thread if not already running."""
+  global queue_worker_thread, queue_worker_running
+
+  if queue_worker_thread is not None and queue_worker_thread.is_alive():
+    return  # Already running
+
+  queue_worker_running = True
+  queue_worker_thread = threading.Thread(target=queue_worker, daemon=True)
+  queue_worker_thread.start()
+
+
+def stop_queue_worker():
+  """Stop the queue worker thread."""
+  global queue_worker_running
+  queue_worker_running = False
+
+
+def add_to_queue_db(
+  quadrants: list[tuple[int, int]],
+  item_type: str,
+  model_id: str | None = None,
+  context_quadrants: list[tuple[int, int]] | None = None,
+  prompt: str | None = None,
+) -> dict:
+  """Add a generation/render request to the database queue."""
+  conn = get_db_connection()
+  try:
+    queue_item = add_to_queue(
+      conn,
+      QueueItemType(item_type),
+      quadrants,
+      model_id,
+      context_quadrants,
+      prompt,
+    )
+
+    # Get model-specific queue position
+    model_position = get_queue_position_for_model(conn, queue_item.id, model_id)
+
+    # Get total queue length for backwards compatibility
+    pending = get_pending_queue(conn)
+    total_position = len(pending)
+
+    # Ensure the queue worker is running
+    start_queue_worker()
+
+    return {
+      "success": True,
+      "queued": True,
+      "position": model_position,  # Position within this model's queue
+      "total_position": total_position,  # Overall queue position
+      "model_id": model_id,
+      "item_id": queue_item.id,
+      "message": f"Added to queue at position {model_position}",
+    }
+  finally:
+    conn.close()
+
+
+@app.route("/api/status")
+def api_status():
+  """API endpoint to check generation status including queue info."""
+  conn = get_db_connection()
+  try:
+    queue_status = get_queue_status(conn)
+    model_status = get_queue_status_by_model(conn)
+
+    # Get list of currently busy models
+    with busy_models_lock:
+      active_models = list(busy_models)
+
+    # Build the response
+    response = {
+      **generation_state,
+      "queue": queue_status["pending_items"],
+      "queue_length": queue_status["pending_count"],
+      # Per-model queue info
+      "queue_by_model": model_status["by_model"],
+      "processing_models": model_status["processing_models"],
+      # All currently processing models (for parallel processing)
+      "active_models": active_models,
+      "active_model_count": len(active_models),
+      # All quadrants being processed across all models
+      "all_processing_quadrants": model_status["all_processing_quadrants"],
+    }
+
+    # Set is_generating based on whether any models are active
+    response["is_generating"] = len(active_models) > 0
+
+    # Include current processing item info if available
+    if queue_status["current_item"]:
+      response["current_item"] = queue_status["current_item"]
+
+    return jsonify(response)
+  finally:
+    conn.close()
+
+
+@app.route("/api/queue/clear", methods=["POST"])
+def api_clear_queue():
+  """
+  API endpoint to clear all items from the generation queue,
+  including cancelling any currently running generation.
+
+  Returns:
+    {
+      "success": true,
+      "cleared_count": N,
+      "cancelled_count": M,
+      "message": "Cleared N pending item(s), cancelled M in-progress item(s)"
+    }
+  """
+  global generation_state, generation_cancelled
+
+  print(f"\n{'=' * 60}")
+  print("🗑️  Clear queue request received")
+  print(f"{'=' * 60}")
+
+  conn = get_db_connection()
+  try:
+    # Clear pending items
+    cleared_count = clear_pending_queue(conn)
+
+    # Cancel any in-progress items
+    cancelled_count = cancel_processing_items(conn)
+
+    # Set the cancellation flag so the worker knows to stop
+    if cancelled_count > 0:
+      generation_cancelled = True
+
+    # Clear busy models
+    with busy_models_lock:
+      busy_models.clear()
+
+    # Clear per-model states
+    model_generation_states.clear()
+
+    # Reset the generation state
+    generation_state["is_generating"] = False
+    generation_state["quadrants"] = []
+    generation_state["status"] = "idle"
+    generation_state["message"] = "Queue cleared"
+    generation_state["error"] = None
+    generation_state["current_item_id"] = None
+
+    if cleared_count > 0 or cancelled_count > 0:
+      print(
+        f"✅ Cleared {cleared_count} pending, cancelled {cancelled_count} in-progress"
+      )
+    else:
+      print("ℹ️  Queue was already empty")
+
+    message_parts = []
+    if cleared_count > 0:
+      message_parts.append(f"Cleared {cleared_count} pending item(s)")
+    if cancelled_count > 0:
+      message_parts.append(f"cancelled {cancelled_count} in-progress item(s)")
+    message = ", ".join(message_parts) if message_parts else "Queue was already empty"
+
+    return jsonify(
+      {
+        "success": True,
+        "cleared_count": cleared_count,
+        "cancelled_count": cancelled_count,
+        "message": message,
+      }
+    )
+  except Exception as e:
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
+  finally:
+    conn.close()
+
+
+@app.route("/api/queue/cancel/<int:item_id>", methods=["POST"])
+def api_cancel_queue_item(item_id: int):
+  """
+  API endpoint to cancel a specific queue item by its ID.
+
+  Returns:
+    {
+      "success": true,
+      "cancelled": true,
+      "item_id": N,
+      "message": "Cancelled queue item N"
+    }
+  """
+  global generation_cancelled
+
+  print(f"\n{'=' * 60}")
+  print(f"🗑️  Cancel queue item request received: item_id={item_id}")
+  print(f"{'=' * 60}")
+
+  conn = get_db_connection()
+  try:
+    cancelled = cancel_queue_item_by_id(conn, item_id)
+
+    if cancelled:
+      # Set the cancellation flag so the worker knows to stop
+      # (in case this was a processing item)
+      generation_cancelled = True
+      print(f"✅ Cancelled queue item {item_id}")
+
+      return jsonify(
+        {
+          "success": True,
+          "cancelled": True,
+          "item_id": item_id,
+          "message": f"Cancelled queue item {item_id}",
+        }
+      )
+    else:
+      print(f"ℹ️  Queue item {item_id} not found or already completed")
+      return jsonify(
+        {
+          "success": True,
+          "cancelled": False,
+          "item_id": item_id,
+          "message": f"Queue item {item_id} not found or already completed",
+        }
+      )
+  except Exception as e:
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
+  finally:
+    conn.close()
+
+
+@app.route("/api/models")
+def api_models():
+  """API endpoint to get available models."""
+  if APP_CONFIG is None:
+    return jsonify({"models": [], "default_model_id": None})
+
+  return jsonify(
+    {
+      "models": [m.to_dict() for m in APP_CONFIG.models],
+      "default_model_id": APP_CONFIG.default_model_id,
+    }
+  )
+
+
+@app.route("/api/delete", methods=["POST"])
+def api_delete():
+  """API endpoint to delete generation data for selected quadrants."""
+  data = request.get_json()
+  if not data or "quadrants" not in data:
+    return jsonify({"success": False, "error": "No quadrants specified"})
+
+  quadrants = data["quadrants"]
+  if not quadrants:
+    return jsonify({"success": False, "error": "Empty quadrants list"})
+
+  # Connect to database (quadrants.db, not tiles.db)
+  db_path = Path(GENERATION_DIR) / "quadrants.db"
+  conn = sqlite3.connect(db_path)
+
+  try:
+    deleted_count = 0
+    for qx, qy in quadrants:
+      # Clear the generation column (set to NULL) but keep the row
+      # Columns are quadrant_x and quadrant_y
+      cursor = conn.execute(
+        """
+        UPDATE quadrants
+        SET generation = NULL
+        WHERE quadrant_x = ? AND quadrant_y = ?
+        """,
+        (qx, qy),
+      )
+      if cursor.rowcount > 0:
+        deleted_count += 1
+
+    conn.commit()
+
+    return jsonify(
+      {
+        "success": True,
+        "message": f"Deleted generation data for {deleted_count} quadrant{'s' if deleted_count != 1 else ''}",
+        "deleted": deleted_count,
+      }
+    )
+  except Exception as e:
+    return jsonify({"success": False, "error": str(e)})
+  finally:
+    conn.close()
+
+
+@app.route("/api/flag", methods=["POST"])
+def api_flag():
+  """API endpoint to flag/unflag selected quadrants."""
+  data = request.get_json()
+  if not data or "quadrants" not in data:
+    return jsonify({"success": False, "error": "No quadrants specified"})
+
+  quadrants = data["quadrants"]
+  if not quadrants:
+    return jsonify({"success": False, "error": "Empty quadrants list"})
+
+  # Get flag value (default to True/1 for flagging, False/0 for unflagging)
+  flag_value = 1 if data.get("flag", True) else 0
+
+  conn = get_db_connection()
+
+  try:
+    # Ensure the flagged column exists
+    ensure_flagged_column_exists(conn)
+
+    flagged_count = 0
+    for qx, qy in quadrants:
+      cursor = conn.execute(
+        """
+        UPDATE quadrants
+        SET flagged = ?
+        WHERE quadrant_x = ? AND quadrant_y = ?
+        """,
+        (flag_value, qx, qy),
+      )
+      if cursor.rowcount > 0:
+        flagged_count += 1
+
+    conn.commit()
+
+    action = "Flagged" if flag_value else "Unflagged"
+    return jsonify(
+      {
+        "success": True,
+        "message": f"{action} {flagged_count} quadrant{'s' if flagged_count != 1 else ''}",
+        "count": flagged_count,
+        "flagged": bool(flag_value),
+      }
+    )
+  except Exception as e:
+    return jsonify({"success": False, "error": str(e)})
+  finally:
+    conn.close()
+
+
+# Hardcoded water replacement color
+WATER_REPLACEMENT_COLOR = "#4A6372"
+DEFAULT_SOFTNESS = 30.0  # Lower = more precise color matching
+
+
+@app.route("/api/fix-water", methods=["POST"])
+def api_fix_water():
+  """API endpoint to fix water color in a quadrant using soft blending."""
+  data = request.get_json()
+  if not data:
+    return jsonify({"success": False, "error": "No data provided"}), 400
+
+  # Required fields
+  x = data.get("x")
+  y = data.get("y")
+  target_color = data.get("target_color")
+
+  if x is None or y is None:
+    return jsonify({"success": False, "error": "Missing x or y coordinate"}), 400
+
+  if not target_color:
+    return jsonify({"success": False, "error": "Missing target_color"}), 400
+
+  # Optional fields
+  softness = data.get("softness", DEFAULT_SOFTNESS)
+
+  # Parse colors
+  try:
+    target_rgb = hex_to_rgb(target_color)
+  except ValueError as e:
+    return jsonify({"success": False, "error": f"Invalid target color: {e}"}), 400
+
+  try:
+    replacement_rgb = hex_to_rgb(WATER_REPLACEMENT_COLOR)
+  except ValueError as e:
+    return jsonify({"success": False, "error": f"Invalid replacement color: {e}"}), 400
+
+  print(f"\n{'=' * 60}")
+  print(f"💧 Water fix request: quadrant ({x}, {y})")
+  print(f"   Target color: {target_color} -> RGB{target_rgb}")
+  print(f"   Replacement color: {WATER_REPLACEMENT_COLOR} -> RGB{replacement_rgb}")
+  print(f"   Softness: {softness}")
+  print(f"{'=' * 60}")
+
+  # Connect to database
+  db_path = Path(GENERATION_DIR) / "quadrants.db"
+  conn = sqlite3.connect(db_path)
+
+  try:
+    config = get_generation_config(conn)
+    exports_dir = Path(GENERATION_DIR) / "exports"
+
+    success = process_color_replacement(
+      conn=conn,
+      config=config,
+      x=int(x),
+      y=int(y),
+      target_color=target_rgb,
+      replacement_color=replacement_rgb,
+      softness=float(softness),
+      dry_run=False,  # Apply directly to database
+      exports_dir=exports_dir,
+    )
+
+    if success:
+      print(f"✅ Water fix complete for quadrant ({x}, {y})")
+      return jsonify(
+        {
+          "success": True,
+          "message": f"Fixed water color in quadrant ({x}, {y})",
+          "quadrant": {"x": x, "y": y},
+          "target_color": target_color,
+          "replacement_color": WATER_REPLACEMENT_COLOR,
+        }
+      )
+    else:
+      print(f"❌ Water fix failed for quadrant ({x}, {y})")
+      return jsonify(
+        {"success": False, "error": f"Failed to process quadrant ({x}, {y})"}
+      ), 400
+
+  except Exception as e:
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
+  finally:
+    conn.close()
+
+
+@app.route("/api/water-fill", methods=["POST"])
+def api_water_fill():
+  """API endpoint to fill an entire quadrant with the water color."""
+
+  from PIL import Image
+
+  from isometric_nyc.e2e_generation.shared import (
+    get_quadrant_generation,
+    image_to_png_bytes,
+    png_bytes_to_image,
+    save_quadrant_generation,
+  )
+
+  data = request.get_json()
+  if not data:
+    return jsonify({"success": False, "error": "No data provided"}), 400
+
+  x = data.get("x")
+  y = data.get("y")
+
+  if x is None or y is None:
+    return jsonify({"success": False, "error": "Missing x or y coordinate"}), 400
+
+  print(f"\n{'=' * 60}")
+  print(f"💧 Water fill request: quadrant ({x}, {y})")
+  print(f"   Fill color: {WATER_REPLACEMENT_COLOR}")
+  print(f"{'=' * 60}")
+
+  # Connect to database
+  db_path = Path(GENERATION_DIR) / "quadrants.db"
+  conn = sqlite3.connect(db_path)
+
+  try:
+    config = get_generation_config(conn)
+
+    # Get existing generation to determine size, or use config defaults
+    generation_bytes = get_quadrant_generation(conn, int(x), int(y))
+    if generation_bytes is not None:
+      # Get dimensions from existing image
+      existing_img = png_bytes_to_image(generation_bytes)
+      width, height = existing_img.size
+      mode = existing_img.mode
+    else:
+      # No existing generation - use quadrant size from config
+      # Quadrant is half the tile size
+      width = config.get("width_px", 512) // 2
+      height = config.get("height_px", 512) // 2
+      mode = "RGBA"
+      print(f"   No existing generation - creating new {width}x{height} image")
+
+    # Parse water color
+    water_rgb = hex_to_rgb(WATER_REPLACEMENT_COLOR)
+
+    # Create solid color image
+    if mode == "RGBA":
+      fill_color = (*water_rgb, 255)  # Add full alpha
+    else:
+      fill_color = water_rgb
+
+    filled_img = Image.new(mode, (width, height), fill_color)
+
+    # Save to database
+    png_bytes = image_to_png_bytes(filled_img)
+    save_quadrant_generation(conn, config, int(x), int(y), png_bytes)
+
+    print(f"✅ Water fill complete for quadrant ({x}, {y})")
+    return jsonify(
+      {
+        "success": True,
+        "message": f"Filled quadrant ({x}, {y}) with water color",
+        "quadrant": {"x": x, "y": y},
+        "color": WATER_REPLACEMENT_COLOR,
+      }
+    )
+
+  except Exception as e:
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
+  finally:
+    conn.close()
+
+
+@app.route("/api/render", methods=["POST"])
+def api_render():
+  """API endpoint to render tiles for selected quadrants."""
+  global generation_state
+
+  # Parse request
+  data = request.get_json()
+  if not data or "quadrants" not in data:
+    return jsonify(
+      {
+        "success": False,
+        "error": "Missing 'quadrants' in request body",
+      }
+    ), 400
+
+  quadrants = data["quadrants"]
+  if not isinstance(quadrants, list) or len(quadrants) == 0:
+    return jsonify(
+      {
+        "success": False,
+        "error": "quadrants must be a non-empty list",
+      }
+    ), 400
+
+  # Convert to list of tuples
+  selected_quadrants = []
+  for q in quadrants:
+    if isinstance(q, list) and len(q) == 2:
+      selected_quadrants.append((int(q[0]), int(q[1])))
+    elif isinstance(q, dict) and "x" in q and "y" in q:
+      selected_quadrants.append((int(q["x"]), int(q["y"])))
+    else:
+      return jsonify(
+        {
+          "success": False,
+          "error": f"Invalid quadrant format: {q}",
+        }
+      ), 400
+
+  print(f"\n{'=' * 60}")
+  print(f"🎨 Render request: {selected_quadrants}")
+  print(f"{'=' * 60}")
+
+  # Always add to queue (database-backed queue handles everything)
+  result = add_to_queue_db(selected_quadrants, "render")
+  return jsonify(result), 202  # 202 Accepted
+
+
+@app.route("/api/generate", methods=["POST"])
+def api_generate():
+  """
+  API endpoint to generate tiles for selected quadrants.
+
+  Request body:
+    {
+      "quadrants": [[x, y], ...] or [{"x": x, "y": y}, ...],
+      "model_id": "optional-model-id",
+      "context": [[x, y], ...] or [{"x": x, "y": y}, ...]  // Optional context quadrants
+    }
+
+  The context quadrants are used to provide surrounding pixel art context for
+  the generation. If a context quadrant has an existing generation, that will
+  be used; otherwise the render content will be used.
+  """
+  global generation_state
+
+  # Parse request
+  data = request.get_json()
+  if not data or "quadrants" not in data:
+    return jsonify(
+      {
+        "success": False,
+        "error": "Missing 'quadrants' in request body",
+      }
+    ), 400
+
+  quadrants = data["quadrants"]
+  if not isinstance(quadrants, list) or len(quadrants) == 0:
+    return jsonify(
+      {
+        "success": False,
+        "error": "quadrants must be a non-empty list",
+      }
+    ), 400
+
+  # Get optional model_id from request
+  model_id = data.get("model_id")
+
+  # Convert quadrants to list of tuples
+  selected_quadrants = []
+  for q in quadrants:
+    if isinstance(q, list) and len(q) == 2:
+      selected_quadrants.append((int(q[0]), int(q[1])))
+    elif isinstance(q, dict) and "x" in q and "y" in q:
+      selected_quadrants.append((int(q["x"]), int(q["y"])))
+    else:
+      return jsonify(
+        {
+          "success": False,
+          "error": f"Invalid quadrant format: {q}",
+        }
+      ), 400
+
+  # Parse optional context quadrants
+  context_quadrants = None
+  context_raw = data.get("context")
+  if context_raw:
+    if not isinstance(context_raw, list):
+      return jsonify(
+        {
+          "success": False,
+          "error": "context must be a list of quadrant coordinates",
+        }
+      ), 400
+
+    context_quadrants = []
+    for q in context_raw:
+      if isinstance(q, list) and len(q) == 2:
+        context_quadrants.append((int(q[0]), int(q[1])))
+      elif isinstance(q, dict) and "x" in q and "y" in q:
+        context_quadrants.append((int(q["x"]), int(q["y"])))
+      else:
+        return jsonify(
+          {
+            "success": False,
+            "error": f"Invalid context quadrant format: {q}",
+          }
+        ), 400
+
+  # Parse optional prompt
+  prompt = data.get("prompt")
+  if prompt and not isinstance(prompt, str):
+    return jsonify(
+      {
+        "success": False,
+        "error": "prompt must be a string",
+      }
+    ), 400
+
+  # Clean up prompt (strip whitespace, None if empty)
+  if prompt:
+    prompt = prompt.strip()
+    if not prompt:
+      prompt = None
+
+  print(f"\n{'=' * 60}")
+  print(f"🎯 Generation request: {selected_quadrants}")
+  if model_id:
+    print(f"   Model: {model_id}")
+  if context_quadrants:
+    print(f"   Context: {context_quadrants}")
+  if prompt:
+    print(f"   Prompt: {prompt}")
+  print(f"{'=' * 60}")
+
+  # Always add to queue (database-backed queue handles everything)
+  result = add_to_queue_db(
+    selected_quadrants, "generate", model_id, context_quadrants, prompt
+  )
+  return jsonify(result), 202  # 202 Accepted
+
+
+# =============================================================================
+# Rectangle Generation API
+# =============================================================================
+
+
+def load_generated_quadrants(conn: sqlite3.Connection) -> set[Point]:
+  """Load all quadrants that have generations from the database."""
+  cursor = conn.cursor()
+  cursor.execute(
+    "SELECT quadrant_x, quadrant_y FROM quadrants WHERE generation IS NOT NULL"
+  )
+  return {Point(row[0], row[1]) for row in cursor.fetchall()}
+
+
+@app.route("/api/generate-rectangle", methods=["POST"])
+def api_generate_rectangle():
+  """
+  API endpoint to generate all quadrants within a rectangle.
+
+  Request body:
+    {
+      "tl": [x, y] or {"x": x, "y": y},  // Top-left corner
+      "br": [x, y] or {"x": x, "y": y},  // Bottom-right corner
+      "model_id": "optional-model-id"    // Optional model ID
+    }
+
+  Returns:
+    {
+      "success": true,
+      "plan_summary": {...},
+      "queued_count": N,
+      "message": "Queued N generation steps"
+    }
+  """
+  global generation_state
+
+  # Parse request
+  data = request.get_json()
+  if not data:
+    return jsonify({"success": False, "error": "No JSON body provided"}), 400
+
+  # Parse top-left coordinate
+  tl_raw = data.get("tl")
+  if not tl_raw:
+    return jsonify(
+      {"success": False, "error": "Missing 'tl' (top-left) coordinate"}
+    ), 400
+
+  try:
+    if isinstance(tl_raw, list) and len(tl_raw) == 2:
+      tl = Point(int(tl_raw[0]), int(tl_raw[1]))
+    elif isinstance(tl_raw, dict) and "x" in tl_raw and "y" in tl_raw:
+      tl = Point(int(tl_raw["x"]), int(tl_raw["y"]))
+    else:
+      return jsonify({"success": False, "error": f"Invalid 'tl' format: {tl_raw}"}), 400
+  except (ValueError, TypeError) as e:
+    return jsonify({"success": False, "error": f"Invalid 'tl' coordinate: {e}"}), 400
+
+  # Parse bottom-right coordinate
+  br_raw = data.get("br")
+  if not br_raw:
+    return jsonify(
+      {"success": False, "error": "Missing 'br' (bottom-right) coordinate"}
+    ), 400
+
+  try:
+    if isinstance(br_raw, list) and len(br_raw) == 2:
+      br = Point(int(br_raw[0]), int(br_raw[1]))
+    elif isinstance(br_raw, dict) and "x" in br_raw and "y" in br_raw:
+      br = Point(int(br_raw["x"]), int(br_raw["y"]))
+    else:
+      return jsonify({"success": False, "error": f"Invalid 'br' format: {br_raw}"}), 400
+  except (ValueError, TypeError) as e:
+    return jsonify({"success": False, "error": f"Invalid 'br' coordinate: {e}"}), 400
+
+  # Validate bounds
+  if tl.x > br.x or tl.y > br.y:
+    return jsonify(
+      {
+        "success": False,
+        "error": "Invalid bounds: top-left must be above and to the left of bottom-right",
+      }
+    ), 400
+
+  # Get optional model_id
+  model_id = data.get("model_id")
+
+  print(f"\n{'=' * 60}")
+  print(f"📐 Rectangle generation request: ({tl.x},{tl.y}) to ({br.x},{br.y})")
+  if model_id:
+    print(f"   Model: {model_id}")
+  print(f"{'=' * 60}")
+
+  # Load existing generated quadrants
+  conn = get_db_connection()
+  try:
+    generated = load_generated_quadrants(conn)
+
+    # Create the rectangle plan
+    bounds = RectBounds(tl, br)
+    plan = create_rectangle_plan(bounds, generated)
+
+    # Validate the plan
+    is_valid, errors = validate_plan(plan)
+    if not is_valid:
+      print(f"❌ Invalid plan generated: {errors}")
+      return jsonify(
+        {
+          "success": False,
+          "error": f"Internal error: invalid plan generated - {errors}",
+        }
+      ), 500
+
+    # Get plan summary for response
+    summary = get_plan_summary(plan)
+
+    if len(plan.steps) == 0:
+      print("ℹ️  No quadrants to generate (all already generated)")
+      return jsonify(
+        {
+          "success": True,
+          "plan_summary": summary,
+          "queued_count": 0,
+          "message": "No quadrants to generate - all already generated",
+        }
+      )
+
+    # Queue all generation steps
+    queued_count = 0
+    for step in plan.steps:
+      quadrants = [(q.x, q.y) for q in step.quadrants]
+      add_to_queue(conn, QueueItemType.GENERATE, quadrants, model_id)
+      queued_count += 1
+
+    # Ensure queue worker is running
+    start_queue_worker()
+
+    print(f"✅ Queued {queued_count} generation step(s)")
+    print(f"   Steps by type: {summary['steps_by_type']}")
+
+    return jsonify(
+      {
+        "success": True,
+        "plan_summary": summary,
+        "queued_count": queued_count,
+        "message": f"Queued {queued_count} generation step(s) for {summary['total_quadrants']} quadrant(s)",
+      }
+    )
+
+  except Exception as e:
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
+  finally:
+    conn.close()
+
+
+def main():
+  global GENERATION_DIR, WEB_SERVER_PORT, APP_CONFIG
+
+  parser = argparse.ArgumentParser(description="View generated tiles in a grid.")
+  parser.add_argument(
+    "generation_dir",
+    type=Path,
+    help="Path to the generation directory containing quadrants.db",
+  )
+  parser.add_argument(
+    "--port",
+    type=int,
+    default=8080,
+    help="Port to run the Flask server on (default: 8080)",
+  )
+  parser.add_argument(
+    "--host",
+    default="127.0.0.1",
+    help="Host to bind to (default: 127.0.0.1)",
+  )
+  parser.add_argument(
+    "--web-port",
+    type=int,
+    default=DEFAULT_WEB_PORT,
+    help=f"Port for the Vite web server used for rendering (default: {DEFAULT_WEB_PORT})",
+  )
+  parser.add_argument(
+    "--config",
+    type=Path,
+    default=None,
+    help="Path to app_config.json (default: looks in the e2e_generation directory)",
+  )
+
+  args = parser.parse_args()
+
+  GENERATION_DIR = args.generation_dir.resolve()
+  WEB_SERVER_PORT = args.web_port
+
+  if not GENERATION_DIR.exists():
+    print(f"❌ Error: Directory not found: {GENERATION_DIR}")
+    return 1
+
+  db_path = GENERATION_DIR / "quadrants.db"
+  if not db_path.exists():
+    print(f"❌ Error: Database not found: {db_path}")
+    return 1
+
+  # Load app configuration
+  APP_CONFIG = load_app_config(args.config)
+  print(f"📦 Loaded {len(APP_CONFIG.models)} model(s) from configuration")
+  for model in APP_CONFIG.models:
+    default_marker = (
+      " (default)" if model.model_id == APP_CONFIG.default_model_id else ""
+    )
+    has_key = "✓" if model.api_key else "✗"
+    print(f"   {has_key} {model.name} ({model.model_id}){default_marker}")
+
+  # Initialize the generation queue table
+  conn = get_db_connection()
+  try:
+    init_queue_table(conn)
+    # Reset any items that were mid-processing when server shut down
+    # These will be retried automatically
+    reset_count = reset_all_processing_items(conn)
+    if reset_count > 0:
+      print(f"🔄 Reset {reset_count} interrupted generation(s) - will be retried")
+    # Clean up old completed items
+    deleted_count = clear_completed_items(conn)
+    if deleted_count > 0:
+      print(f"🧹 Cleaned up {deleted_count} old completed queue item(s)")
+  finally:
+    conn.close()
+
+  # Start the queue worker
+  start_queue_worker()
+
+  # Start the global web renderer
+  try:
+    start_global_renderer(port=WEB_SERVER_PORT)
+  except Exception as e:
+    print(f"⚠️  Failed to start web renderer: {e}")
+    print("   Rendering will start on demand")
+
+  print("🎨 Starting tile viewer...")
+  print(f"   Generation dir: {GENERATION_DIR}")
+  print(f"   Flask server: http://{args.host}:{args.port}/")
+  print(f"   Web render port: {WEB_SERVER_PORT}")
+  print("   Press Ctrl+C to stop")
+
+  try:
+    app.run(host=args.host, port=args.port, debug=True, use_reloader=False)
+  finally:
+    # Clean up queue worker
+    print("\n🛑 Stopping queue worker...")
+    stop_queue_worker()
+
+    # Clean up web renderer
+    print("🛑 Stopping web renderer...")
+    stop_global_renderer()
+
+  return 0
+
+
+if __name__ == "__main__":
+  exit(main())
+
+```
+
+Now let me update the viewer endpoint to include flagged status. Let me find where tile data is fetched:
+
+Let me add a function to get flagged status and update the index function:
+
+```python
+"""
+Simple web app to view generated tiles in an nx×ny grid.
+
+Usage:
+  uv run python src/isometric_nyc/e2e_generation/view_generations.py <generation_dir>
+
+Then open http://localhost:8080/?x=0&y=0 in your browser.
+
+URL Parameters:
+  x, y   - Starting coordinates (default: 0, 0)
+  nx, ny - Grid size nx×ny (default: 2, max: 20)
+  lines  - Show grid lines: 1=on, 0=off (default: 1)
+  coords - Show coordinates: 1=on, 0=off (default: 1)
+  render - Show renders instead of generations: 1=renders, 0=generations (default: 0)
+
+Keyboard shortcuts:
+  Arrow keys - Navigate the grid
+  L          - Toggle lines
+  C          - Toggle coords
+  R          - Toggle render/generation mode
+  G          - Generate selected quadrants
+  S          - Toggle select tool
+"""
+
+import argparse
+import hashlib
+import json
+import logging
+import sqlite3
+import threading
+import time
+import traceback
+from pathlib import Path
+
+from dotenv import load_dotenv
+from flask import Flask, Response, jsonify, render_template, request
+
+from isometric_nyc.e2e_generation.generate_omni import run_generation_for_quadrants
+from isometric_nyc.e2e_generation.make_rectangle_plan import (
+  Point,
+  RectBounds,
+  create_rectangle_plan,
+  get_plan_summary,
+  validate_plan,
+)
+from isometric_nyc.e2e_generation.model_config import AppConfig, load_app_config
+from isometric_nyc.e2e_generation.queue_db import (
+  QueueItemType,
+  add_to_queue,
+  cancel_processing_items,
+  cancel_queue_item_by_id,
+  clear_completed_items,
+  clear_pending_queue,
+  get_next_pending_item_for_available_model,
+  get_pending_queue,
+  get_queue_position_for_model,
+  get_queue_status,
+  get_queue_status_by_model,
+  init_queue_table,
+  mark_item_complete,
+  mark_item_error,
+  mark_item_processing,
+  reset_all_processing_items,
+)
+from isometric_nyc.e2e_generation.replace_color import hex_to_rgb
+from isometric_nyc.e2e_generation.replace_color import (
+  process_quadrant as process_color_replacement,
+)
+from isometric_nyc.e2e_generation.shared import DEFAULT_WEB_PORT, get_generation_config
+from isometric_nyc.e2e_generation.web_renderer import (
+  start_global_renderer,
+  stop_global_renderer,
+)
+
+# Load environment variables
+load_dotenv()
+
+# Setup Flask with template and static folders relative to this file
+VIEWER_DIR = Path(__file__).parent
+app = Flask(
+  __name__,
+  template_folder=str(VIEWER_DIR / "templates"),
+  static_folder=str(VIEWER_DIR / "static"),
+)
+
+
+# =============================================================================
+# Logging Configuration - Suppress noisy tile request logs
+# =============================================================================
+class TileRequestFilter(logging.Filter):
+  """Filter out noisy tile and static file requests from logs."""
+
+  def filter(self, record: logging.LogRecord) -> bool:
+    message = record.getMessage()
+    # Filter out tile requests, static files, and api/status polling
+    if "/tile/" in message:
+      return False
+    if "/static/" in message:
+      return False
+    if "/api/status" in message:
+      return False
+    return True
+
+
+# Apply filter to werkzeug logger (Flask's HTTP request logger)
+werkzeug_logger = logging.getLogger("werkzeug")
+werkzeug_logger.addFilter(TileRequestFilter())
+
+# Generation lock - protects generation_state updates
+generation_lock = threading.Lock()
+
+# Per-model generation states
+# Key is model_id (None for default), value is state dict
+model_generation_states: dict[str | None, dict] = {}
+
+# Legacy global generation_state for backwards compatibility with API
+generation_state = {
+  "is_generating": False,
+  "quadrants": [],  # List of quadrant coords being generated
+  "status": "idle",  # idle, validating, rendering, uploading, generating, saving, complete, error
+  "message": "",
+  "error": None,
+  "started_at": None,
+  "current_item_id": None,
+  "model_id": None,
+}
+
+# Track which models are currently processing
+busy_models: set[str | None] = set()
+busy_models_lock = threading.Lock()
+
+# Queue worker thread
+queue_worker_thread: threading.Thread | None = None
+queue_worker_running = False
+
+# Cancellation flag - set to True to cancel all generations
+generation_cancelled = False
+
+# Will be set by main()
+GENERATION_DIR: Path | None = None
+WEB_SERVER_PORT: int = DEFAULT_WEB_PORT
+APP_CONFIG: AppConfig | None = None
+
+
+def get_db_connection() -> sqlite3.Connection:
+  """Get a connection to the quadrants database."""
+  if GENERATION_DIR is None:
+    raise RuntimeError("GENERATION_DIR not set")
+  db_path = GENERATION_DIR / "quadrants.db"
+  return sqlite3.connect(db_path)
+
+
+def ensure_flagged_column_exists(conn: sqlite3.Connection) -> None:
+  """Ensure the flagged column exists in the quadrants table (migration)."""
+  cursor = conn.cursor()
+  # Check if column exists
+  cursor.execute("PRAGMA table_info(quadrants)")
+  columns = [row[1] for row in cursor.fetchall()]
+  if "flagged" not in columns:
+    cursor.execute("ALTER TABLE quadrants ADD COLUMN flagged INTEGER DEFAULT 0")
+    conn.commit()
+    print("📝 Added 'flagged' column to quadrants table")
+
+
+def get_quadrant_generation(x: int, y: int) -> bytes | None:
+  """Get the generation bytes for a quadrant."""
+  conn = get_db_connection()
+  try:
+    cursor = conn.cursor()
+    cursor.execute(
+      "SELECT generation FROM quadrants WHERE quadrant_x = ? AND quadrant_y = ?",
+      (x, y),
+    )
+    row = cursor.fetchone()
+    return row[0] if row and row[0] else None
+  finally:
+    conn.close()
+
+
+def get_quadrant_render(x: int, y: int) -> bytes | None:
+  """Get the render bytes for a quadrant."""
+  conn = get_db_connection()
+  try:
+    cursor = conn.cursor()
+    cursor.execute(
+      "SELECT render FROM quadrants WHERE quadrant_x = ? AND quadrant_y = ?",
+      (x, y),
+    )
+    row = cursor.fetchone()
+    return row[0] if row and row[0] else None
+  finally:
+    conn.close()
+
+
+def get_quadrant_data(x: int, y: int, use_render: bool = False) -> bytes | None:
+  """Get either render or generation bytes for a quadrant."""
+  if use_render:
+    return get_quadrant_render(x, y)
+  return get_quadrant_generation(x, y)
+
+
+def get_quadrant_info(x: int, y: int, use_render: bool = False) -> dict:
+  """Get info about a quadrant including whether it has data and is flagged."""
+  conn = get_db_connection()
+  try:
+    # Ensure flagged column exists
+    ensure_flagged_column_exists(conn)
+
+    cursor = conn.cursor()
+    column = "render" if use_render else "generation"
+    cursor.execute(
+      f"""
+      SELECT {column} IS NOT NULL, COALESCE(flagged, 0)
+      FROM quadrants
+      WHERE quadrant_x = ? AND quadrant_y = ?
+      """,
+      (x, y),
+    )
+    row = cursor.fetchone()
+    if row:
+      return {"has_data": bool(row[0]), "flagged": bool(row[1])}
+    return {"has_data": False, "flagged": False}
+  finally:
+    conn.close()
+
+
+@app.route("/")
+def index():
+  """Main page showing nx×ny grid of tiles."""
+  x = request.args.get("x", 0, type=int)
+  y = request.args.get("y", 0, type=int)
+  # Default fallback if nx/ny not present
+  n_default = request.args.get("n", 2, type=int)
+  nx = request.args.get("nx", n_default, type=int)
+  ny = request.args.get("ny", n_default, type=int)
+  size_px = request.args.get("size", 256, type=int)
+  show_lines = request.args.get("lines", "1") == "1"
+  show_coords = request.args.get("coords", "1") == "1"
+  show_render = request.args.get("render", "0") == "1"
+
+  # Clamp nx/ny to reasonable bounds
+  nx = max(1, min(nx, 20))
+  ny = max(1, min(ny, 20))
+
+  # Check which tiles have data and flagged status
+  tiles = {}
+  flagged_tiles = {}
+  for dx in range(nx):
+    for dy in range(ny):
+      qx, qy = x + dx, y + dy
+      info = get_quadrant_info(qx, qy, use_render=show_render)
+      tiles[(dx, dy)] = info["has_data"]
+      flagged_tiles[(dx, dy)] = info["flagged"]
+
+  # Get model configuration for the frontend
+  models_config = []
+  default_model_id = None
+  if APP_CONFIG:
+    models_config = [m.to_dict() for m in APP_CONFIG.models]
+    default_model_id = APP_CONFIG.default_model_id
+
+  return render_template(
+    "viewer.html",
+    x=x,
+    y=y,
+    nx=nx,
+    ny=ny,
+    size_px=size_px,
+    show_lines=show_lines,
+    show_coords=show_coords,
+    show_render=show_render,
+    tiles=tiles,
+    generation_dir=str(GENERATION_DIR),
+    models_config=json.dumps(models_config),
+    default_model_id=default_model_id,
+  )
+
+
+@app.route("/tile/<x>/<y>")
+def tile(x: str, y: str):
+  """Serve a tile image (generation or render based on query param)."""
+  try:
+    qx, qy = int(x), int(y)
+  except ValueError:
+    return Response("Invalid coordinates", status=400)
+
+  use_render = request.args.get("render", "0") == "1"
+  data = get_quadrant_data(qx, qy, use_render=use_render)
+
+  if data is None:
+    return Response("Not found", status=404)
+
+  # Generate ETag from content hash for caching
+  etag = hashlib.md5(data).hexdigest()
+
+  # Check if client has cached version
+  if_none_match = request.headers.get("If-None-Match")
+  if if_none_match and if_none_match == etag:
+    return Response(status=304)  # Not Modified
+
+  response = Response(data, mimetype="image/png")
+  response.headers["ETag"] = etag
+  response.headers["Cache-Control"] = "public, max-age=3600"  # Cache for 1 hour
+  return response
+
+
+# =============================================================================
+# Generation API
+# =============================================================================
+
+
+def update_generation_state(
+  status: str, message: str = "", error: str | None = None
+) -> None:
+  """Update the global generation state."""
+  global generation_state
+  generation_state["status"] = status
+  generation_state["message"] = message
+  if error:
+    generation_state["error"] = error
+
+
+def calculate_context_quadrants(
+  conn: sqlite3.Connection,
+  selected_quadrants: list[tuple[int, int]],
+) -> list[tuple[int, int]]:
+  """
+  Calculate context quadrants lazily at execution time.
+
+  This determines which adjacent quadrants have existing generations
+  that can provide context for the current generation.
+
+  For a valid generation, we need at least a 2x2 block where all 4 quadrants
+  are either being generated or already generated.
+
+  Args:
+    conn: Database connection
+    selected_quadrants: The quadrants being generated
+
+  Returns:
+    List of quadrant coordinates that have existing generations and can
+    provide context for the current generation.
+  """
+  from isometric_nyc.e2e_generation.shared import (
+    get_quadrant_generation as shared_get_quadrant_generation,
+  )
+
+  selected_set = set(selected_quadrants)
+  context = []
+
+  # Find all quadrants adjacent to the selection that have generations
+  # Check all potential 2x2 blocks that include any selected quadrant
+  checked = set()
+
+  for qx, qy in selected_quadrants:
+    # Check all neighbors that could form a 2x2 block with this quadrant
+    # A quadrant can be in 4 different 2x2 blocks (as TL, TR, BL, BR corner)
+    potential_context = [
+      # Neighbors for 2x2 where (qx, qy) is top-left
+      (qx + 1, qy),
+      (qx, qy + 1),
+      (qx + 1, qy + 1),
+      # Neighbors for 2x2 where (qx, qy) is top-right
+      (qx - 1, qy),
+      (qx - 1, qy + 1),
+      (qx, qy + 1),
+      # Neighbors for 2x2 where (qx, qy) is bottom-left
+      (qx, qy - 1),
+      (qx + 1, qy - 1),
+      (qx + 1, qy),
+      # Neighbors for 2x2 where (qx, qy) is bottom-right
+      (qx - 1, qy - 1),
+      (qx, qy - 1),
+      (qx - 1, qy),
+    ]
+
+    for nx, ny in potential_context:
+      coord = (nx, ny)
+      if coord in checked or coord in selected_set:
+        continue
+      checked.add(coord)
+
+      # Check if this quadrant has an existing generation
+      gen = shared_get_quadrant_generation(conn, nx, ny)
+      if gen is not None:
+        context.append(coord)
+
+  return context
+
+
+def run_generation(
+  conn: sqlite3.Connection,
+  config: dict,
+  selected_quadrants: list[tuple[int, int]],
+  model_id: str | None = None,
+  context_quadrants: list[tuple[int, int]] | None = None,
+  prompt: str | None = None,
+) -> dict:
+  """
+  Run the full generation pipeline for selected quadrants.
+
+  This is a wrapper around run_generation_for_quadrants that ensures
+  the web server is running and updates the global generation state.
+
+  Args:
+    conn: Database connection
+    config: Generation config dict
+    selected_quadrants: List of (x, y) quadrant coordinates to generate
+    model_id: Optional model ID for generation
+    context_quadrants: Optional list of (x, y) quadrant coordinates to use as
+      context. These quadrants provide surrounding pixel art context for the
+      generation.
+    prompt: Optional additional prompt text for generation
+
+  Returns dict with success status and message/error.
+  """
+  # Get model configuration if specified
+  model_config = None
+  if model_id and APP_CONFIG:
+    model_config = APP_CONFIG.get_model(model_id)
+  elif APP_CONFIG:
+    model_config = APP_CONFIG.get_default_model()
+
+  # Create status callback that updates global state
+  def status_callback(status: str, message: str) -> None:
+    update_generation_state(status, message)
+
+  # Use the shared library function
+  return run_generation_for_quadrants(
+    conn=conn,
+    config=config,
+    selected_quadrants=selected_quadrants,
+    port=WEB_SERVER_PORT,
+    status_callback=status_callback,
+    model_config=model_config,
+    context_quadrants=context_quadrants,
+    prompt=prompt,
+  )
+
+
+def render_quadrant_with_renderer(
+  conn: sqlite3.Connection,
+  config: dict,
+  x: int,
+  y: int,
+) -> bytes | None:
+  """
+  Render a quadrant using the global web renderer.
+
+  Returns the PNG bytes of the rendered quadrant.
+  """
+  from isometric_nyc.e2e_generation.shared import (
+    ensure_quadrant_exists,
+    save_quadrant_render,
+  )
+  from isometric_nyc.e2e_generation.web_renderer import get_web_renderer
+
+  # Ensure the quadrant exists in the database
+  quadrant = ensure_quadrant_exists(conn, config, x, y)
+
+  print(f"   🎨 Rendering tile for quadrant ({x}, {y})...")
+
+  renderer = get_web_renderer(port=WEB_SERVER_PORT)
+
+  # Render the tile
+  quadrant_images = renderer.render_quadrant(
+    quadrant_x=x,
+    quadrant_y=y,
+    lat=quadrant["lat"],
+    lng=quadrant["lng"],
+    width_px=config["width_px"],
+    height_px=config["height_px"],
+    camera_azimuth_degrees=config["camera_azimuth_degrees"],
+    camera_elevation_degrees=config["camera_elevation_degrees"],
+    view_height_meters=config.get("view_height_meters", 200),
+  )
+
+  # Save all quadrants to database
+  result_bytes = None
+  for (dx, dy), png_bytes in quadrant_images.items():
+    qx, qy = x + dx, y + dy
+    save_quadrant_render(conn, config, qx, qy, png_bytes)
+    print(f"      ✓ Saved render for ({qx}, {qy})")
+
+    # Return the specific quadrant we were asked for
+    if qx == x and qy == y:
+      result_bytes = png_bytes
+
+  return result_bytes
+
+
+def process_queue_item_from_db(item_id: int) -> dict:
+  """Process a single queue item from the database."""
+  global generation_state
+
+  conn = get_db_connection()
+  try:
+    # Get item details
+    cursor = conn.cursor()
+    cursor.execute(
+      """
+      SELECT item_type, quadrants, model_id, context_quadrants, prompt
+      FROM generation_queue
+      WHERE id = ?
+      """,
+      (item_id,),
+    )
+    row = cursor.fetchone()
+    if not row:
+      return {"success": False, "error": "Item not found"}
+
+    item_type = QueueItemType(row[0])
+    quadrants = json.loads(row[1])
+    model_id = row[2]
+    context_quadrants_raw = json.loads(row[3]) if row[3] else None
+    prompt = row[4]
+
+    # Convert to list of tuples
+    selected_quadrants = [(q[0], q[1]) for q in quadrants]
+
+    # Calculate context lazily if not explicitly provided
+    # This ensures we use the most up-to-date context based on what's
+    # actually generated at execution time (not queue time)
+    if context_quadrants_raw:
+      context_quadrants = [(q[0], q[1]) for q in context_quadrants_raw]
+      print(
+        f"   📋 Using explicit context from queue: {len(context_quadrants)} quadrant(s)"
+      )
+    else:
+      # Calculate context lazily based on current generation state
+      context_quadrants = calculate_context_quadrants(conn, selected_quadrants)
+      if context_quadrants:
+        print(f"   📋 Calculated lazy context: {len(context_quadrants)} quadrant(s)")
+      else:
+        print(
+          "   📋 No context quadrants (2x2 self-contained or no adjacent generations)"
+        )
+
+    # Mark item as processing
+    mark_item_processing(conn, item_id)
+
+    # Initialize generation state
+    generation_state["is_generating"] = True
+    generation_state["quadrants"] = selected_quadrants
+    generation_state["status"] = (
+      "starting" if item_type == QueueItemType.GENERATE else "rendering"
+    )
+    generation_state["message"] = f"Starting {item_type.value}..."
+    generation_state["error"] = None
+    generation_state["started_at"] = time.time()
+    generation_state["current_item_id"] = item_id
+    generation_state["model_id"] = model_id
+
+    print(f"\n{'=' * 60}")
+    emoji = "🎯" if item_type == QueueItemType.GENERATE else "🎨"
+    print(
+      f"{emoji} {item_type.value.title()} request (item {item_id}): {selected_quadrants}"
+    )
+    if model_id:
+      print(f"   Model: {model_id}")
+    if context_quadrants:
+      print(f"   Context: {context_quadrants}")
+    if prompt:
+      print(f"   Prompt: {prompt}")
+    print(f"{'=' * 60}")
+
+    config = get_generation_config(conn)
+
+    if item_type == QueueItemType.GENERATE:
+      result = run_generation(
+        conn, config, selected_quadrants, model_id, context_quadrants, prompt
+      )
+      if result["success"]:
+        print(f"✅ Generation complete: {result['message']}")
+        generation_state["status"] = "complete"
+        generation_state["message"] = result["message"]
+        mark_item_complete(conn, item_id, result["message"])
+      else:
+        print(f"❌ Generation failed: {result['error']}")
+        generation_state["status"] = "error"
+        generation_state["error"] = result["error"]
+        mark_item_error(conn, item_id, result["error"])
+      return result
+
+    else:  # render
+      update_generation_state("rendering", "Starting render...")
+
+      rendered_count = 0
+      total = len(selected_quadrants)
+
+      for i, (qx, qy) in enumerate(selected_quadrants):
+        update_generation_state(
+          "rendering", f"Rendering quadrant ({qx}, {qy})... ({i + 1}/{total})"
+        )
+        print(f"   🎨 Rendering quadrant ({qx}, {qy})...")
+
+        try:
+          render_bytes = render_quadrant_with_renderer(conn, config, qx, qy)
+          if render_bytes:
+            rendered_count += 1
+            print(f"      ✓ Rendered quadrant ({qx}, {qy})")
+          else:
+            print(f"      ⚠️ No render output for ({qx}, {qy})")
+        except Exception as e:
+          print(f"      ❌ Failed to render ({qx}, {qy}): {e}")
+          traceback.print_exc()
+
+      result_message = f"Rendered {rendered_count} quadrant(s)"
+      update_generation_state("complete", result_message)
+      print(f"✅ Render complete: {rendered_count}/{total} quadrants")
+      mark_item_complete(conn, item_id, result_message)
+
+      return {
+        "success": True,
+        "message": f"Rendered {rendered_count} quadrant{'s' if rendered_count != 1 else ''}",
+        "quadrants": selected_quadrants,
+      }
+
+  except Exception as e:
+    traceback.print_exc()
+    generation_state["status"] = "error"
+    generation_state["error"] = str(e)
+    mark_item_error(conn, item_id, str(e))
+    return {"success": False, "error": str(e)}
+  finally:
+    conn.close()
+
+
+def process_model_item(item_id: int, model_id: str | None):
+  """Process a single queue item for a specific model in its own thread."""
+  global generation_state, generation_cancelled
+
+  try:
+    # Check cancellation before starting
+    if generation_cancelled:
+      print(f"⚠️  Item {item_id} cancelled before processing")
+      return
+
+    process_queue_item_from_db(item_id)
+
+  except Exception as e:
+    print(f"❌ Model worker error for {model_id}: {e}")
+    traceback.print_exc()
+  finally:
+    # Remove model from busy set
+    with busy_models_lock:
+      busy_models.discard(model_id)
+
+    # Update global state if this was the active model
+    with generation_lock:
+      if generation_state.get("model_id") == model_id:
+        generation_state["is_generating"] = False
+        generation_state["current_item_id"] = None
+
+    # Remove from per-model states
+    if model_id in model_generation_states:
+      del model_generation_states[model_id]
+
+
+def queue_worker():
+  """Background worker that processes the generation queue from the database.
+
+  This worker supports parallel processing of different models - each model
+  can have one active generation at a time, but different models can run
+  concurrently.
+  """
+  global generation_state, queue_worker_running, generation_cancelled
+
+  print("🔄 Queue worker started (parallel model support)")
+
+  while queue_worker_running:
+    conn = None
+    try:
+      # Check if we were cancelled
+      if generation_cancelled:
+        print("⚠️  Generation cancelled, resetting flags...")
+        generation_cancelled = False
+        with generation_lock:
+          generation_state["is_generating"] = False
+          generation_state["current_item_id"] = None
+        with busy_models_lock:
+          busy_models.clear()
+        model_generation_states.clear()
+        time.sleep(0.5)
+        continue
+
+      conn = get_db_connection()
+
+      # Get current busy models
+      with busy_models_lock:
+        current_busy = busy_models.copy()
+
+      # Get next pending item for an available model
+      item = get_next_pending_item_for_available_model(conn, current_busy)
+
+      if item is None:
+        # No items available (either queue empty or all models busy)
+        conn.close()
+        time.sleep(0.5)
+        continue
+
+      item_id = item.id
+      model_id = item.model_id
+      conn.close()
+      conn = None
+
+      # Mark this model as busy
+      with busy_models_lock:
+        if model_id in busy_models:
+          # Another thread grabbed this model, skip
+          continue
+        busy_models.add(model_id)
+
+      # Update global state for display (use most recent)
+      with generation_lock:
+        generation_state["is_generating"] = True
+        generation_state["model_id"] = model_id
+
+      # Initialize per-model state
+      model_generation_states[model_id] = {
+        "is_generating": True,
+        "item_id": item_id,
+        "started_at": time.time(),
+      }
+
+      # Spawn a thread to process this model's item
+      model_name = model_id or "default"
+      worker_thread = threading.Thread(
+        target=process_model_item,
+        args=(item_id, model_id),
+        name=f"model-worker-{model_name}",
+        daemon=True,
+      )
+      worker_thread.start()
+
+      print(f"🚀 Started worker for model '{model_name}' (item {item_id})")
+
+      # Small delay before checking for more work
+      time.sleep(0.2)
+
+    except Exception as e:
+      print(f"❌ Queue worker error: {e}")
+      traceback.print_exc()
+      time.sleep(1.0)
+    finally:
+      if conn:
+        conn.close()
+
+  print("🛑 Queue worker stopped")
+
+
+def start_queue_worker():
+  """Start the queue worker thread if not already running."""
+  global queue_worker_thread, queue_worker_running
+
+  if queue_worker_thread is not None and queue_worker_thread.is_alive():
+    return  # Already running
+
+  queue_worker_running = True
+  queue_worker_thread = threading.Thread(target=queue_worker, daemon=True)
+  queue_worker_thread.start()
+
+
+def stop_queue_worker():
+  """Stop the queue worker thread."""
+  global queue_worker_running
+  queue_worker_running = False
+
+
+def add_to_queue_db(
+  quadrants: list[tuple[int, int]],
+  item_type: str,
+  model_id: str | None = None,
+  context_quadrants: list[tuple[int, int]] | None = None,
+  prompt: str | None = None,
+) -> dict:
+  """Add a generation/render request to the database queue."""
+  conn = get_db_connection()
+  try:
+    queue_item = add_to_queue(
+      conn,
+      QueueItemType(item_type),
+      quadrants,
+      model_id,
+      context_quadrants,
+      prompt,
+    )
+
+    # Get model-specific queue position
+    model_position = get_queue_position_for_model(conn, queue_item.id, model_id)
+
+    # Get total queue length for backwards compatibility
+    pending = get_pending_queue(conn)
+    total_position = len(pending)
+
+    # Ensure the queue worker is running
+    start_queue_worker()
+
+    return {
+      "success": True,
+      "queued": True,
+      "position": model_position,  # Position within this model's queue
+      "total_position": total_position,  # Overall queue position
+      "model_id": model_id,
+      "item_id": queue_item.id,
+      "message": f"Added to queue at position {model_position}",
+    }
+  finally:
+    conn.close()
+
+
+@app.route("/api/status")
+def api_status():
+  """API endpoint to check generation status including queue info."""
+  conn = get_db_connection()
+  try:
+    queue_status = get_queue_status(conn)
+    model_status = get_queue_status_by_model(conn)
+
+    # Get list of currently busy models
+    with busy_models_lock:
+      active_models = list(busy_models)
+
+    # Build the response
+    response = {
+      **generation_state,
+      "queue": queue_status["pending_items"],
+      "queue_length": queue_status["pending_count"],
+      # Per-model queue info
+      "queue_by_model": model_status["by_model"],
+      "processing_models": model_status["processing_models"],
+      # All currently processing models (for parallel processing)
+      "active_models": active_models,
+      "active_model_count": len(active_models),
+      # All quadrants being processed across all models
+      "all_processing_quadrants": model_status["all_processing_quadrants"],
+    }
+
+    # Set is_generating based on whether any models are active
+    response["is_generating"] = len(active_models) > 0
+
+    # Include current processing item info if available
+    if queue_status["current_item"]:
+      response["current_item"] = queue_status["current_item"]
+
+    return jsonify(response)
+  finally:
+    conn.close()
+
+
+@app.route("/api/queue/clear", methods=["POST"])
+def api_clear_queue():
+  """
+  API endpoint to clear all items from the generation queue,
+  including cancelling any currently running generation.
+
+  Returns:
+    {
+      "success": true,
+      "cleared_count": N,
+      "cancelled_count": M,
+      "message": "Cleared N pending item(s), cancelled M in-progress item(s)"
+    }
+  """
+  global generation_state, generation_cancelled
+
+  print(f"\n{'=' * 60}")
+  print("🗑️  Clear queue request received")
+  print(f"{'=' * 60}")
+
+  conn = get_db_connection()
+  try:
+    # Clear pending items
+    cleared_count = clear_pending_queue(conn)
+
+    # Cancel any in-progress items
+    cancelled_count = cancel_processing_items(conn)
+
+    # Set the cancellation flag so the worker knows to stop
+    if cancelled_count > 0:
+      generation_cancelled = True
+
+    # Clear busy models
+    with busy_models_lock:
+      busy_models.clear()
+
+    # Clear per-model states
+    model_generation_states.clear()
+
+    # Reset the generation state
+    generation_state["is_generating"] = False
+    generation_state["quadrants"] = []
+    generation_state["status"] = "idle"
+    generation_state["message"] = "Queue cleared"
+    generation_state["error"] = None
+    generation_state["current_item_id"] = None
+
+    if cleared_count > 0 or cancelled_count > 0:
+      print(
+        f"✅ Cleared {cleared_count} pending, cancelled {cancelled_count} in-progress"
+      )
+    else:
+      print("ℹ️  Queue was already empty")
+
+    message_parts = []
+    if cleared_count > 0:
+      message_parts.append(f"Cleared {cleared_count} pending item(s)")
+    if cancelled_count > 0:
+      message_parts.append(f"cancelled {cancelled_count} in-progress item(s)")
+    message = ", ".join(message_parts) if message_parts else "Queue was already empty"
+
+    return jsonify(
+      {
+        "success": True,
+        "cleared_count": cleared_count,
+        "cancelled_count": cancelled_count,
+        "message": message,
+      }
+    )
+  except Exception as e:
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
+  finally:
+    conn.close()
+
+
+@app.route("/api/queue/cancel/<int:item_id>", methods=["POST"])
+def api_cancel_queue_item(item_id: int):
+  """
+  API endpoint to cancel a specific queue item by its ID.
+
+  Returns:
+    {
+      "success": true,
+      "cancelled": true,
+      "item_id": N,
+      "message": "Cancelled queue item N"
+    }
+  """
+  global generation_cancelled
+
+  print(f"\n{'=' * 60}")
+  print(f"🗑️  Cancel queue item request received: item_id={item_id}")
+  print(f"{'=' * 60}")
+
+  conn = get_db_connection()
+  try:
+    cancelled = cancel_queue_item_by_id(conn, item_id)
+
+    if cancelled:
+      # Set the cancellation flag so the worker knows to stop
+      # (in case this was a processing item)
+      generation_cancelled = True
+      print(f"✅ Cancelled queue item {item_id}")
+
+      return jsonify(
+        {
+          "success": True,
+          "cancelled": True,
+          "item_id": item_id,
+          "message": f"Cancelled queue item {item_id}",
+        }
+      )
+    else:
+      print(f"ℹ️  Queue item {item_id} not found or already completed")
+      return jsonify(
+        {
+          "success": True,
+          "cancelled": False,
+          "item_id": item_id,
+          "message": f"Queue item {item_id} not found or already completed",
+        }
+      )
+  except Exception as e:
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
+  finally:
+    conn.close()
+
+
+@app.route("/api/models")
+def api_models():
+  """API endpoint to get available models."""
+  if APP_CONFIG is None:
+    return jsonify({"models": [], "default_model_id": None})
+
+  return jsonify(
+    {
+      "models": [m.to_dict() for m in APP_CONFIG.models],
+      "default_model_id": APP_CONFIG.default_model_id,
+    }
+  )
+
+
+@app.route("/api/delete", methods=["POST"])
+def api_delete():
+  """API endpoint to delete generation data for selected quadrants."""
+  data = request.get_json()
+  if not data or "quadrants" not in data:
+    return jsonify({"success": False, "error": "No quadrants specified"})
+
+  quadrants = data["quadrants"]
+  if not quadrants:
+    return jsonify({"success": False, "error": "Empty quadrants list"})
+
+  # Connect to database (quadrants.db, not tiles.db)
+  db_path = Path(GENERATION_DIR) / "quadrants.db"
+  conn = sqlite3.connect(db_path)
+
+  try:
+    deleted_count = 0
+    for qx, qy in quadrants:
+      # Clear the generation column (set to NULL) but keep the row
+      # Columns are quadrant_x and quadrant_y
+      cursor = conn.execute(
+        """
+        UPDATE quadrants
+        SET generation = NULL
+        WHERE quadrant_x = ? AND quadrant_y = ?
+        """,
+        (qx, qy),
+      )
+      if cursor.rowcount > 0:
+        deleted_count += 1
+
+    conn.commit()
+
+    return jsonify(
+      {
+        "success": True,
+        "message": f"Deleted generation data for {deleted_count} quadrant{'s' if deleted_count != 1 else ''}",
+        "deleted": deleted_count,
+      }
+    )
+  except Exception as e:
+    return jsonify({"success": False, "error": str(e)})
+  finally:
+    conn.close()
+
+
+@app.route("/api/flag", methods=["POST"])
+def api_flag():
+  """API endpoint to flag/unflag selected quadrants."""
+  data = request.get_json()
+  if not data or "quadrants" not in data:
+    return jsonify({"success": False, "error": "No quadrants specified"})
+
+  quadrants = data["quadrants"]
+  if not quadrants:
+    return jsonify({"success": False, "error": "Empty quadrants list"})
+
+  # Get flag value (default to True/1 for flagging, False/0 for unflagging)
+  flag_value = 1 if data.get("flag", True) else 0
+
+  conn = get_db_connection()
+
+  try:
+    # Ensure the flagged column exists
+    ensure_flagged_column_exists(conn)
+
+    flagged_count = 0
+    for qx, qy in quadrants:
+      cursor = conn.execute(
+        """
+        UPDATE quadrants
+        SET flagged = ?
+        WHERE quadrant_x = ? AND quadrant_y = ?
+        """,
+        (flag_value, qx, qy),
+      )
+      if cursor.rowcount > 0:
+        flagged_count += 1
+
+    conn.commit()
+
+    action = "Flagged" if flag_value else "Unflagged"
+    return jsonify(
+      {
+        "success": True,
+        "message": f"{action} {flagged_count} quadrant{'s' if flagged_count != 1 else ''}",
+        "count": flagged_count,
+        "flagged": bool(flag_value),
+      }
+    )
+  except Exception as e:
+    return jsonify({"success": False, "error": str(e)})
+  finally:
+    conn.close()
+
+
+# Hardcoded water replacement color
+WATER_REPLACEMENT_COLOR = "#4A6372"
+DEFAULT_SOFTNESS = 30.0  # Lower = more precise color matching
+
+
+@app.route("/api/fix-water", methods=["POST"])
+def api_fix_water():
+  """API endpoint to fix water color in a quadrant using soft blending."""
+  data = request.get_json()
+  if not data:
+    return jsonify({"success": False, "error": "No data provided"}), 400
+
+  # Required fields
+  x = data.get("x")
+  y = data.get("y")
+  target_color = data.get("target_color")
+
+  if x is None or y is None:
+    return jsonify({"success": False, "error": "Missing x or y coordinate"}), 400
+
+  if not target_color:
+    return jsonify({"success": False, "error": "Missing target_color"}), 400
+
+  # Optional fields
+  softness = data.get("softness", DEFAULT_SOFTNESS)
+
+  # Parse colors
+  try:
+    target_rgb = hex_to_rgb(target_color)
+  except ValueError as e:
+    return jsonify({"success": False, "error": f"Invalid target color: {e}"}), 400
+
+  try:
+    replacement_rgb = hex_to_rgb(WATER_REPLACEMENT_COLOR)
+  except ValueError as e:
+    return jsonify({"success": False, "error": f"Invalid replacement color: {e}"}), 400
+
+  print(f"\n{'=' * 60}")
+  print(f"💧 Water fix request: quadrant ({x}, {y})")
+  print(f"   Target color: {target_color} -> RGB{target_rgb}")
+  print(f"   Replacement color: {WATER_REPLACEMENT_COLOR} -> RGB{replacement_rgb}")
+  print(f"   Softness: {softness}")
+  print(f"{'=' * 60}")
+
+  # Connect to database
+  db_path = Path(GENERATION_DIR) / "quadrants.db"
+  conn = sqlite3.connect(db_path)
+
+  try:
+    config = get_generation_config(conn)
+    exports_dir = Path(GENERATION_DIR) / "exports"
+
+    success = process_color_replacement(
+      conn=conn,
+      config=config,
+      x=int(x),
+      y=int(y),
+      target_color=target_rgb,
+      replacement_color=replacement_rgb,
+      softness=float(softness),
+      dry_run=False,  # Apply directly to database
+      exports_dir=exports_dir,
+    )
+
+    if success:
+      print(f"✅ Water fix complete for quadrant ({x}, {y})")
+      return jsonify(
+        {
+          "success": True,
+          "message": f"Fixed water color in quadrant ({x}, {y})",
+          "quadrant": {"x": x, "y": y},
+          "target_color": target_color,
+          "replacement_color": WATER_REPLACEMENT_COLOR,
+        }
+      )
+    else:
+      print(f"❌ Water fix failed for quadrant ({x}, {y})")
+      return jsonify(
+        {"success": False, "error": f"Failed to process quadrant ({x}, {y})"}
+      ), 400
+
+  except Exception as e:
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
+  finally:
+    conn.close()
+
+
+@app.route("/api/water-fill", methods=["POST"])
+def api_water_fill():
+  """API endpoint to fill an entire quadrant with the water color."""
+
+  from PIL import Image
+
+  from isometric_nyc.e2e_generation.shared import (
+    get_quadrant_generation,
+    image_to_png_bytes,
+    png_bytes_to_image,
+    save_quadrant_generation,
+  )
+
+  data = request.get_json()
+  if not data:
+    return jsonify({"success": False, "error": "No data provided"}), 400
+
+  x = data.get("x")
+  y = data.get("y")
+
+  if x is None or y is None:
+    return jsonify({"success": False, "error": "Missing x or y coordinate"}), 400
+
+  print(f"\n{'=' * 60}")
+  print(f"💧 Water fill request: quadrant ({x}, {y})")
+  print(f"   Fill color: {WATER_REPLACEMENT_COLOR}")
+  print(f"{'=' * 60}")
+
+  # Connect to database
+  db_path = Path(GENERATION_DIR) / "quadrants.db"
+  conn = sqlite3.connect(db_path)
+
+  try:
+    config = get_generation_config(conn)
+
+    # Get existing generation to determine size, or use config defaults
+    generation_bytes = get_quadrant_generation(conn, int(x), int(y))
+    if generation_bytes is not None:
+      # Get dimensions from existing image
+      existing_img = png_bytes_to_image(generation_bytes)
+      width, height = existing_img.size
+      mode = existing_img.mode
+    else:
+      # No existing generation - use quadrant size from config
+      # Quadrant is half the tile size
+      width = config.get("width_px", 512) // 2
+      height = config.get("height_px", 512) // 2
+      mode = "RGBA"
+      print(f"   No existing generation - creating new {width}x{height} image")
+
+    # Parse water color
+    water_rgb = hex_to_rgb(WATER_REPLACEMENT_COLOR)
+
+    # Create solid color image
+    if mode == "RGBA":
+      fill_color = (*water_rgb, 255)  # Add full alpha
+    else:
+      fill_color = water_rgb
+
+    filled_img = Image.new(mode, (width, height), fill_color)
+
+    # Save to database
+    png_bytes = image_to_png_bytes(filled_img)
+    save_quadrant_generation(conn, config, int(x), int(y), png_bytes)
+
+    print(f"✅ Water fill complete for quadrant ({x}, {y})")
+    return jsonify(
+      {
+        "success": True,
+        "message": f"Filled quadrant ({x}, {y}) with water color",
+        "quadrant": {"x": x, "y": y},
+        "color": WATER_REPLACEMENT_COLOR,
+      }
+    )
+
+  except Exception as e:
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
+  finally:
+    conn.close()
+
+
+@app.route("/api/render", methods=["POST"])
+def api_render():
+  """API endpoint to render tiles for selected quadrants."""
+  global generation_state
+
+  # Parse request
+  data = request.get_json()
+  if not data or "quadrants" not in data:
+    return jsonify(
+      {
+        "success": False,
+        "error": "Missing 'quadrants' in request body",
+      }
+    ), 400
+
+  quadrants = data["quadrants"]
+  if not isinstance(quadrants, list) or len(quadrants) == 0:
+    return jsonify(
+      {
+        "success": False,
+        "error": "quadrants must be a non-empty list",
+      }
+    ), 400
+
+  # Convert to list of tuples
+  selected_quadrants = []
+  for q in quadrants:
+    if isinstance(q, list) and len(q) == 2:
+      selected_quadrants.append((int(q[0]), int(q[1])))
+    elif isinstance(q, dict) and "x" in q and "y" in q:
+      selected_quadrants.append((int(q["x"]), int(q["y"])))
+    else:
+      return jsonify(
+        {
+          "success": False,
+          "error": f"Invalid quadrant format: {q}",
+        }
+      ), 400
+
+  print(f"\n{'=' * 60}")
+  print(f"🎨 Render request: {selected_quadrants}")
+  print(f"{'=' * 60}")
+
+  # Always add to queue (database-backed queue handles everything)
+  result = add_to_queue_db(selected_quadrants, "render")
+  return jsonify(result), 202  # 202 Accepted
+
+
+@app.route("/api/generate", methods=["POST"])
+def api_generate():
+  """
+  API endpoint to generate tiles for selected quadrants.
+
+  Request body:
+    {
+      "quadrants": [[x, y], ...] or [{"x": x, "y": y}, ...],
+      "model_id": "optional-model-id",
+      "context": [[x, y], ...] or [{"x": x, "y": y}, ...]  // Optional context quadrants
+    }
+
+  The context quadrants are used to provide surrounding pixel art context for
+  the generation. If a context quadrant has an existing generation, that will
+  be used; otherwise the render content will be used.
+  """
+  global generation_state
+
+  # Parse request
+  data = request.get_json()
+  if not data or "quadrants" not in data:
+    return jsonify(
+      {
+        "success": False,
+        "error": "Missing 'quadrants' in request body",
+      }
+    ), 400
+
+  quadrants = data["quadrants"]
+  if not isinstance(quadrants, list) or len(quadrants) == 0:
+    return jsonify(
+      {
+        "success": False,
+        "error": "quadrants must be a non-empty list",
+      }
+    ), 400
+
+  # Get optional model_id from request
+  model_id = data.get("model_id")
+
+  # Convert quadrants to list of tuples
+  selected_quadrants = []
+  for q in quadrants:
+    if isinstance(q, list) and len(q) == 2:
+      selected_quadrants.append((int(q[0]), int(q[1])))
+    elif isinstance(q, dict) and "x" in q and "y" in q:
+      selected_quadrants.append((int(q["x"]), int(q["y"])))
+    else:
+      return jsonify(
+        {
+          "success": False,
+          "error": f"Invalid quadrant format: {q}",
+        }
+      ), 400
+
+  # Parse optional context quadrants
+  context_quadrants = None
+  context_raw = data.get("context")
+  if context_raw:
+    if not isinstance(context_raw, list):
+      return jsonify(
+        {
+          "success": False,
+          "error": "context must be a list of quadrant coordinates",
+        }
+      ), 400
+
+    context_quadrants = []
+    for q in context_raw:
+      if isinstance(q, list) and len(q) == 2:
+        context_quadrants.append((int(q[0]), int(q[1])))
+      elif isinstance(q, dict) and "x" in q and "y" in q:
+        context_quadrants.append((int(q["x"]), int(q["y"])))
+      else:
+        return jsonify(
+          {
+            "success": False,
+            "error": f"Invalid context quadrant format: {q}",
+          }
+        ), 400
+
+  # Parse optional prompt
+  prompt = data.get("prompt")
+  if prompt and not isinstance(prompt, str):
+    return jsonify(
+      {
+        "success": False,
+        "error": "prompt must be a string",
+      }
+    ), 400
+
+  # Clean up prompt (strip whitespace, None if empty)
+  if prompt:
+    prompt = prompt.strip()
+    if not prompt:
+      prompt = None
+
+  print(f"\n{'=' * 60}")
+  print(f"🎯 Generation request: {selected_quadrants}")
+  if model_id:
+    print(f"   Model: {model_id}")
+  if context_quadrants:
+    print(f"   Context: {context_quadrants}")
+  if prompt:
+    print(f"   Prompt: {prompt}")
+  print(f"{'=' * 60}")
+
+  # Always add to queue (database-backed queue handles everything)
+  result = add_to_queue_db(
+    selected_quadrants, "generate", model_id, context_quadrants, prompt
+  )
+  return jsonify(result), 202  # 202 Accepted
+
+
+# =============================================================================
+# Rectangle Generation API
+# =============================================================================
+
+
+def load_generated_quadrants(conn: sqlite3.Connection) -> set[Point]:
+  """Load all quadrants that have generations from the database."""
+  cursor = conn.cursor()
+  cursor.execute(
+    "SELECT quadrant_x, quadrant_y FROM quadrants WHERE generation IS NOT NULL"
+  )
+  return {Point(row[0], row[1]) for row in cursor.fetchall()}
+
+
+@app.route("/api/generate-rectangle", methods=["POST"])
+def api_generate_rectangle():
+  """
+  API endpoint to generate all quadrants within a rectangle.
+
+  Request body:
+    {
+      "tl": [x, y] or {"x": x, "y": y},  // Top-left corner
+      "br": [x, y] or {"x": x, "y": y},  // Bottom-right corner
+      "model_id": "optional-model-id"    // Optional model ID
+    }
+
+  Returns:
+    {
+      "success": true,
+      "plan_summary": {...},
+      "queued_count": N,
+      "message": "Queued N generation steps"
+    }
+  """
+  global generation_state
+
+  # Parse request
+  data = request.get_json()
+  if not data:
+    return jsonify({"success": False, "error": "No JSON body provided"}), 400
+
+  # Parse top-left coordinate
+  tl_raw = data.get("tl")
+  if not tl_raw:
+    return jsonify(
+      {"success": False, "error": "Missing 'tl' (top-left) coordinate"}
+    ), 400
+
+  try:
+    if isinstance(tl_raw, list) and len(tl_raw) == 2:
+      tl = Point(int(tl_raw[0]), int(tl_raw[1]))
+    elif isinstance(tl_raw, dict) and "x" in tl_raw and "y" in tl_raw:
+      tl = Point(int(tl_raw["x"]), int(tl_raw["y"]))
+    else:
+      return jsonify({"success": False, "error": f"Invalid 'tl' format: {tl_raw}"}), 400
+  except (ValueError, TypeError) as e:
+    return jsonify({"success": False, "error": f"Invalid 'tl' coordinate: {e}"}), 400
+
+  # Parse bottom-right coordinate
+  br_raw = data.get("br")
+  if not br_raw:
+    return jsonify(
+      {"success": False, "error": "Missing 'br' (bottom-right) coordinate"}
+    ), 400
+
+  try:
+    if isinstance(br_raw, list) and len(br_raw) == 2:
+      br = Point(int(br_raw[0]), int(br_raw[1]))
+    elif isinstance(br_raw, dict) and "x" in br_raw and "y" in br_raw:
+      br = Point(int(br_raw["x"]), int(br_raw["y"]))
+    else:
+      return jsonify({"success": False, "error": f"Invalid 'br' format: {br_raw}"}), 400
+  except (ValueError, TypeError) as e:
+    return jsonify({"success": False, "error": f"Invalid 'br' coordinate: {e}"}), 400
+
+  # Validate bounds
+  if tl.x > br.x or tl.y > br.y:
+    return jsonify(
+      {
+        "success": False,
+        "error": "Invalid bounds: top-left must be above and to the left of bottom-right",
+      }
+    ), 400
+
+  # Get optional model_id
+  model_id = data.get("model_id")
+
+  print(f"\n{'=' * 60}")
+  print(f"📐 Rectangle generation request: ({tl.x},{tl.y}) to ({br.x},{br.y})")
+  if model_id:
+    print(f"   Model: {model_id}")
+  print(f"{'=' * 60}")
+
+  # Load existing generated quadrants
+  conn = get_db_connection()
+  try:
+    generated = load_generated_quadrants(conn)
+
+    # Create the rectangle plan
+    bounds = RectBounds(tl, br)
+    plan = create_rectangle_plan(bounds, generated)
+
+    # Validate the plan
+    is_valid, errors = validate_plan(plan)
+    if not is_valid:
+      print(f"❌ Invalid plan generated: {errors}")
+      return jsonify(
+        {
+          "success": False,
+          "error": f"Internal error: invalid plan generated - {errors}",
+        }
+      ), 500
+
+    # Get plan summary for response
+    summary = get_plan_summary(plan)
+
+    if len(plan.steps) == 0:
+      print("ℹ️  No quadrants to generate (all already generated)")
+      return jsonify(
+        {
+          "success": True,
+          "plan_summary": summary,
+          "queued_count": 0,
+          "message": "No quadrants to generate - all already generated",
+        }
+      )
+
+    # Queue all generation steps
+    queued_count = 0
+    for step in plan.steps:
+      quadrants = [(q.x, q.y) for q in step.quadrants]
+      add_to_queue(conn, QueueItemType.GENERATE, quadrants, model_id)
+      queued_count += 1
+
+    # Ensure queue worker is running
+    start_queue_worker()
+
+    print(f"✅ Queued {queued_count} generation step(s)")
+    print(f"   Steps by type: {summary['steps_by_type']}")
+
+    return jsonify(
+      {
+        "success": True,
+        "plan_summary": summary,
+        "queued_count": queued_count,
+        "message": f"Queued {queued_count} generation step(s) for {summary['total_quadrants']} quadrant(s)",
+      }
+    )
+
+  except Exception as e:
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
+  finally:
+    conn.close()
+
+
+def main():
+  global GENERATION_DIR, WEB_SERVER_PORT, APP_CONFIG
+
+  parser = argparse.ArgumentParser(description="View generated tiles in a grid.")
+  parser.add_argument(
+    "generation_dir",
+    type=Path,
+    help="Path to the generation directory containing quadrants.db",
+  )
+  parser.add_argument(
+    "--port",
+    type=int,
+    default=8080,
+    help="Port to run the Flask server on (default: 8080)",
+  )
+  parser.add_argument(
+    "--host",
+    default="127.0.0.1",
+    help="Host to bind to (default: 127.0.0.1)",
+  )
+  parser.add_argument(
+    "--web-port",
+    type=int,
+    default=DEFAULT_WEB_PORT,
+    help=f"Port for the Vite web server used for rendering (default: {DEFAULT_WEB_PORT})",
+  )
+  parser.add_argument(
+    "--config",
+    type=Path,
+    default=None,
+    help="Path to app_config.json (default: looks in the e2e_generation directory)",
+  )
+
+  args = parser.parse_args()
+
+  GENERATION_DIR = args.generation_dir.resolve()
+  WEB_SERVER_PORT = args.web_port
+
+  if not GENERATION_DIR.exists():
+    print(f"❌ Error: Directory not found: {GENERATION_DIR}")
+    return 1
+
+  db_path = GENERATION_DIR / "quadrants.db"
+  if not db_path.exists():
+    print(f"❌ Error: Database not found: {db_path}")
+    return 1
+
+  # Load app configuration
+  APP_CONFIG = load_app_config(args.config)
+  print(f"📦 Loaded {len(APP_CONFIG.models)} model(s) from configuration")
+  for model in APP_CONFIG.models:
+    default_marker = (
+      " (default)" if model.model_id == APP_CONFIG.default_model_id else ""
+    )
+    has_key = "✓" if model.api_key else "✗"
+    print(f"   {has_key} {model.name} ({model.model_id}){default_marker}")
+
+  # Initialize the generation queue table
+  conn = get_db_connection()
+  try:
+    init_queue_table(conn)
+    # Reset any items that were mid-processing when server shut down
+    # These will be retried automatically
+    reset_count = reset_all_processing_items(conn)
+    if reset_count > 0:
+      print(f"🔄 Reset {reset_count} interrupted generation(s) - will be retried")
+    # Clean up old completed items
+    deleted_count = clear_completed_items(conn)
+    if deleted_count > 0:
+      print(f"🧹 Cleaned up {deleted_count} old completed queue item(s)")
+  finally:
+    conn.close()
+
+  # Start the queue worker
+  start_queue_worker()
+
+  # Start the global web renderer
+  try:
+    start_global_renderer(port=WEB_SERVER_PORT)
+  except Exception as e:
+    print(f"⚠️  Failed to start web renderer: {e}")
+    print("   Rendering will start on demand")
+
+  print("🎨 Starting tile viewer...")
+  print(f"   Generation dir: {GENERATION_DIR}")
+  print(f"   Flask server: http://{args.host}:{args.port}/")
+  print(f"   Web render port: {WEB_SERVER_PORT}")
+  print("   Press Ctrl+C to stop")
+
+  try:
+    app.run(host=args.host, port=args.port, debug=True, use_reloader=False)
+  finally:
+    # Clean up queue worker
+    print("\n🛑 Stopping queue worker...")
+    stop_queue_worker()
+
+    # Clean up web renderer
+    print("🛑 Stopping web renderer...")
+    stop_global_renderer()
+
+  return 0
+
+
+if __name__ == "__main__":
+  exit(main())
+
+```
+
+Now update the render_template call to include flagged_tiles:
+
+```python
+"""
+Simple web app to view generated tiles in an nx×ny grid.
+
+Usage:
+  uv run python src/isometric_nyc/e2e_generation/view_generations.py <generation_dir>
+
+Then open http://localhost:8080/?x=0&y=0 in your browser.
+
+URL Parameters:
+  x, y   - Starting coordinates (default: 0, 0)
+  nx, ny - Grid size nx×ny (default: 2, max: 20)
+  lines  - Show grid lines: 1=on, 0=off (default: 1)
+  coords - Show coordinates: 1=on, 0=off (default: 1)
+  render - Show renders instead of generations: 1=renders, 0=generations (default: 0)
+
+Keyboard shortcuts:
+  Arrow keys - Navigate the grid
+  L          - Toggle lines
+  C          - Toggle coords
+  R          - Toggle render/generation mode
+  G          - Generate selected quadrants
+  S          - Toggle select tool
+"""
+
+import argparse
+import hashlib
+import json
+import logging
+import sqlite3
+import threading
+import time
+import traceback
+from pathlib import Path
+
+from dotenv import load_dotenv
+from flask import Flask, Response, jsonify, render_template, request
+
+from isometric_nyc.e2e_generation.generate_omni import run_generation_for_quadrants
+from isometric_nyc.e2e_generation.make_rectangle_plan import (
+  Point,
+  RectBounds,
+  create_rectangle_plan,
+  get_plan_summary,
+  validate_plan,
+)
+from isometric_nyc.e2e_generation.model_config import AppConfig, load_app_config
+from isometric_nyc.e2e_generation.queue_db import (
+  QueueItemType,
+  add_to_queue,
+  cancel_processing_items,
+  cancel_queue_item_by_id,
+  clear_completed_items,
+  clear_pending_queue,
+  get_next_pending_item_for_available_model,
+  get_pending_queue,
+  get_queue_position_for_model,
+  get_queue_status,
+  get_queue_status_by_model,
+  init_queue_table,
+  mark_item_complete,
+  mark_item_error,
+  mark_item_processing,
+  reset_all_processing_items,
+)
+from isometric_nyc.e2e_generation.replace_color import hex_to_rgb
+from isometric_nyc.e2e_generation.replace_color import (
+  process_quadrant as process_color_replacement,
+)
+from isometric_nyc.e2e_generation.shared import DEFAULT_WEB_PORT, get_generation_config
+from isometric_nyc.e2e_generation.web_renderer import (
+  start_global_renderer,
+  stop_global_renderer,
+)
+
+# Load environment variables
+load_dotenv()
+
+# Setup Flask with template and static folders relative to this file
+VIEWER_DIR = Path(__file__).parent
+app = Flask(
+  __name__,
+  template_folder=str(VIEWER_DIR / "templates"),
+  static_folder=str(VIEWER_DIR / "static"),
+)
+
+
+# =============================================================================
+# Logging Configuration - Suppress noisy tile request logs
+# =============================================================================
+class TileRequestFilter(logging.Filter):
+  """Filter out noisy tile and static file requests from logs."""
+
+  def filter(self, record: logging.LogRecord) -> bool:
+    message = record.getMessage()
+    # Filter out tile requests, static files, and api/status polling
+    if "/tile/" in message:
+      return False
+    if "/static/" in message:
+      return False
+    if "/api/status" in message:
+      return False
+    return True
+
+
+# Apply filter to werkzeug logger (Flask's HTTP request logger)
+werkzeug_logger = logging.getLogger("werkzeug")
+werkzeug_logger.addFilter(TileRequestFilter())
+
+# Generation lock - protects generation_state updates
+generation_lock = threading.Lock()
+
+# Per-model generation states
+# Key is model_id (None for default), value is state dict
+model_generation_states: dict[str | None, dict] = {}
+
+# Legacy global generation_state for backwards compatibility with API
+generation_state = {
+  "is_generating": False,
+  "quadrants": [],  # List of quadrant coords being generated
+  "status": "idle",  # idle, validating, rendering, uploading, generating, saving, complete, error
+  "message": "",
+  "error": None,
+  "started_at": None,
+  "current_item_id": None,
+  "model_id": None,
+}
+
+# Track which models are currently processing
+busy_models: set[str | None] = set()
+busy_models_lock = threading.Lock()
+
+# Queue worker thread
+queue_worker_thread: threading.Thread | None = None
+queue_worker_running = False
+
+# Cancellation flag - set to True to cancel all generations
+generation_cancelled = False
+
+# Will be set by main()
+GENERATION_DIR: Path | None = None
+WEB_SERVER_PORT: int = DEFAULT_WEB_PORT
+APP_CONFIG: AppConfig | None = None
+
+
+def get_db_connection() -> sqlite3.Connection:
+  """Get a connection to the quadrants database."""
+  if GENERATION_DIR is None:
+    raise RuntimeError("GENERATION_DIR not set")
+  db_path = GENERATION_DIR / "quadrants.db"
+  return sqlite3.connect(db_path)
+
+
+def ensure_flagged_column_exists(conn: sqlite3.Connection) -> None:
+  """Ensure the flagged column exists in the quadrants table (migration)."""
+  cursor = conn.cursor()
+  # Check if column exists
+  cursor.execute("PRAGMA table_info(quadrants)")
+  columns = [row[1] for row in cursor.fetchall()]
+  if "flagged" not in columns:
+    cursor.execute("ALTER TABLE quadrants ADD COLUMN flagged INTEGER DEFAULT 0")
+    conn.commit()
+    print("📝 Added 'flagged' column to quadrants table")
+
+
+def get_quadrant_generation(x: int, y: int) -> bytes | None:
+  """Get the generation bytes for a quadrant."""
+  conn = get_db_connection()
+  try:
+    cursor = conn.cursor()
+    cursor.execute(
+      "SELECT generation FROM quadrants WHERE quadrant_x = ? AND quadrant_y = ?",
+      (x, y),
+    )
+    row = cursor.fetchone()
+    return row[0] if row and row[0] else None
+  finally:
+    conn.close()
+
+
+def get_quadrant_render(x: int, y: int) -> bytes | None:
+  """Get the render bytes for a quadrant."""
+  conn = get_db_connection()
+  try:
+    cursor = conn.cursor()
+    cursor.execute(
+      "SELECT render FROM quadrants WHERE quadrant_x = ? AND quadrant_y = ?",
+      (x, y),
+    )
+    row = cursor.fetchone()
+    return row[0] if row and row[0] else None
+  finally:
+    conn.close()
+
+
+def get_quadrant_data(x: int, y: int, use_render: bool = False) -> bytes | None:
+  """Get either render or generation bytes for a quadrant."""
+  if use_render:
+    return get_quadrant_render(x, y)
+  return get_quadrant_generation(x, y)
+
+
+def get_quadrant_info(x: int, y: int, use_render: bool = False) -> dict:
+  """Get info about a quadrant including whether it has data and is flagged."""
+  conn = get_db_connection()
+  try:
+    # Ensure flagged column exists
+    ensure_flagged_column_exists(conn)
+
+    cursor = conn.cursor()
+    column = "render" if use_render else "generation"
+    cursor.execute(
+      f"""
+      SELECT {column} IS NOT NULL, COALESCE(flagged, 0)
+      FROM quadrants
+      WHERE quadrant_x = ? AND quadrant_y = ?
+      """,
+      (x, y),
+    )
+    row = cursor.fetchone()
+    if row:
+      return {"has_data": bool(row[0]), "flagged": bool(row[1])}
+    return {"has_data": False, "flagged": False}
+  finally:
+    conn.close()
+
+
+@app.route("/")
+def index():
+  """Main page showing nx×ny grid of tiles."""
+  x = request.args.get("x", 0, type=int)
+  y = request.args.get("y", 0, type=int)
+  # Default fallback if nx/ny not present
+  n_default = request.args.get("n", 2, type=int)
+  nx = request.args.get("nx", n_default, type=int)
+  ny = request.args.get("ny", n_default, type=int)
+  size_px = request.args.get("size", 256, type=int)
+  show_lines = request.args.get("lines", "1") == "1"
+  show_coords = request.args.get("coords", "1") == "1"
+  show_render = request.args.get("render", "0") == "1"
+
+  # Clamp nx/ny to reasonable bounds
+  nx = max(1, min(nx, 20))
+  ny = max(1, min(ny, 20))
+
+  # Check which tiles have data and flagged status
+  tiles = {}
+  flagged_tiles = {}
+  for dx in range(nx):
+    for dy in range(ny):
+      qx, qy = x + dx, y + dy
+      info = get_quadrant_info(qx, qy, use_render=show_render)
+      tiles[(dx, dy)] = info["has_data"]
+      flagged_tiles[(dx, dy)] = info["flagged"]
+
+  # Get model configuration for the frontend
+  models_config = []
+  default_model_id = None
+  if APP_CONFIG:
+    models_config = [m.to_dict() for m in APP_CONFIG.models]
+    default_model_id = APP_CONFIG.default_model_id
+
+  return render_template(
+    "viewer.html",
+    x=x,
+    y=y,
+    nx=nx,
+    ny=ny,
+    size_px=size_px,
+    show_lines=show_lines,
+    show_coords=show_coords,
+    show_render=show_render,
+    tiles=tiles,
+    flagged_tiles=flagged_tiles,
+    generation_dir=str(GENERATION_DIR),
+    models_config=json.dumps(models_config),
+    default_model_id=default_model_id,
+  )
+
+
+@app.route("/tile/<x>/<y>")
+def tile(x: str, y: str):
+  """Serve a tile image (generation or render based on query param)."""
+  try:
+    qx, qy = int(x), int(y)
+  except ValueError:
+    return Response("Invalid coordinates", status=400)
+
+  use_render = request.args.get("render", "0") == "1"
+  data = get_quadrant_data(qx, qy, use_render=use_render)
+
+  if data is None:
+    return Response("Not found", status=404)
+
+  # Generate ETag from content hash for caching
+  etag = hashlib.md5(data).hexdigest()
+
+  # Check if client has cached version
+  if_none_match = request.headers.get("If-None-Match")
+  if if_none_match and if_none_match == etag:
+    return Response(status=304)  # Not Modified
+
+  response = Response(data, mimetype="image/png")
+  response.headers["ETag"] = etag
+  response.headers["Cache-Control"] = "public, max-age=3600"  # Cache for 1 hour
+  return response
+
+
+# =============================================================================
+# Generation API
+# =============================================================================
+
+
+def update_generation_state(
+  status: str, message: str = "", error: str | None = None
+) -> None:
+  """Update the global generation state."""
+  global generation_state
+  generation_state["status"] = status
+  generation_state["message"] = message
+  if error:
+    generation_state["error"] = error
+
+
+def calculate_context_quadrants(
+  conn: sqlite3.Connection,
+  selected_quadrants: list[tuple[int, int]],
+) -> list[tuple[int, int]]:
+  """
+  Calculate context quadrants lazily at execution time.
+
+  This determines which adjacent quadrants have existing generations
+  that can provide context for the current generation.
+
+  For a valid generation, we need at least a 2x2 block where all 4 quadrants
+  are either being generated or already generated.
+
+  Args:
+    conn: Database connection
+    selected_quadrants: The quadrants being generated
+
+  Returns:
+    List of quadrant coordinates that have existing generations and can
+    provide context for the current generation.
+  """
+  from isometric_nyc.e2e_generation.shared import (
+    get_quadrant_generation as shared_get_quadrant_generation,
+  )
+
+  selected_set = set(selected_quadrants)
+  context = []
+
+  # Find all quadrants adjacent to the selection that have generations
+  # Check all potential 2x2 blocks that include any selected quadrant
+  checked = set()
+
+  for qx, qy in selected_quadrants:
+    # Check all neighbors that could form a 2x2 block with this quadrant
+    # A quadrant can be in 4 different 2x2 blocks (as TL, TR, BL, BR corner)
+    potential_context = [
+      # Neighbors for 2x2 where (qx, qy) is top-left
+      (qx + 1, qy),
+      (qx, qy + 1),
+      (qx + 1, qy + 1),
+      # Neighbors for 2x2 where (qx, qy) is top-right
+      (qx - 1, qy),
+      (qx - 1, qy + 1),
+      (qx, qy + 1),
+      # Neighbors for 2x2 where (qx, qy) is bottom-left
+      (qx, qy - 1),
+      (qx + 1, qy - 1),
+      (qx + 1, qy),
+      # Neighbors for 2x2 where (qx, qy) is bottom-right
+      (qx - 1, qy - 1),
+      (qx, qy - 1),
+      (qx - 1, qy),
+    ]
+
+    for nx, ny in potential_context:
+      coord = (nx, ny)
+      if coord in checked or coord in selected_set:
+        continue
+      checked.add(coord)
+
+      # Check if this quadrant has an existing generation
+      gen = shared_get_quadrant_generation(conn, nx, ny)
+      if gen is not None:
+        context.append(coord)
+
+  return context
+
+
+def run_generation(
+  conn: sqlite3.Connection,
+  config: dict,
+  selected_quadrants: list[tuple[int, int]],
+  model_id: str | None = None,
+  context_quadrants: list[tuple[int, int]] | None = None,
+  prompt: str | None = None,
+) -> dict:
+  """
+  Run the full generation pipeline for selected quadrants.
+
+  This is a wrapper around run_generation_for_quadrants that ensures
+  the web server is running and updates the global generation state.
+
+  Args:
+    conn: Database connection
+    config: Generation config dict
+    selected_quadrants: List of (x, y) quadrant coordinates to generate
+    model_id: Optional model ID for generation
+    context_quadrants: Optional list of (x, y) quadrant coordinates to use as
+      context. These quadrants provide surrounding pixel art context for the
+      generation.
+    prompt: Optional additional prompt text for generation
+
+  Returns dict with success status and message/error.
+  """
+  # Get model configuration if specified
+  model_config = None
+  if model_id and APP_CONFIG:
+    model_config = APP_CONFIG.get_model(model_id)
+  elif APP_CONFIG:
+    model_config = APP_CONFIG.get_default_model()
+
+  # Create status callback that updates global state
+  def status_callback(status: str, message: str) -> None:
+    update_generation_state(status, message)
+
+  # Use the shared library function
+  return run_generation_for_quadrants(
+    conn=conn,
+    config=config,
+    selected_quadrants=selected_quadrants,
+    port=WEB_SERVER_PORT,
+    status_callback=status_callback,
+    model_config=model_config,
+    context_quadrants=context_quadrants,
+    prompt=prompt,
+  )
+
+
+def render_quadrant_with_renderer(
+  conn: sqlite3.Connection,
+  config: dict,
+  x: int,
+  y: int,
+) -> bytes | None:
+  """
+  Render a quadrant using the global web renderer.
+
+  Returns the PNG bytes of the rendered quadrant.
+  """
+  from isometric_nyc.e2e_generation.shared import (
+    ensure_quadrant_exists,
+    save_quadrant_render,
+  )
+  from isometric_nyc.e2e_generation.web_renderer import get_web_renderer
+
+  # Ensure the quadrant exists in the database
+  quadrant = ensure_quadrant_exists(conn, config, x, y)
+
+  print(f"   🎨 Rendering tile for quadrant ({x}, {y})...")
+
+  renderer = get_web_renderer(port=WEB_SERVER_PORT)
+
+  # Render the tile
+  quadrant_images = renderer.render_quadrant(
+    quadrant_x=x,
+    quadrant_y=y,
+    lat=quadrant["lat"],
+    lng=quadrant["lng"],
+    width_px=config["width_px"],
+    height_px=config["height_px"],
+    camera_azimuth_degrees=config["camera_azimuth_degrees"],
+    camera_elevation_degrees=config["camera_elevation_degrees"],
+    view_height_meters=config.get("view_height_meters", 200),
+  )
+
+  # Save all quadrants to database
+  result_bytes = None
+  for (dx, dy), png_bytes in quadrant_images.items():
+    qx, qy = x + dx, y + dy
+    save_quadrant_render(conn, config, qx, qy, png_bytes)
+    print(f"      ✓ Saved render for ({qx}, {qy})")
+
+    # Return the specific quadrant we were asked for
+    if qx == x and qy == y:
+      result_bytes = png_bytes
+
+  return result_bytes
+
+
+def process_queue_item_from_db(item_id: int) -> dict:
+  """Process a single queue item from the database."""
+  global generation_state
+
+  conn = get_db_connection()
+  try:
+    # Get item details
+    cursor = conn.cursor()
+    cursor.execute(
+      """
+      SELECT item_type, quadrants, model_id, context_quadrants, prompt
+      FROM generation_queue
+      WHERE id = ?
+      """,
+      (item_id,),
+    )
+    row = cursor.fetchone()
+    if not row:
+      return {"success": False, "error": "Item not found"}
+
+    item_type = QueueItemType(row[0])
+    quadrants = json.loads(row[1])
+    model_id = row[2]
+    context_quadrants_raw = json.loads(row[3]) if row[3] else None
+    prompt = row[4]
+
+    # Convert to list of tuples
+    selected_quadrants = [(q[0], q[1]) for q in quadrants]
+
+    # Calculate context lazily if not explicitly provided
+    # This ensures we use the most up-to-date context based on what's
+    # actually generated at execution time (not queue time)
+    if context_quadrants_raw:
+      context_quadrants = [(q[0], q[1]) for q in context_quadrants_raw]
+      print(
+        f"   📋 Using explicit context from queue: {len(context_quadrants)} quadrant(s)"
+      )
+    else:
+      # Calculate context lazily based on current generation state
+      context_quadrants = calculate_context_quadrants(conn, selected_quadrants)
+      if context_quadrants:
+        print(f"   📋 Calculated lazy context: {len(context_quadrants)} quadrant(s)")
+      else:
+        print(
+          "   📋 No context quadrants (2x2 self-contained or no adjacent generations)"
+        )
+
+    # Mark item as processing
+    mark_item_processing(conn, item_id)
+
+    # Initialize generation state
+    generation_state["is_generating"] = True
+    generation_state["quadrants"] = selected_quadrants
+    generation_state["status"] = (
+      "starting" if item_type == QueueItemType.GENERATE else "rendering"
+    )
+    generation_state["message"] = f"Starting {item_type.value}..."
+    generation_state["error"] = None
+    generation_state["started_at"] = time.time()
+    generation_state["current_item_id"] = item_id
+    generation_state["model_id"] = model_id
+
+    print(f"\n{'=' * 60}")
+    emoji = "🎯" if item_type == QueueItemType.GENERATE else "🎨"
+    print(
+      f"{emoji} {item_type.value.title()} request (item {item_id}): {selected_quadrants}"
+    )
+    if model_id:
+      print(f"   Model: {model_id}")
+    if context_quadrants:
+      print(f"   Context: {context_quadrants}")
+    if prompt:
+      print(f"   Prompt: {prompt}")
+    print(f"{'=' * 60}")
+
+    config = get_generation_config(conn)
+
+    if item_type == QueueItemType.GENERATE:
+      result = run_generation(
+        conn, config, selected_quadrants, model_id, context_quadrants, prompt
+      )
+      if result["success"]:
+        print(f"✅ Generation complete: {result['message']}")
+        generation_state["status"] = "complete"
+        generation_state["message"] = result["message"]
+        mark_item_complete(conn, item_id, result["message"])
+      else:
+        print(f"❌ Generation failed: {result['error']}")
+        generation_state["status"] = "error"
+        generation_state["error"] = result["error"]
+        mark_item_error(conn, item_id, result["error"])
+      return result
+
+    else:  # render
+      update_generation_state("rendering", "Starting render...")
+
+      rendered_count = 0
+      total = len(selected_quadrants)
+
+      for i, (qx, qy) in enumerate(selected_quadrants):
+        update_generation_state(
+          "rendering", f"Rendering quadrant ({qx}, {qy})... ({i + 1}/{total})"
+        )
+        print(f"   🎨 Rendering quadrant ({qx}, {qy})...")
+
+        try:
+          render_bytes = render_quadrant_with_renderer(conn, config, qx, qy)
+          if render_bytes:
+            rendered_count += 1
+            print(f"      ✓ Rendered quadrant ({qx}, {qy})")
+          else:
+            print(f"      ⚠️ No render output for ({qx}, {qy})")
+        except Exception as e:
+          print(f"      ❌ Failed to render ({qx}, {qy}): {e}")
+          traceback.print_exc()
+
+      result_message = f"Rendered {rendered_count} quadrant(s)"
+      update_generation_state("complete", result_message)
+      print(f"✅ Render complete: {rendered_count}/{total} quadrants")
+      mark_item_complete(conn, item_id, result_message)
+
+      return {
+        "success": True,
+        "message": f"Rendered {rendered_count} quadrant{'s' if rendered_count != 1 else ''}",
+        "quadrants": selected_quadrants,
+      }
+
+  except Exception as e:
+    traceback.print_exc()
+    generation_state["status"] = "error"
+    generation_state["error"] = str(e)
+    mark_item_error(conn, item_id, str(e))
+    return {"success": False, "error": str(e)}
+  finally:
+    conn.close()
+
+
+def process_model_item(item_id: int, model_id: str | None):
+  """Process a single queue item for a specific model in its own thread."""
+  global generation_state, generation_cancelled
+
+  try:
+    # Check cancellation before starting
+    if generation_cancelled:
+      print(f"⚠️  Item {item_id} cancelled before processing")
+      return
+
+    process_queue_item_from_db(item_id)
+
+  except Exception as e:
+    print(f"❌ Model worker error for {model_id}: {e}")
+    traceback.print_exc()
+  finally:
+    # Remove model from busy set
+    with busy_models_lock:
+      busy_models.discard(model_id)
+
+    # Update global state if this was the active model
+    with generation_lock:
+      if generation_state.get("model_id") == model_id:
+        generation_state["is_generating"] = False
+        generation_state["current_item_id"] = None
+
+    # Remove from per-model states
+    if model_id in model_generation_states:
+      del model_generation_states[model_id]
+
+
+def queue_worker():
+  """Background worker that processes the generation queue from the database.
+
+  This worker supports parallel processing of different models - each model
+  can have one active generation at a time, but different models can run
+  concurrently.
+  """
+  global generation_state, queue_worker_running, generation_cancelled
+
+  print("🔄 Queue worker started (parallel model support)")
+
+  while queue_worker_running:
+    conn = None
+    try:
+      # Check if we were cancelled
+      if generation_cancelled:
+        print("⚠️  Generation cancelled, resetting flags...")
+        generation_cancelled = False
+        with generation_lock:
+          generation_state["is_generating"] = False
+          generation_state["current_item_id"] = None
+        with busy_models_lock:
+          busy_models.clear()
+        model_generation_states.clear()
+        time.sleep(0.5)
+        continue
+
+      conn = get_db_connection()
+
+      # Get current busy models
+      with busy_models_lock:
+        current_busy = busy_models.copy()
+
+      # Get next pending item for an available model
+      item = get_next_pending_item_for_available_model(conn, current_busy)
+
+      if item is None:
+        # No items available (either queue empty or all models busy)
+        conn.close()
+        time.sleep(0.5)
+        continue
+
+      item_id = item.id
+      model_id = item.model_id
+      conn.close()
+      conn = None
+
+      # Mark this model as busy
+      with busy_models_lock:
+        if model_id in busy_models:
+          # Another thread grabbed this model, skip
+          continue
+        busy_models.add(model_id)
+
+      # Update global state for display (use most recent)
+      with generation_lock:
+        generation_state["is_generating"] = True
+        generation_state["model_id"] = model_id
+
+      # Initialize per-model state
+      model_generation_states[model_id] = {
+        "is_generating": True,
+        "item_id": item_id,
+        "started_at": time.time(),
+      }
+
+      # Spawn a thread to process this model's item
+      model_name = model_id or "default"
+      worker_thread = threading.Thread(
+        target=process_model_item,
+        args=(item_id, model_id),
+        name=f"model-worker-{model_name}",
+        daemon=True,
+      )
+      worker_thread.start()
+
+      print(f"🚀 Started worker for model '{model_name}' (item {item_id})")
+
+      # Small delay before checking for more work
+      time.sleep(0.2)
+
+    except Exception as e:
+      print(f"❌ Queue worker error: {e}")
+      traceback.print_exc()
+      time.sleep(1.0)
+    finally:
+      if conn:
+        conn.close()
+
+  print("🛑 Queue worker stopped")
+
+
+def start_queue_worker():
+  """Start the queue worker thread if not already running."""
+  global queue_worker_thread, queue_worker_running
+
+  if queue_worker_thread is not None and queue_worker_thread.is_alive():
+    return  # Already running
+
+  queue_worker_running = True
+  queue_worker_thread = threading.Thread(target=queue_worker, daemon=True)
+  queue_worker_thread.start()
+
+
+def stop_queue_worker():
+  """Stop the queue worker thread."""
+  global queue_worker_running
+  queue_worker_running = False
+
+
+def add_to_queue_db(
+  quadrants: list[tuple[int, int]],
+  item_type: str,
+  model_id: str | None = None,
+  context_quadrants: list[tuple[int, int]] | None = None,
+  prompt: str | None = None,
+) -> dict:
+  """Add a generation/render request to the database queue."""
+  conn = get_db_connection()
+  try:
+    queue_item = add_to_queue(
+      conn,
+      QueueItemType(item_type),
+      quadrants,
+      model_id,
+      context_quadrants,
+      prompt,
+    )
+
+    # Get model-specific queue position
+    model_position = get_queue_position_for_model(conn, queue_item.id, model_id)
+
+    # Get total queue length for backwards compatibility
+    pending = get_pending_queue(conn)
+    total_position = len(pending)
+
+    # Ensure the queue worker is running
+    start_queue_worker()
+
+    return {
+      "success": True,
+      "queued": True,
+      "position": model_position,  # Position within this model's queue
+      "total_position": total_position,  # Overall queue position
+      "model_id": model_id,
+      "item_id": queue_item.id,
+      "message": f"Added to queue at position {model_position}",
+    }
+  finally:
+    conn.close()
+
+
+@app.route("/api/status")
+def api_status():
+  """API endpoint to check generation status including queue info."""
+  conn = get_db_connection()
+  try:
+    queue_status = get_queue_status(conn)
+    model_status = get_queue_status_by_model(conn)
+
+    # Get list of currently busy models
+    with busy_models_lock:
+      active_models = list(busy_models)
+
+    # Build the response
+    response = {
+      **generation_state,
+      "queue": queue_status["pending_items"],
+      "queue_length": queue_status["pending_count"],
+      # Per-model queue info
+      "queue_by_model": model_status["by_model"],
+      "processing_models": model_status["processing_models"],
+      # All currently processing models (for parallel processing)
+      "active_models": active_models,
+      "active_model_count": len(active_models),
+      # All quadrants being processed across all models
+      "all_processing_quadrants": model_status["all_processing_quadrants"],
+    }
+
+    # Set is_generating based on whether any models are active
+    response["is_generating"] = len(active_models) > 0
+
+    # Include current processing item info if available
+    if queue_status["current_item"]:
+      response["current_item"] = queue_status["current_item"]
+
+    return jsonify(response)
+  finally:
+    conn.close()
+
+
+@app.route("/api/queue/clear", methods=["POST"])
+def api_clear_queue():
+  """
+  API endpoint to clear all items from the generation queue,
+  including cancelling any currently running generation.
+
+  Returns:
+    {
+      "success": true,
+      "cleared_count": N,
+      "cancelled_count": M,
+      "message": "Cleared N pending item(s), cancelled M in-progress item(s)"
+    }
+  """
+  global generation_state, generation_cancelled
+
+  print(f"\n{'=' * 60}")
+  print("🗑️  Clear queue request received")
+  print(f"{'=' * 60}")
+
+  conn = get_db_connection()
+  try:
+    # Clear pending items
+    cleared_count = clear_pending_queue(conn)
+
+    # Cancel any in-progress items
+    cancelled_count = cancel_processing_items(conn)
+
+    # Set the cancellation flag so the worker knows to stop
+    if cancelled_count > 0:
+      generation_cancelled = True
+
+    # Clear busy models
+    with busy_models_lock:
+      busy_models.clear()
+
+    # Clear per-model states
+    model_generation_states.clear()
+
+    # Reset the generation state
+    generation_state["is_generating"] = False
+    generation_state["quadrants"] = []
+    generation_state["status"] = "idle"
+    generation_state["message"] = "Queue cleared"
+    generation_state["error"] = None
+    generation_state["current_item_id"] = None
+
+    if cleared_count > 0 or cancelled_count > 0:
+      print(
+        f"✅ Cleared {cleared_count} pending, cancelled {cancelled_count} in-progress"
+      )
+    else:
+      print("ℹ️  Queue was already empty")
+
+    message_parts = []
+    if cleared_count > 0:
+      message_parts.append(f"Cleared {cleared_count} pending item(s)")
+    if cancelled_count > 0:
+      message_parts.append(f"cancelled {cancelled_count} in-progress item(s)")
+    message = ", ".join(message_parts) if message_parts else "Queue was already empty"
+
+    return jsonify(
+      {
+        "success": True,
+        "cleared_count": cleared_count,
+        "cancelled_count": cancelled_count,
+        "message": message,
+      }
+    )
+  except Exception as e:
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
+  finally:
+    conn.close()
+
+
+@app.route("/api/queue/cancel/<int:item_id>", methods=["POST"])
+def api_cancel_queue_item(item_id: int):
+  """
+  API endpoint to cancel a specific queue item by its ID.
+
+  Returns:
+    {
+      "success": true,
+      "cancelled": true,
+      "item_id": N,
+      "message": "Cancelled queue item N"
+    }
+  """
+  global generation_cancelled
+
+  print(f"\n{'=' * 60}")
+  print(f"🗑️  Cancel queue item request received: item_id={item_id}")
+  print(f"{'=' * 60}")
+
+  conn = get_db_connection()
+  try:
+    cancelled = cancel_queue_item_by_id(conn, item_id)
+
+    if cancelled:
+      # Set the cancellation flag so the worker knows to stop
+      # (in case this was a processing item)
+      generation_cancelled = True
+      print(f"✅ Cancelled queue item {item_id}")
+
+      return jsonify(
+        {
+          "success": True,
+          "cancelled": True,
+          "item_id": item_id,
+          "message": f"Cancelled queue item {item_id}",
+        }
+      )
+    else:
+      print(f"ℹ️  Queue item {item_id} not found or already completed")
+      return jsonify(
+        {
+          "success": True,
+          "cancelled": False,
+          "item_id": item_id,
+          "message": f"Queue item {item_id} not found or already completed",
+        }
+      )
+  except Exception as e:
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
+  finally:
+    conn.close()
+
+
+@app.route("/api/models")
+def api_models():
+  """API endpoint to get available models."""
+  if APP_CONFIG is None:
+    return jsonify({"models": [], "default_model_id": None})
+
+  return jsonify(
+    {
+      "models": [m.to_dict() for m in APP_CONFIG.models],
+      "default_model_id": APP_CONFIG.default_model_id,
+    }
+  )
+
+
+@app.route("/api/delete", methods=["POST"])
+def api_delete():
+  """API endpoint to delete generation data for selected quadrants."""
+  data = request.get_json()
+  if not data or "quadrants" not in data:
+    return jsonify({"success": False, "error": "No quadrants specified"})
+
+  quadrants = data["quadrants"]
+  if not quadrants:
+    return jsonify({"success": False, "error": "Empty quadrants list"})
+
+  # Connect to database (quadrants.db, not tiles.db)
+  db_path = Path(GENERATION_DIR) / "quadrants.db"
+  conn = sqlite3.connect(db_path)
+
+  try:
+    deleted_count = 0
+    for qx, qy in quadrants:
+      # Clear the generation column (set to NULL) but keep the row
+      # Columns are quadrant_x and quadrant_y
+      cursor = conn.execute(
+        """
+        UPDATE quadrants
+        SET generation = NULL
+        WHERE quadrant_x = ? AND quadrant_y = ?
+        """,
+        (qx, qy),
+      )
+      if cursor.rowcount > 0:
+        deleted_count += 1
+
+    conn.commit()
+
+    return jsonify(
+      {
+        "success": True,
+        "message": f"Deleted generation data for {deleted_count} quadrant{'s' if deleted_count != 1 else ''}",
+        "deleted": deleted_count,
+      }
+    )
+  except Exception as e:
+    return jsonify({"success": False, "error": str(e)})
+  finally:
+    conn.close()
+
+
+@app.route("/api/flag", methods=["POST"])
+def api_flag():
+  """API endpoint to flag/unflag selected quadrants."""
+  data = request.get_json()
+  if not data or "quadrants" not in data:
+    return jsonify({"success": False, "error": "No quadrants specified"})
+
+  quadrants = data["quadrants"]
+  if not quadrants:
+    return jsonify({"success": False, "error": "Empty quadrants list"})
+
+  # Get flag value (default to True/1 for flagging, False/0 for unflagging)
+  flag_value = 1 if data.get("flag", True) else 0
+
+  conn = get_db_connection()
+
+  try:
+    # Ensure the flagged column exists
+    ensure_flagged_column_exists(conn)
+
+    flagged_count = 0
+    for qx, qy in quadrants:
+      cursor = conn.execute(
+        """
+        UPDATE quadrants
+        SET flagged = ?
+        WHERE quadrant_x = ? AND quadrant_y = ?
+        """,
+        (flag_value, qx, qy),
+      )
+      if cursor.rowcount > 0:
+        flagged_count += 1
+
+    conn.commit()
+
+    action = "Flagged" if flag_value else "Unflagged"
+    return jsonify(
+      {
+        "success": True,
+        "message": f"{action} {flagged_count} quadrant{'s' if flagged_count != 1 else ''}",
+        "count": flagged_count,
+        "flagged": bool(flag_value),
+      }
+    )
+  except Exception as e:
+    return jsonify({"success": False, "error": str(e)})
+  finally:
+    conn.close()
+
+
+# Hardcoded water replacement color
+WATER_REPLACEMENT_COLOR = "#4A6372"
+DEFAULT_SOFTNESS = 30.0  # Lower = more precise color matching
+
+
+@app.route("/api/fix-water", methods=["POST"])
+def api_fix_water():
+  """API endpoint to fix water color in a quadrant using soft blending."""
+  data = request.get_json()
+  if not data:
+    return jsonify({"success": False, "error": "No data provided"}), 400
+
+  # Required fields
+  x = data.get("x")
+  y = data.get("y")
+  target_color = data.get("target_color")
+
+  if x is None or y is None:
+    return jsonify({"success": False, "error": "Missing x or y coordinate"}), 400
+
+  if not target_color:
+    return jsonify({"success": False, "error": "Missing target_color"}), 400
+
+  # Optional fields
+  softness = data.get("softness", DEFAULT_SOFTNESS)
+
+  # Parse colors
+  try:
+    target_rgb = hex_to_rgb(target_color)
+  except ValueError as e:
+    return jsonify({"success": False, "error": f"Invalid target color: {e}"}), 400
+
+  try:
+    replacement_rgb = hex_to_rgb(WATER_REPLACEMENT_COLOR)
+  except ValueError as e:
+    return jsonify({"success": False, "error": f"Invalid replacement color: {e}"}), 400
+
+  print(f"\n{'=' * 60}")
+  print(f"💧 Water fix request: quadrant ({x}, {y})")
+  print(f"   Target color: {target_color} -> RGB{target_rgb}")
+  print(f"   Replacement color: {WATER_REPLACEMENT_COLOR} -> RGB{replacement_rgb}")
+  print(f"   Softness: {softness}")
+  print(f"{'=' * 60}")
+
+  # Connect to database
+  db_path = Path(GENERATION_DIR) / "quadrants.db"
+  conn = sqlite3.connect(db_path)
+
+  try:
+    config = get_generation_config(conn)
+    exports_dir = Path(GENERATION_DIR) / "exports"
+
+    success = process_color_replacement(
+      conn=conn,
+      config=config,
+      x=int(x),
+      y=int(y),
+      target_color=target_rgb,
+      replacement_color=replacement_rgb,
+      softness=float(softness),
+      dry_run=False,  # Apply directly to database
+      exports_dir=exports_dir,
+    )
+
+    if success:
+      print(f"✅ Water fix complete for quadrant ({x}, {y})")
+      return jsonify(
+        {
+          "success": True,
+          "message": f"Fixed water color in quadrant ({x}, {y})",
+          "quadrant": {"x": x, "y": y},
+          "target_color": target_color,
+          "replacement_color": WATER_REPLACEMENT_COLOR,
+        }
+      )
+    else:
+      print(f"❌ Water fix failed for quadrant ({x}, {y})")
+      return jsonify(
+        {"success": False, "error": f"Failed to process quadrant ({x}, {y})"}
+      ), 400
+
+  except Exception as e:
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
+  finally:
+    conn.close()
+
+
+@app.route("/api/water-fill", methods=["POST"])
+def api_water_fill():
+  """API endpoint to fill an entire quadrant with the water color."""
+
+  from PIL import Image
+
+  from isometric_nyc.e2e_generation.shared import (
+    get_quadrant_generation,
+    image_to_png_bytes,
+    png_bytes_to_image,
+    save_quadrant_generation,
+  )
+
+  data = request.get_json()
+  if not data:
+    return jsonify({"success": False, "error": "No data provided"}), 400
+
+  x = data.get("x")
+  y = data.get("y")
+
+  if x is None or y is None:
+    return jsonify({"success": False, "error": "Missing x or y coordinate"}), 400
+
+  print(f"\n{'=' * 60}")
+  print(f"💧 Water fill request: quadrant ({x}, {y})")
+  print(f"   Fill color: {WATER_REPLACEMENT_COLOR}")
+  print(f"{'=' * 60}")
+
+  # Connect to database
+  db_path = Path(GENERATION_DIR) / "quadrants.db"
+  conn = sqlite3.connect(db_path)
+
+  try:
+    config = get_generation_config(conn)
+
+    # Get existing generation to determine size, or use config defaults
+    generation_bytes = get_quadrant_generation(conn, int(x), int(y))
+    if generation_bytes is not None:
+      # Get dimensions from existing image
+      existing_img = png_bytes_to_image(generation_bytes)
+      width, height = existing_img.size
+      mode = existing_img.mode
+    else:
+      # No existing generation - use quadrant size from config
+      # Quadrant is half the tile size
+      width = config.get("width_px", 512) // 2
+      height = config.get("height_px", 512) // 2
+      mode = "RGBA"
+      print(f"   No existing generation - creating new {width}x{height} image")
+
+    # Parse water color
+    water_rgb = hex_to_rgb(WATER_REPLACEMENT_COLOR)
+
+    # Create solid color image
+    if mode == "RGBA":
+      fill_color = (*water_rgb, 255)  # Add full alpha
+    else:
+      fill_color = water_rgb
+
+    filled_img = Image.new(mode, (width, height), fill_color)
+
+    # Save to database
+    png_bytes = image_to_png_bytes(filled_img)
+    save_quadrant_generation(conn, config, int(x), int(y), png_bytes)
+
+    print(f"✅ Water fill complete for quadrant ({x}, {y})")
+    return jsonify(
+      {
+        "success": True,
+        "message": f"Filled quadrant ({x}, {y}) with water color",
+        "quadrant": {"x": x, "y": y},
+        "color": WATER_REPLACEMENT_COLOR,
+      }
+    )
+
+  except Exception as e:
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
+  finally:
+    conn.close()
+
+
+@app.route("/api/render", methods=["POST"])
+def api_render():
+  """API endpoint to render tiles for selected quadrants."""
+  global generation_state
+
+  # Parse request
+  data = request.get_json()
+  if not data or "quadrants" not in data:
+    return jsonify(
+      {
+        "success": False,
+        "error": "Missing 'quadrants' in request body",
+      }
+    ), 400
+
+  quadrants = data["quadrants"]
+  if not isinstance(quadrants, list) or len(quadrants) == 0:
+    return jsonify(
+      {
+        "success": False,
+        "error": "quadrants must be a non-empty list",
+      }
+    ), 400
+
+  # Convert to list of tuples
+  selected_quadrants = []
+  for q in quadrants:
+    if isinstance(q, list) and len(q) == 2:
+      selected_quadrants.append((int(q[0]), int(q[1])))
+    elif isinstance(q, dict) and "x" in q and "y" in q:
+      selected_quadrants.append((int(q["x"]), int(q["y"])))
+    else:
+      return jsonify(
+        {
+          "success": False,
+          "error": f"Invalid quadrant format: {q}",
+        }
+      ), 400
+
+  print(f"\n{'=' * 60}")
+  print(f"🎨 Render request: {selected_quadrants}")
+  print(f"{'=' * 60}")
+
+  # Always add to queue (database-backed queue handles everything)
+  result = add_to_queue_db(selected_quadrants, "render")
+  return jsonify(result), 202  # 202 Accepted
+
+
+@app.route("/api/generate", methods=["POST"])
+def api_generate():
+  """
+  API endpoint to generate tiles for selected quadrants.
+
+  Request body:
+    {
+      "quadrants": [[x, y], ...] or [{"x": x, "y": y}, ...],
+      "model_id": "optional-model-id",
+      "context": [[x, y], ...] or [{"x": x, "y": y}, ...]  // Optional context quadrants
+    }
+
+  The context quadrants are used to provide surrounding pixel art context for
+  the generation. If a context quadrant has an existing generation, that will
+  be used; otherwise the render content will be used.
+  """
+  global generation_state
+
+  # Parse request
+  data = request.get_json()
+  if not data or "quadrants" not in data:
+    return jsonify(
+      {
+        "success": False,
+        "error": "Missing 'quadrants' in request body",
+      }
+    ), 400
+
+  quadrants = data["quadrants"]
+  if not isinstance(quadrants, list) or len(quadrants) == 0:
+    return jsonify(
+      {
+        "success": False,
+        "error": "quadrants must be a non-empty list",
+      }
+    ), 400
+
+  # Get optional model_id from request
+  model_id = data.get("model_id")
+
+  # Convert quadrants to list of tuples
+  selected_quadrants = []
+  for q in quadrants:
+    if isinstance(q, list) and len(q) == 2:
+      selected_quadrants.append((int(q[0]), int(q[1])))
+    elif isinstance(q, dict) and "x" in q and "y" in q:
+      selected_quadrants.append((int(q["x"]), int(q["y"])))
+    else:
+      return jsonify(
+        {
+          "success": False,
+          "error": f"Invalid quadrant format: {q}",
+        }
+      ), 400
+
+  # Parse optional context quadrants
+  context_quadrants = None
+  context_raw = data.get("context")
+  if context_raw:
+    if not isinstance(context_raw, list):
+      return jsonify(
+        {
+          "success": False,
+          "error": "context must be a list of quadrant coordinates",
+        }
+      ), 400
+
+    context_quadrants = []
+    for q in context_raw:
+      if isinstance(q, list) and len(q) == 2:
+        context_quadrants.append((int(q[0]), int(q[1])))
+      elif isinstance(q, dict) and "x" in q and "y" in q:
+        context_quadrants.append((int(q["x"]), int(q["y"])))
+      else:
+        return jsonify(
+          {
+            "success": False,
+            "error": f"Invalid context quadrant format: {q}",
+          }
+        ), 400
+
+  # Parse optional prompt
+  prompt = data.get("prompt")
+  if prompt and not isinstance(prompt, str):
+    return jsonify(
+      {
+        "success": False,
+        "error": "prompt must be a string",
+      }
+    ), 400
+
+  # Clean up prompt (strip whitespace, None if empty)
+  if prompt:
+    prompt = prompt.strip()
+    if not prompt:
+      prompt = None
+
+  print(f"\n{'=' * 60}")
+  print(f"🎯 Generation request: {selected_quadrants}")
+  if model_id:
+    print(f"   Model: {model_id}")
+  if context_quadrants:
+    print(f"   Context: {context_quadrants}")
+  if prompt:
+    print(f"   Prompt: {prompt}")
+  print(f"{'=' * 60}")
+
+  # Always add to queue (database-backed queue handles everything)
+  result = add_to_queue_db(
+    selected_quadrants, "generate", model_id, context_quadrants, prompt
+  )
+  return jsonify(result), 202  # 202 Accepted
+
+
+# =============================================================================
+# Rectangle Generation API
+# =============================================================================
+
+
+def load_generated_quadrants(conn: sqlite3.Connection) -> set[Point]:
+  """Load all quadrants that have generations from the database."""
+  cursor = conn.cursor()
+  cursor.execute(
+    "SELECT quadrant_x, quadrant_y FROM quadrants WHERE generation IS NOT NULL"
+  )
+  return {Point(row[0], row[1]) for row in cursor.fetchall()}
+
+
+@app.route("/api/generate-rectangle", methods=["POST"])
+def api_generate_rectangle():
+  """
+  API endpoint to generate all quadrants within a rectangle.
+
+  Request body:
+    {
+      "tl": [x, y] or {"x": x, "y": y},  // Top-left corner
+      "br": [x, y] or {"x": x, "y": y},  // Bottom-right corner
+      "model_id": "optional-model-id"    // Optional model ID
+    }
+
+  Returns:
+    {
+      "success": true,
+      "plan_summary": {...},
+      "queued_count": N,
+      "message": "Queued N generation steps"
+    }
+  """
+  global generation_state
+
+  # Parse request
+  data = request.get_json()
+  if not data:
+    return jsonify({"success": False, "error": "No JSON body provided"}), 400
+
+  # Parse top-left coordinate
+  tl_raw = data.get("tl")
+  if not tl_raw:
+    return jsonify(
+      {"success": False, "error": "Missing 'tl' (top-left) coordinate"}
+    ), 400
+
+  try:
+    if isinstance(tl_raw, list) and len(tl_raw) == 2:
+      tl = Point(int(tl_raw[0]), int(tl_raw[1]))
+    elif isinstance(tl_raw, dict) and "x" in tl_raw and "y" in tl_raw:
+      tl = Point(int(tl_raw["x"]), int(tl_raw["y"]))
+    else:
+      return jsonify({"success": False, "error": f"Invalid 'tl' format: {tl_raw}"}), 400
+  except (ValueError, TypeError) as e:
+    return jsonify({"success": False, "error": f"Invalid 'tl' coordinate: {e}"}), 400
+
+  # Parse bottom-right coordinate
+  br_raw = data.get("br")
+  if not br_raw:
+    return jsonify(
+      {"success": False, "error": "Missing 'br' (bottom-right) coordinate"}
+    ), 400
+
+  try:
+    if isinstance(br_raw, list) and len(br_raw) == 2:
+      br = Point(int(br_raw[0]), int(br_raw[1]))
+    elif isinstance(br_raw, dict) and "x" in br_raw and "y" in br_raw:
+      br = Point(int(br_raw["x"]), int(br_raw["y"]))
+    else:
+      return jsonify({"success": False, "error": f"Invalid 'br' format: {br_raw}"}), 400
+  except (ValueError, TypeError) as e:
+    return jsonify({"success": False, "error": f"Invalid 'br' coordinate: {e}"}), 400
+
+  # Validate bounds
+  if tl.x > br.x or tl.y > br.y:
+    return jsonify(
+      {
+        "success": False,
+        "error": "Invalid bounds: top-left must be above and to the left of bottom-right",
+      }
+    ), 400
+
+  # Get optional model_id
+  model_id = data.get("model_id")
+
+  print(f"\n{'=' * 60}")
+  print(f"📐 Rectangle generation request: ({tl.x},{tl.y}) to ({br.x},{br.y})")
+  if model_id:
+    print(f"   Model: {model_id}")
+  print(f"{'=' * 60}")
+
+  # Load existing generated quadrants
+  conn = get_db_connection()
+  try:
+    generated = load_generated_quadrants(conn)
+
+    # Create the rectangle plan
+    bounds = RectBounds(tl, br)
+    plan = create_rectangle_plan(bounds, generated)
+
+    # Validate the plan
+    is_valid, errors = validate_plan(plan)
+    if not is_valid:
+      print(f"❌ Invalid plan generated: {errors}")
+      return jsonify(
+        {
+          "success": False,
+          "error": f"Internal error: invalid plan generated - {errors}",
+        }
+      ), 500
+
+    # Get plan summary for response
+    summary = get_plan_summary(plan)
+
+    if len(plan.steps) == 0:
+      print("ℹ️  No quadrants to generate (all already generated)")
+      return jsonify(
+        {
+          "success": True,
+          "plan_summary": summary,
+          "queued_count": 0,
+          "message": "No quadrants to generate - all already generated",
+        }
+      )
+
+    # Queue all generation steps
+    queued_count = 0
+    for step in plan.steps:
+      quadrants = [(q.x, q.y) for q in step.quadrants]
+      add_to_queue(conn, QueueItemType.GENERATE, quadrants, model_id)
+      queued_count += 1
+
+    # Ensure queue worker is running
+    start_queue_worker()
+
+    print(f"✅ Queued {queued_count} generation step(s)")
+    print(f"   Steps by type: {summary['steps_by_type']}")
+
+    return jsonify(
+      {
+        "success": True,
+        "plan_summary": summary,
+        "queued_count": queued_count,
+        "message": f"Queued {queued_count} generation step(s) for {summary['total_quadrants']} quadrant(s)",
+      }
+    )
+
+  except Exception as e:
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
+  finally:
+    conn.close()
+
+
+def main():
+  global GENERATION_DIR, WEB_SERVER_PORT, APP_CONFIG
+
+  parser = argparse.ArgumentParser(description="View generated tiles in a grid.")
+  parser.add_argument(
+    "generation_dir",
+    type=Path,
+    help="Path to the generation directory containing quadrants.db",
+  )
+  parser.add_argument(
+    "--port",
+    type=int,
+    default=8080,
+    help="Port to run the Flask server on (default: 8080)",
+  )
+  parser.add_argument(
+    "--host",
+    default="127.0.0.1",
+    help="Host to bind to (default: 127.0.0.1)",
+  )
+  parser.add_argument(
+    "--web-port",
+    type=int,
+    default=DEFAULT_WEB_PORT,
+    help=f"Port for the Vite web server used for rendering (default: {DEFAULT_WEB_PORT})",
+  )
+  parser.add_argument(
+    "--config",
+    type=Path,
+    default=None,
+    help="Path to app_config.json (default: looks in the e2e_generation directory)",
+  )
+
+  args = parser.parse_args()
+
+  GENERATION_DIR = args.generation_dir.resolve()
+  WEB_SERVER_PORT = args.web_port
+
+  if not GENERATION_DIR.exists():
+    print(f"❌ Error: Directory not found: {GENERATION_DIR}")
+    return 1
+
+  db_path = GENERATION_DIR / "quadrants.db"
+  if not db_path.exists():
+    print(f"❌ Error: Database not found: {db_path}")
+    return 1
+
+  # Load app configuration
+  APP_CONFIG = load_app_config(args.config)
+  print(f"📦 Loaded {len(APP_CONFIG.models)} model(s) from configuration")
+  for model in APP_CONFIG.models:
+    default_marker = (
+      " (default)" if model.model_id == APP_CONFIG.default_model_id else ""
+    )
+    has_key = "✓" if model.api_key else "✗"
+    print(f"   {has_key} {model.name} ({model.model_id}){default_marker}")
+
+  # Initialize the generation queue table
+  conn = get_db_connection()
+  try:
+    init_queue_table(conn)
+    # Reset any items that were mid-processing when server shut down
+    # These will be retried automatically
+    reset_count = reset_all_processing_items(conn)
+    if reset_count > 0:
+      print(f"🔄 Reset {reset_count} interrupted generation(s) - will be retried")
+    # Clean up old completed items
+    deleted_count = clear_completed_items(conn)
+    if deleted_count > 0:
+      print(f"🧹 Cleaned up {deleted_count} old completed queue item(s)")
+  finally:
+    conn.close()
+
+  # Start the queue worker
+  start_queue_worker()
+
+  # Start the global web renderer
+  try:
+    start_global_renderer(port=WEB_SERVER_PORT)
+  except Exception as e:
+    print(f"⚠️  Failed to start web renderer: {e}")
+    print("   Rendering will start on demand")
+
+  print("🎨 Starting tile viewer...")
+  print(f"   Generation dir: {GENERATION_DIR}")
+  print(f"   Flask server: http://{args.host}:{args.port}/")
+  print(f"   Web render port: {WEB_SERVER_PORT}")
+  print("   Press Ctrl+C to stop")
+
+  try:
+    app.run(host=args.host, port=args.port, debug=True, use_reloader=False)
+  finally:
+    # Clean up queue worker
+    print("\n🛑 Stopping queue worker...")
+    stop_queue_worker()
+
+    # Clean up web renderer
+    print("🛑 Stopping web renderer...")
+    stop_global_renderer()
+
+  return 0
+
+
+if __name__ == "__main__":
+  exit(main())
+
+```
+
+Now let me update the HTML template to add the Flag button and show flagged tiles:
+
+```html
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Generated Tiles Viewer</title>
+    <link rel="stylesheet" href="/static/viewer.css" />
+    <style>
+      /* Dynamic grid sizing based on template variables */
+      .grid {
+        grid-template-columns: repeat({{ nx }}, {{ size_px }}px);
+        grid-auto-rows: {{ size_px }}px;
+      }
+      .tile.placeholder {
+        min-width: {{ size_px }}px;
+        min-height: {{ size_px }}px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Config data for JS -->
+    <script
+      id="app-config"
+      type="application/json"
+      data-config='{"x": {{ x }}, "y": {{ y }}, "nx": {{ nx }}, "ny": {{ ny }}, "size_px": {{ size_px }}, "models": {{ models_config | safe }}, "default_model_id": "{{ default_model_id }}"}'
+    ></script>
+
+    <!-- Toast notification container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Fixed toolbar -->
+    <div class="toolbar">
+      <div class="toolbar-row">
+        <div class="controls">
+          <label>X: <input type="number" id="x" value="{{ x }}" /></label>
+          <label>Y: <input type="number" id="y" value="{{ y }}" /></label>
+          <label
+            >NX: <input type="number" id="nx" value="{{ nx }}" min="1" max="20"
+          /></label>
+          <label
+            >NY: <input type="number" id="ny" value="{{ ny }}" min="1" max="20"
+          /></label>
+          <label
+            >Size:
+            <input type="number" id="sizePx" value="{{ size_px }}" step="32"
+          /></label>
+          <button onclick="goTo()">Go</button>
+          <div class="toggle-group">
+            <label
+              ><input
+                type="checkbox"
+                id="showLines"
+                {%
+                if
+                show_lines
+                %}checked{%
+                endif
+                %}
+                onchange="toggleLines()"
+              />
+              Lines</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                id="showCoords"
+                {%
+                if
+                show_coords
+                %}checked{%
+                endif
+                %}
+                onchange="toggleCoords()"
+              />
+              Coords</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                id="showRender"
+                {%
+                if
+                show_render
+                %}checked{%
+                endif
+                %}
+                onchange="toggleRender()"
+              />
+              Renders</label
+            >
+          </div>
+          <div class="toggle-group model-group">
+            <label class="model-label"
+              >Model:
+              <select id="modelSelect" class="model-select">
+                <!-- Populated by JavaScript -->
+              </select>
+            </label>
+          </div>
+          <div class="toggle-group tools-group">
+            <span class="tools-label">Tools:</span>
+            <button
+              id="selectTool"
+              class="tool-btn"
+              onclick="toggleSelectTool()"
+              title="Select quadrants (S)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"></path>
+                <path d="M13 13l6 6"></path>
+              </svg>
+              Select
+            </button>
+            <button
+              id="fixWaterTool"
+              class="tool-btn"
+              onclick="toggleFixWaterTool()"
+              title="Fix water color (W)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+              </svg>
+              Fix Water
+            </button>
+            <button
+              id="waterFillTool"
+              class="tool-btn"
+              onclick="toggleWaterFillTool()"
+              title="Fill quadrant with water (F)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                <path d="M12 8v8"></path>
+                <path d="M8 12h8"></path>
+              </svg>
+              Water Fill
+            </button>
+          </div>
+        </div>
+        <div class="toolbar-info">
+          <span>({{ x }}, {{ y }}) → ({{ x + nx - 1 }}, {{ y + ny - 1 }})</span>
+          <span id="selectedQuadrantsDisplay" class="selected-quadrants"></span>
+          <span>{{ generation_dir }}</span>
+        </div>
+      </div>
+      <div class="selection-status" id="selectionStatus">
+        <span id="selectionCount">0 quadrants selected</span>
+        <span class="selection-limit">(max 4)</span>
+        <button
+          id="deselectAllBtn"
+          class="deselect-btn"
+          onclick="deselectAll()"
+          disabled
+        >
+          Deselect All
+        </button>
+        <button
+          id="deleteBtn"
+          class="delete-btn"
+          onclick="deleteSelected()"
+          disabled
+        >
+          Delete
+        </button>
+        <button
+          id="renderBtn"
+          class="render-btn"
+          onclick="renderSelected()"
+          disabled
+        >
+          Render
+        </button>
+        <button
+          id="generateBtn"
+          class="generate-btn"
+          onclick="generateSelected()"
+          disabled
+        >
+          Generate
+        </button>
+        <button
+          id="generateWithPromptBtn"
+          class="generate-prompt-btn"
+          onclick="showPromptDialog()"
+          disabled
+          title="Generate with additional prompt text"
+        >
+          + Prompt
+        </button>
+        <button
+          id="generateRectBtn"
+          class="generate-rect-btn"
+          onclick="generateRectangle()"
+          disabled
+          title="Select exactly 2 quadrants to define rectangle corners"
+        >
+          Generate Rectangle
+        </button>
+        <button
+          id="clearQueueBtn"
+          class="clear-queue-btn"
+          onclick="clearQueue()"
+          title="Clear all pending items from the generation queue"
+        >
+          Clear Queue
+        </button>
+        <button
+          id="hardRefreshBtn"
+          class="hard-refresh-btn"
+          onclick="hardRefresh()"
+          title="Clear image cache and reload page"
+        >
+          ↻ Refresh
+        </button>
+      </div>
+      <div class="water-fix-status" id="waterFixStatus" style="display: none">
+        <span class="water-fix-label">Target Color:</span>
+        <span class="color-swatch" id="targetColorSwatch"></span>
+        <span class="color-hex" id="targetColorHex"
+          >Click a quadrant to pick color</span
+        >
+        <span class="water-fix-quadrant" id="waterFixQuadrant"></span>
+        <button
+          id="applyWaterFixBtn"
+          class="apply-water-fix-btn"
+          onclick="applyWaterFix()"
+          disabled
+        >
+          Apply Fix
+        </button>
+        <button
+          id="cancelWaterFixBtn"
+          class="cancel-water-fix-btn"
+          onclick="cancelWaterFix()"
+        >
+          Cancel
+        </button>
+      </div>
+      <div class="water-fill-status" id="waterFillStatus" style="display: none">
+        <span class="water-fill-label">Water Fill:</span>
+        <span class="color-swatch water-color-preview"></span>
+        <span class="water-fill-instruction" id="waterFillInstruction"
+          >Click a quadrant to fill with water</span
+        >
+        <button
+          id="cancelWaterFillBtn"
+          class="cancel-water-fix-btn"
+          onclick="cancelWaterFill()"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+
+    <div
+      class="grid-container {% if show_lines %}show-lines{% endif %} {% if show_coords %}show-coords{% endif %}"
+      id="gridContainer"
+    >
+      <div class="grid">
+        {% for dy in range(ny) %} {% for dx in range(nx) %} {% set qx = x + dx
+        %} {% set qy = y + dy %} {% set has_gen = tiles.get((dx, dy), False) %}
+        {% set is_flagged = flagged_tiles.get((dx, dy), False) %}
+        <div
+          class="tile {% if not has_gen %}placeholder{% endif %}{% if is_flagged %} flagged{% endif %}"
+          data-coords="{{ qx }},{{ qy }}"
+          data-flagged="{{ 'true' if is_flagged else 'false' }}"
+        >
+          <span class="coords">({{ qx }}, {{ qy }})</span>
+          {% if has_gen %}
+          <img
+            src="/tile/{{ qx }}/{{ qy }}?render={{ '1' if show_render else '0' }}"
+            alt="Tile {{ qx }},{{ qy }}"
+          />
+          {% endif %}
+        </div>
+        {% endfor %} {% endfor %}
+      </div>
+    </div>
+
+    <!-- Prompt Dialog -->
+    <div id="promptDialog" class="dialog-overlay" style="display: none">
+      <div class="dialog-content">
+        <h3>Generate with Prompt</h3>
+        <p class="dialog-description">
+          Add additional instructions for the generation:
+        </p>
+        <textarea
+          id="promptInput"
+          class="prompt-input"
+          placeholder="e.g., 'Add more trees' or 'Make the water darker'"
+          rows="3"
+        ></textarea>
+        <div class="dialog-buttons">
+          <button class="dialog-cancel-btn" onclick="hidePromptDialog()">
+            Cancel
+          </button>
+          <button class="dialog-submit-btn" onclick="submitPromptGeneration()">
+            Generate
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/viewer.js"></script>
+  </body>
+</html>
+
+```
+
+Now add the Flag button to the UI:
+
+```html
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Generated Tiles Viewer</title>
+    <link rel="stylesheet" href="/static/viewer.css" />
+    <style>
+      /* Dynamic grid sizing based on template variables */
+      .grid {
+        grid-template-columns: repeat({{ nx }}, {{ size_px }}px);
+        grid-auto-rows: {{ size_px }}px;
+      }
+      .tile.placeholder {
+        min-width: {{ size_px }}px;
+        min-height: {{ size_px }}px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Config data for JS -->
+    <script
+      id="app-config"
+      type="application/json"
+      data-config='{"x": {{ x }}, "y": {{ y }}, "nx": {{ nx }}, "ny": {{ ny }}, "size_px": {{ size_px }}, "models": {{ models_config | safe }}, "default_model_id": "{{ default_model_id }}"}'
+    ></script>
+
+    <!-- Toast notification container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Fixed toolbar -->
+    <div class="toolbar">
+      <div class="toolbar-row">
+        <div class="controls">
+          <label>X: <input type="number" id="x" value="{{ x }}" /></label>
+          <label>Y: <input type="number" id="y" value="{{ y }}" /></label>
+          <label
+            >NX: <input type="number" id="nx" value="{{ nx }}" min="1" max="20"
+          /></label>
+          <label
+            >NY: <input type="number" id="ny" value="{{ ny }}" min="1" max="20"
+          /></label>
+          <label
+            >Size:
+            <input type="number" id="sizePx" value="{{ size_px }}" step="32"
+          /></label>
+          <button onclick="goTo()">Go</button>
+          <div class="toggle-group">
+            <label
+              ><input
+                type="checkbox"
+                id="showLines"
+                {%
+                if
+                show_lines
+                %}checked{%
+                endif
+                %}
+                onchange="toggleLines()"
+              />
+              Lines</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                id="showCoords"
+                {%
+                if
+                show_coords
+                %}checked{%
+                endif
+                %}
+                onchange="toggleCoords()"
+              />
+              Coords</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                id="showRender"
+                {%
+                if
+                show_render
+                %}checked{%
+                endif
+                %}
+                onchange="toggleRender()"
+              />
+              Renders</label
+            >
+          </div>
+          <div class="toggle-group model-group">
+            <label class="model-label"
+              >Model:
+              <select id="modelSelect" class="model-select">
+                <!-- Populated by JavaScript -->
+              </select>
+            </label>
+          </div>
+          <div class="toggle-group tools-group">
+            <span class="tools-label">Tools:</span>
+            <button
+              id="selectTool"
+              class="tool-btn"
+              onclick="toggleSelectTool()"
+              title="Select quadrants (S)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"></path>
+                <path d="M13 13l6 6"></path>
+              </svg>
+              Select
+            </button>
+            <button
+              id="fixWaterTool"
+              class="tool-btn"
+              onclick="toggleFixWaterTool()"
+              title="Fix water color (W)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+              </svg>
+              Fix Water
+            </button>
+            <button
+              id="waterFillTool"
+              class="tool-btn"
+              onclick="toggleWaterFillTool()"
+              title="Fill quadrant with water (F)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                <path d="M12 8v8"></path>
+                <path d="M8 12h8"></path>
+              </svg>
+              Water Fill
+            </button>
+          </div>
+        </div>
+        <div class="toolbar-info">
+          <span>({{ x }}, {{ y }}) → ({{ x + nx - 1 }}, {{ y + ny - 1 }})</span>
+          <span id="selectedQuadrantsDisplay" class="selected-quadrants"></span>
+          <span>{{ generation_dir }}</span>
+        </div>
+      </div>
+      <div class="selection-status" id="selectionStatus">
+        <span id="selectionCount">0 quadrants selected</span>
+        <span class="selection-limit">(max 4)</span>
+        <button
+          id="deselectAllBtn"
+          class="deselect-btn"
+          onclick="deselectAll()"
+          disabled
+        >
+          Deselect All
+        </button>
+        <button
+          id="deleteBtn"
+          class="delete-btn"
+          onclick="deleteSelected()"
+          disabled
+        >
+          Delete
+        </button>
+        <button
+          id="flagBtn"
+          class="flag-btn"
+          onclick="flagSelected()"
+          disabled
+          title="Flag selected quadrants for review"
+        >
+          🚩 Flag
+        </button>
+        <button
+          id="renderBtn"
+          class="render-btn"
+          onclick="renderSelected()"
+          disabled
+        >
+          Render
+        </button>
+        <button
+          id="generateBtn"
+          class="generate-btn"
+          onclick="generateSelected()"
+          disabled
+        >
+          Generate
+        </button>
+        <button
+          id="generateWithPromptBtn"
+          class="generate-prompt-btn"
+          onclick="showPromptDialog()"
+          disabled
+          title="Generate with additional prompt text"
+        >
+          + Prompt
+        </button>
+        <button
+          id="generateRectBtn"
+          class="generate-rect-btn"
+          onclick="generateRectangle()"
+          disabled
+          title="Select exactly 2 quadrants to define rectangle corners"
+        >
+          Generate Rectangle
+        </button>
+        <button
+          id="clearQueueBtn"
+          class="clear-queue-btn"
+          onclick="clearQueue()"
+          title="Clear all pending items from the generation queue"
+        >
+          Clear Queue
+        </button>
+        <button
+          id="hardRefreshBtn"
+          class="hard-refresh-btn"
+          onclick="hardRefresh()"
+          title="Clear image cache and reload page"
+        >
+          ↻ Refresh
+        </button>
+      </div>
+      <div class="water-fix-status" id="waterFixStatus" style="display: none">
+        <span class="water-fix-label">Target Color:</span>
+        <span class="color-swatch" id="targetColorSwatch"></span>
+        <span class="color-hex" id="targetColorHex"
+          >Click a quadrant to pick color</span
+        >
+        <span class="water-fix-quadrant" id="waterFixQuadrant"></span>
+        <button
+          id="applyWaterFixBtn"
+          class="apply-water-fix-btn"
+          onclick="applyWaterFix()"
+          disabled
+        >
+          Apply Fix
+        </button>
+        <button
+          id="cancelWaterFixBtn"
+          class="cancel-water-fix-btn"
+          onclick="cancelWaterFix()"
+        >
+          Cancel
+        </button>
+      </div>
+      <div class="water-fill-status" id="waterFillStatus" style="display: none">
+        <span class="water-fill-label">Water Fill:</span>
+        <span class="color-swatch water-color-preview"></span>
+        <span class="water-fill-instruction" id="waterFillInstruction"
+          >Click a quadrant to fill with water</span
+        >
+        <button
+          id="cancelWaterFillBtn"
+          class="cancel-water-fix-btn"
+          onclick="cancelWaterFill()"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+
+    <div
+      class="grid-container {% if show_lines %}show-lines{% endif %} {% if show_coords %}show-coords{% endif %}"
+      id="gridContainer"
+    >
+      <div class="grid">
+        {% for dy in range(ny) %} {% for dx in range(nx) %} {% set qx = x + dx
+        %} {% set qy = y + dy %} {% set has_gen = tiles.get((dx, dy), False) %}
+        {% set is_flagged = flagged_tiles.get((dx, dy), False) %}
+        <div
+          class="tile {% if not has_gen %}placeholder{% endif %}{% if is_flagged %} flagged{% endif %}"
+          data-coords="{{ qx }},{{ qy }}"
+          data-flagged="{{ 'true' if is_flagged else 'false' }}"
+        >
+          <span class="coords">({{ qx }}, {{ qy }})</span>
+          {% if has_gen %}
+          <img
+            src="/tile/{{ qx }}/{{ qy }}?render={{ '1' if show_render else '0' }}"
+            alt="Tile {{ qx }},{{ qy }}"
+          />
+          {% endif %}
+        </div>
+        {% endfor %} {% endfor %}
+      </div>
+    </div>
+
+    <!-- Prompt Dialog -->
+    <div id="promptDialog" class="dialog-overlay" style="display: none">
+      <div class="dialog-content">
+        <h3>Generate with Prompt</h3>
+        <p class="dialog-description">
+          Add additional instructions for the generation:
+        </p>
+        <textarea
+          id="promptInput"
+          class="prompt-input"
+          placeholder="e.g., 'Add more trees' or 'Make the water darker'"
+          rows="3"
+        ></textarea>
+        <div class="dialog-buttons">
+          <button class="dialog-cancel-btn" onclick="hidePromptDialog()">
+            Cancel
+          </button>
+          <button class="dialog-submit-btn" onclick="submitPromptGeneration()">
+            Generate
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/viewer.js"></script>
+  </body>
+</html>
+
+```
+
+Now let me add the JavaScript function and update the selection status handling:
+
+```javascript
+// Get config from data attributes
+const config = JSON.parse(document.getElementById("app-config").dataset.config);
+
+// LocalStorage keys for persistence
+const STORAGE_KEY_MODEL = "viewer_selected_model";
+const STORAGE_KEY_TOOL = "viewer_selected_tool";
+const STORAGE_KEY_SELECTION = "viewer_selected_quadrants";
+
+// Save selected model ID to localStorage
+function saveSelectedModel(modelId) {
+  try {
+    localStorage.setItem(STORAGE_KEY_MODEL, modelId);
+  } catch (e) {
+    console.warn("Could not save model to localStorage:", e);
+  }
+}
+
+// Get saved model ID from localStorage
+function getSavedModel() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_MODEL);
+  } catch (e) {
+    return null;
+  }
+}
+
+// Save selected tool to localStorage
+function saveSelectedTool(toolName) {
+  try {
+    localStorage.setItem(STORAGE_KEY_TOOL, toolName || "");
+  } catch (e) {
+    console.warn("Could not save tool to localStorage:", e);
+  }
+}
+
+// Get saved tool from localStorage
+function getSavedTool() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_TOOL) || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+// Save selected quadrants to localStorage
+function saveSelectedQuadrants() {
+  try {
+    const quadrantsArray = Array.from(selectedQuadrants);
+    localStorage.setItem(STORAGE_KEY_SELECTION, JSON.stringify(quadrantsArray));
+  } catch (e) {
+    console.warn("Could not save selection to localStorage:", e);
+  }
+}
+
+// Get saved quadrants from localStorage
+function getSavedQuadrants() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_SELECTION);
+    return saved ? JSON.parse(saved) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+// Initialize model selector
+function initModelSelector() {
+  const select = document.getElementById("modelSelect");
+  if (!select || !config.models || config.models.length === 0) {
+    return;
+  }
+
+  // Clear existing options
+  select.innerHTML = "";
+
+  // Check if saved model ID exists in available models
+  const savedModelId = getSavedModel();
+  const savedModelExists =
+    savedModelId && config.models.some((m) => m.model_id === savedModelId);
+
+  // Add options for each model
+  config.models.forEach((model, index) => {
+    const option = document.createElement("option");
+    option.value = model.model_id;
+    option.textContent = model.name;
+
+    // Select saved model if it exists, otherwise use default or first
+    if (savedModelExists && model.model_id === savedModelId) {
+      option.selected = true;
+    } else if (
+      !savedModelExists &&
+      model.model_id === config.default_model_id
+    ) {
+      option.selected = true;
+    } else if (!savedModelExists && !config.default_model_id && index === 0) {
+      option.selected = true;
+    }
+    select.appendChild(option);
+  });
+
+  // Auto-blur after selection and save to localStorage
+  select.addEventListener("change", () => {
+    saveSelectedModel(select.value);
+    select.blur();
+  });
+}
+
+// Get the currently selected model ID
+function getSelectedModelId() {
+  const select = document.getElementById("modelSelect");
+  return select ? select.value : null;
+}
+
+// Get display name for a model ID
+function getModelDisplayName(modelId) {
+  if (!modelId) return null;
+  const configEl = document.getElementById("app-config");
+  if (!configEl) return modelId;
+  try {
+    const config = JSON.parse(configEl.dataset.config);
+    const models = config.models || [];
+    const model = models.find((m) => m.model_id === modelId);
+    return model ? model.name : modelId;
+  } catch {
+    return modelId;
+  }
+}
+
+// Apply locked/queued styles based on server status
+function applyStatusStyles(status) {
+  // Clear all existing locked/queued styles first
+  document.querySelectorAll(".tile.locked, .tile.queued").forEach((tile) => {
+    tile.classList.remove("locked", "queued");
+  });
+
+  // Apply locked style to ALL currently processing quadrants (from all models)
+  const processingQuadrants =
+    status.all_processing_quadrants || status.quadrants || [];
+  const isProcessing = status.is_generating || status.active_model_count > 0;
+
+  if (isProcessing && processingQuadrants.length > 0) {
+    document.body.classList.add("generating");
+    processingQuadrants.forEach(([qx, qy]) => {
+      const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+      if (tile) {
+        tile.classList.add("locked");
+      }
+    });
+  } else if (!isProcessing) {
+    document.body.classList.remove("generating");
+  }
+
+  // Apply queued style to pending queue items AND create overlays
+  // Also create overlays for processing items
+  const processingItems = getProcessingItems(status);
+  updateQueueOverlays(status.queue || [], processingItems);
+}
+
+// Extract currently processing items from status
+function getProcessingItems(status) {
+  const processingItems = [];
+  if (status.queue_by_model) {
+    Object.entries(status.queue_by_model).forEach(([modelId, info]) => {
+      if (info.is_processing && info.current_item) {
+        processingItems.push({
+          ...info.current_item,
+          model_id: modelId,
+          _isProcessing: true,
+        });
+      }
+    });
+  }
+  return processingItems;
+}
+
+// Create/update overlays for pending queue items and processing items
+function updateQueueOverlays(queueItems, processingItems = []) {
+  // Remove existing overlays
+  document.querySelectorAll(".queue-overlay").forEach((el) => el.remove());
+
+  // Also clear queued class from all tiles
+  document.querySelectorAll(".tile.queued").forEach((tile) => {
+    tile.classList.remove("queued");
+  });
+
+  const hasItems =
+    (queueItems && queueItems.length > 0) ||
+    (processingItems && processingItems.length > 0);
+  if (!hasItems) return;
+
+  const grid = document.querySelector(".grid");
+  if (!grid) return;
+
+  // Get grid dimensions from config
+  const gridX = config.x;
+  const gridY = config.y;
+  const sizePx = config.size_px;
+  const showLines = document.getElementById("showLines")?.checked || false;
+  const gap = showLines ? 2 : 0;
+
+  // Helper function to create an overlay for an item
+  function createOverlay(item, options = {}) {
+    const { isProcessing = false, queuePosition = null } = options;
+
+    if (!item.quadrants || item.quadrants.length === 0) return null;
+
+    // Calculate bounding box for this generation
+    const quadrants = item.quadrants;
+    let minCol = Infinity,
+      maxCol = -Infinity;
+    let minRow = Infinity,
+      maxRow = -Infinity;
+
+    // Track which tiles are visible in the current view
+    const visibleQuadrants = [];
+
+    quadrants.forEach(([qx, qy]) => {
+      const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+      if (tile) {
+        visibleQuadrants.push([qx, qy]);
+        const col = qx - gridX;
+        const row = qy - gridY;
+        minCol = Math.min(minCol, col);
+        maxCol = Math.max(maxCol, col);
+        minRow = Math.min(minRow, row);
+        maxRow = Math.max(maxRow, row);
+
+        // Add appropriate class to tile
+        if (isProcessing) {
+          tile.classList.add("locked");
+        } else if (!tile.classList.contains("locked")) {
+          tile.classList.add("queued");
+        }
+      }
+    });
+
+    if (visibleQuadrants.length === 0) return null;
+
+    // Create overlay element
+    const overlay = document.createElement("div");
+    overlay.className = isProcessing
+      ? "queue-overlay processing"
+      : "queue-overlay";
+    overlay.dataset.itemId = item.id;
+
+    // Calculate position and size
+    const left = minCol * (sizePx + gap);
+    const top = minRow * (sizePx + gap);
+    const width = (maxCol - minCol + 1) * sizePx + (maxCol - minCol) * gap;
+    const height = (maxRow - minRow + 1) * sizePx + (maxRow - minRow) * gap;
+
+    overlay.style.left = `${left}px`;
+    overlay.style.top = `${top}px`;
+    overlay.style.width = `${width}px`;
+    overlay.style.height = `${height}px`;
+
+    // Badge: spinner for processing, number for queued
+    const badge = document.createElement("div");
+    badge.className = isProcessing ? "queue-badge processing" : "queue-badge";
+    if (isProcessing) {
+      badge.innerHTML = `<svg class="processing-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+      </svg>`;
+    } else {
+      badge.textContent = queuePosition;
+    }
+    overlay.appendChild(badge);
+
+    // Model name label
+    if (item.model_id) {
+      const modelLabel = document.createElement("div");
+      modelLabel.className = "queue-model-label";
+      modelLabel.textContent =
+        getModelDisplayName(item.model_id) || item.model_id;
+      overlay.appendChild(modelLabel);
+    }
+
+    // Cancel button (visible on hover) - for both processing and queued
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className = "queue-cancel-btn";
+    cancelBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+      <line x1="10" y1="11" x2="10" y2="17"/>
+      <line x1="14" y1="11" x2="14" y2="17"/>
+    </svg>`;
+    cancelBtn.title = isProcessing
+      ? "Cancel this generation (in progress)"
+      : "Cancel this generation";
+    cancelBtn.onclick = (e) => {
+      e.stopPropagation();
+      cancelQueueItem(item.id);
+    };
+    overlay.appendChild(cancelBtn);
+
+    return overlay;
+  }
+
+  // First, create overlays for processing items (with spinner)
+  processingItems.forEach((item) => {
+    const overlay = createOverlay(item, { isProcessing: true });
+    if (overlay) {
+      grid.appendChild(overlay);
+    }
+  });
+
+  // Then, create overlays for queued items (with per-model position numbers)
+  // Track position within each model's queue
+  const modelPositionCounters = {};
+
+  queueItems.forEach((item) => {
+    const modelId = item.model_id || "default";
+    // Initialize or increment the counter for this model
+    if (!modelPositionCounters[modelId]) {
+      modelPositionCounters[modelId] = 1;
+    }
+    const positionInModelQueue = modelPositionCounters[modelId];
+    modelPositionCounters[modelId]++;
+
+    const overlay = createOverlay(item, {
+      queuePosition: positionInModelQueue,
+    });
+    if (overlay) {
+      grid.appendChild(overlay);
+    }
+  });
+}
+
+// Cancel a specific queue item
+async function cancelQueueItem(itemId) {
+  try {
+    const response = await fetch(`/api/queue/cancel/${itemId}`, {
+      method: "POST",
+    });
+    const result = await response.json();
+
+    if (result.success && result.cancelled) {
+      showToast("success", "Cancelled", result.message);
+      // Trigger immediate status update
+      checkGenerationStatus();
+    } else if (result.success && !result.cancelled) {
+      showToast("info", "Not found", result.message);
+    } else {
+      showToast("error", "Error", result.error || "Failed to cancel");
+    }
+  } catch (error) {
+    console.error("Cancel queue item failed:", error);
+    showToast("error", "Error", "Failed to cancel queue item");
+  }
+}
+
+function getParams() {
+  const x = document.getElementById("x").value;
+  const y = document.getElementById("y").value;
+  const nx = document.getElementById("nx").value;
+  const ny = document.getElementById("ny").value;
+  const sizePx = document.getElementById("sizePx").value;
+  const showLines = document.getElementById("showLines").checked ? "1" : "0";
+  const showCoords = document.getElementById("showCoords").checked ? "1" : "0";
+  const showRender = document.getElementById("showRender").checked ? "1" : "0";
+  return { x, y, nx, ny, sizePx, showLines, showCoords, showRender };
+}
+
+function goTo() {
+  const { x, y, nx, ny, sizePx, showLines, showCoords, showRender } =
+    getParams();
+  window.location.href = `?x=${x}&y=${y}&nx=${nx}&ny=${ny}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
+}
+
+function navigate(dx, dy) {
+  const params = getParams();
+  const x = parseInt(params.x) + dx;
+  const y = parseInt(params.y) + dy;
+  window.location.href = `?x=${x}&y=${y}&nx=${params.nx}&ny=${params.ny}&size=${params.sizePx}&lines=${params.showLines}&coords=${params.showCoords}&render=${params.showRender}`;
+}
+
+// Navigate to center the view on a specific coordinate
+function navigateToCoord(targetX, targetY) {
+  const params = getParams();
+  const nx = parseInt(params.nx);
+  const ny = parseInt(params.ny);
+  // Center the target coordinate in the view
+  const x = targetX - Math.floor(nx / 2);
+  const y = targetY - Math.floor(ny / 2);
+  window.location.href = `?x=${x}&y=${y}&nx=${params.nx}&ny=${params.ny}&size=${params.sizePx}&lines=${params.showLines}&coords=${params.showCoords}&render=${params.showRender}`;
+}
+
+// Hard refresh - clear image cache and reload page
+function hardRefresh() {
+  // Add cache-busting timestamp to all tile images to force reload
+  const timestamp = Date.now();
+
+  // Update all tile image sources to bust cache
+  document.querySelectorAll(".tile img").forEach((img) => {
+    const url = new URL(img.src);
+    url.searchParams.set("_t", timestamp);
+    img.src = url.toString();
+  });
+
+  // Also reload the page with cache bypass
+  // The true parameter forces reload from server, not cache
+  window.location.reload(true);
+}
+
+function toggleLines() {
+  const container = document.getElementById("gridContainer");
+  const showLines = document.getElementById("showLines").checked;
+  container.classList.toggle("show-lines", showLines);
+
+  // Update URL without reload
+  const url = new URL(window.location);
+  url.searchParams.set("lines", showLines ? "1" : "0");
+  history.replaceState({}, "", url);
+}
+
+function toggleCoords() {
+  const container = document.getElementById("gridContainer");
+  const showCoords = document.getElementById("showCoords").checked;
+  container.classList.toggle("show-coords", showCoords);
+
+  // Update URL without reload
+  const url = new URL(window.location);
+  url.searchParams.set("coords", showCoords ? "1" : "0");
+  history.replaceState({}, "", url);
+}
+
+function toggleRender() {
+  // This requires a page reload to fetch different data
+  const { x, y, nx, ny, sizePx, showLines, showCoords, showRender } =
+    getParams();
+  window.location.href = `?x=${x}&y=${y}&nx=${nx}&ny=${ny}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
+}
+
+// Keyboard navigation
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+
+  // Ignore keyboard shortcuts when prompt dialog is open
+  const promptDialog = document.getElementById("promptDialog");
+  if (promptDialog && promptDialog.style.display !== "none") return;
+
+  switch (e.key) {
+    case "ArrowLeft":
+      navigate(-1, 0);
+      break;
+    case "ArrowRight":
+      navigate(1, 0);
+      break;
+    case "ArrowUp":
+      navigate(0, -1);
+      break;
+    case "ArrowDown":
+      navigate(0, 1);
+      break;
+    case "l":
+    case "L":
+      document.getElementById("showLines").click();
+      break;
+    case "c":
+    case "C":
+      document.getElementById("showCoords").click();
+      break;
+    case "d":
+    case "D":
+      document.getElementById("showRender").click();
+      break;
+    case "g":
+    case "G":
+      generateSelected();
+      break;
+    case "s":
+    case "S":
+      toggleSelectTool();
+      break;
+    case "w":
+    case "W":
+      toggleFixWaterTool();
+      break;
+    case "f":
+    case "F":
+      toggleWaterFillTool();
+      break;
+    case "Escape":
+      if (selectToolActive) toggleSelectTool();
+      if (fixWaterToolActive) cancelWaterFix();
+      if (waterFillToolActive) cancelWaterFill();
+      break;
+  }
+});
+
+// Select tool state
+let selectToolActive = false;
+const selectedQuadrants = new Set();
+const MAX_SELECTION = 4;
+
+function toggleSelectTool() {
+  // Deactivate other tools if active
+  if (fixWaterToolActive) {
+    cancelWaterFix();
+  }
+  if (waterFillToolActive) {
+    cancelWaterFill();
+  }
+
+  selectToolActive = !selectToolActive;
+  const btn = document.getElementById("selectTool");
+  const tiles = document.querySelectorAll(".tile");
+
+  if (selectToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => tile.classList.add("selectable"));
+    saveSelectedTool("select");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => tile.classList.remove("selectable"));
+    saveSelectedTool("");
+  }
+}
+
+// Fix water tool state
+let fixWaterToolActive = false;
+let fixWaterTargetColor = null;
+let fixWaterQuadrant = null;
+
+function toggleFixWaterTool() {
+  // Deactivate other tools if active
+  if (selectToolActive) {
+    toggleSelectTool();
+  }
+  if (waterFillToolActive) {
+    cancelWaterFill();
+  }
+
+  fixWaterToolActive = !fixWaterToolActive;
+  const btn = document.getElementById("fixWaterTool");
+  const tiles = document.querySelectorAll(".tile");
+  const selectionStatus = document.getElementById("selectionStatus");
+  const waterFixStatus = document.getElementById("waterFixStatus");
+
+  if (fixWaterToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => {
+      // Only make tiles with images selectable
+      if (tile.querySelector("img")) {
+        tile.classList.add("fix-water-selectable");
+      }
+    });
+    // Show water fix status bar, hide selection status
+    selectionStatus.style.display = "none";
+    waterFixStatus.style.display = "flex";
+    // Reset state
+    resetWaterFixState();
+    saveSelectedTool("fixwater");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => {
+      tile.classList.remove("fix-water-selectable");
+      tile.classList.remove("water-fix-selected");
+    });
+    // Hide water fix status bar, show selection status
+    selectionStatus.style.display = "flex";
+    waterFixStatus.style.display = "none";
+    saveSelectedTool("");
+  }
+}
+
+function resetWaterFixState() {
+  fixWaterTargetColor = null;
+  fixWaterQuadrant = null;
+  document.getElementById("targetColorSwatch").style.background = "#333";
+  document.getElementById("targetColorSwatch").classList.remove("has-color");
+  document.getElementById("targetColorHex").textContent =
+    "Click a quadrant to pick color";
+  document.getElementById("waterFixQuadrant").textContent = "";
+  // Reset button state
+  const btn = document.getElementById("applyWaterFixBtn");
+  btn.disabled = true;
+  btn.classList.remove("loading");
+  btn.textContent = "Apply Fix";
+  document.querySelectorAll(".tile.water-fix-selected").forEach((tile) => {
+    tile.classList.remove("water-fix-selected");
+  });
+}
+
+function cancelWaterFix() {
+  if (fixWaterToolActive) {
+    toggleFixWaterTool();
+  }
+}
+
+function rgbToHex(r, g, b) {
+  return (
+    "#" +
+    [r, g, b]
+      .map((x) => {
+        const hex = x.toString(16);
+        return hex.length === 1 ? "0" + hex : hex;
+      })
+      .join("")
+      .toUpperCase()
+  );
+}
+
+function getPixelColorFromImage(img, x, y) {
+  // Create an off-screen canvas
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+
+  // Get the pixel data at the clicked position
+  const pixelData = ctx.getImageData(x, y, 1, 1).data;
+
+  return {
+    r: pixelData[0],
+    g: pixelData[1],
+    b: pixelData[2],
+    a: pixelData[3],
+  };
+}
+
+function handleFixWaterClick(tileEl, e) {
+  if (!fixWaterToolActive) return;
+
+  const img = tileEl.querySelector("img");
+  if (!img) {
+    showToast("error", "No image", "This quadrant has no generation to fix");
+    return;
+  }
+
+  // Get coordinates
+  const coords = tileEl.dataset.coords.split(",").map(Number);
+  const [qx, qy] = coords;
+
+  // Calculate click position relative to the image
+  const rect = img.getBoundingClientRect();
+  const clickX = e.clientX - rect.left;
+  const clickY = e.clientY - rect.top;
+
+  // Scale to natural image dimensions
+  const scaleX = img.naturalWidth / rect.width;
+  const scaleY = img.naturalHeight / rect.height;
+  const imgX = Math.floor(clickX * scaleX);
+  const imgY = Math.floor(clickY * scaleY);
+
+  // Ensure we're within bounds
+  if (
+    imgX < 0 ||
+    imgX >= img.naturalWidth ||
+    imgY < 0 ||
+    imgY >= img.naturalHeight
+  ) {
+    console.log("Click outside image bounds");
+    return;
+  }
+
+  try {
+    // Get the pixel color
+    const color = getPixelColorFromImage(img, imgX, imgY);
+    const hex = rgbToHex(color.r, color.g, color.b);
+
+    console.log(
+      `Picked color at (${imgX}, ${imgY}) in quadrant (${qx}, ${qy}): RGB(${color.r}, ${color.g}, ${color.b}) = ${hex}`
+    );
+
+    // Update state
+    fixWaterTargetColor = hex;
+    fixWaterQuadrant = { x: qx, y: qy };
+
+    // Update UI
+    document.getElementById("targetColorSwatch").style.background = hex;
+    document.getElementById("targetColorSwatch").classList.add("has-color");
+    document.getElementById(
+      "targetColorHex"
+    ).textContent = `${hex} — RGB(${color.r}, ${color.g}, ${color.b})`;
+    document.getElementById(
+      "waterFixQuadrant"
+    ).textContent = `Quadrant (${qx}, ${qy})`;
+    document.getElementById("applyWaterFixBtn").disabled = false;
+
+    // Update selected tile visual
+    document.querySelectorAll(".tile.water-fix-selected").forEach((tile) => {
+      tile.classList.remove("water-fix-selected");
+    });
+    tileEl.classList.add("water-fix-selected");
+
+    showToast("info", "Color picked", `Target color: ${hex} at (${qx}, ${qy})`);
+  } catch (error) {
+    console.error("Error picking color:", error);
+    showToast(
+      "error",
+      "Error picking color",
+      "Could not read pixel color. Try again."
+    );
+  }
+}
+
+async function applyWaterFix() {
+  if (!fixWaterTargetColor || !fixWaterQuadrant) {
+    showToast("error", "No color selected", "Pick a color first");
+    return;
+  }
+
+  // Default replacement color - a nice blue water color
+  const replacementColor = "#2A4A5F";
+
+  const btn = document.getElementById("applyWaterFixBtn");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  btn.textContent = "Applying...";
+
+  showToast(
+    "loading",
+    "Applying water fix...",
+    `Replacing ${fixWaterTargetColor} in (${fixWaterQuadrant.x}, ${fixWaterQuadrant.y})`
+  );
+
+  try {
+    const response = await fetch("/api/fix-water", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        x: fixWaterQuadrant.x,
+        y: fixWaterQuadrant.y,
+        target_color: fixWaterTargetColor,
+        replacement_color: replacementColor,
+      }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    if (result.success) {
+      showToast(
+        "success",
+        "Water fix applied!",
+        result.message || "Color replaced successfully"
+      );
+
+      // Refresh the specific tile image immediately with cache-busting
+      const { x, y } = fixWaterQuadrant;
+      const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+      if (tile) {
+        const img = tile.querySelector("img");
+        if (img) {
+          // Add timestamp to bust browser cache
+          const currentSrc = new URL(img.src);
+          currentSrc.searchParams.set("_t", Date.now());
+          img.src = currentSrc.toString();
+        }
+      }
+
+      // Reset the tool after a short delay
+      setTimeout(() => {
+        cancelWaterFix();
+      }, 1000);
+    } else {
+      showToast("error", "Water fix failed", result.error || "Unknown error");
+      btn.disabled = false;
+      btn.classList.remove("loading");
+      btn.textContent = "Apply Fix";
+    }
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Water fix error:", error);
+    showToast("error", "Request failed", error.message);
+    btn.disabled = false;
+    btn.classList.remove("loading");
+    btn.textContent = "Apply Fix";
+  }
+}
+
+// Water Fill tool - fills entire quadrant with water color
+let waterFillToolActive = false;
+
+function toggleWaterFillTool() {
+  // Deactivate other tools
+  if (selectToolActive) {
+    toggleSelectTool();
+  }
+  if (fixWaterToolActive) {
+    cancelWaterFix();
+  }
+
+  waterFillToolActive = !waterFillToolActive;
+  const btn = document.getElementById("waterFillTool");
+  const tiles = document.querySelectorAll(".tile");
+  const selectionStatus = document.getElementById("selectionStatus");
+  const waterFillStatus = document.getElementById("waterFillStatus");
+
+  if (waterFillToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => {
+      tile.classList.add("water-fill-selectable");
+    });
+    // Show water fill status bar, hide selection status
+    selectionStatus.style.display = "none";
+    waterFillStatus.style.display = "flex";
+    saveSelectedTool("waterfill");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => {
+      tile.classList.remove("water-fill-selectable");
+    });
+    // Hide water fill status bar, show selection status
+    selectionStatus.style.display = "flex";
+    waterFillStatus.style.display = "none";
+    saveSelectedTool("");
+  }
+}
+
+function cancelWaterFill() {
+  if (waterFillToolActive) {
+    toggleWaterFillTool();
+  }
+}
+
+async function handleWaterFillClick(tileEl) {
+  if (!waterFillToolActive) return;
+
+  const coords = tileEl.dataset.coords.split(",").map(Number);
+  const [qx, qy] = coords;
+
+  // Confirm action
+  if (!confirm(`Fill quadrant (${qx}, ${qy}) entirely with water color?`)) {
+    return;
+  }
+
+  const instruction = document.getElementById("waterFillInstruction");
+  instruction.textContent = `Filling (${qx}, ${qy})...`;
+
+  showToast(
+    "loading",
+    "Filling with water...",
+    `Processing quadrant (${qx}, ${qy})`
+  );
+
+  try {
+    const response = await fetch("/api/water-fill", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ x: qx, y: qy }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    if (result.success) {
+      showToast("success", "Water fill complete!", result.message);
+
+      // Refresh the tile image
+      const img = tileEl.querySelector("img");
+      if (img) {
+        const currentSrc = new URL(img.src);
+        currentSrc.searchParams.set("_t", Date.now());
+        img.src = currentSrc.toString();
+      }
+
+      instruction.textContent = "Click a quadrant to fill with water";
+    } else {
+      showToast("error", "Water fill failed", result.error || "Unknown error");
+      instruction.textContent = "Click a quadrant to fill with water";
+    }
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Water fill error:", error);
+    showToast("error", "Request failed", error.message);
+    instruction.textContent = "Click a quadrant to fill with water";
+  }
+}
+
+function updateSelectionStatus(serverStatus = null) {
+  const count = selectedQuadrants.size;
+  const countEl = document.getElementById("selectionCount");
+  const limitEl = document.querySelector(".selection-limit");
+  const statusEl = document.getElementById("selectionStatus");
+  const deselectBtn = document.getElementById("deselectAllBtn");
+  const deleteBtn = document.getElementById("deleteBtn");
+  const renderBtn = document.getElementById("renderBtn");
+  const generateBtn = document.getElementById("generateBtn");
+  const generateRectBtn = document.getElementById("generateRectBtn");
+
+  let statusParts = [];
+
+  // Show current processing status from server
+  if (serverStatus) {
+    // Show all active models generating
+    const activeModels = serverStatus.active_models || [];
+    const processingQuadrants =
+      serverStatus.all_processing_quadrants || serverStatus.quadrants || [];
+
+    if (activeModels.length > 0 && processingQuadrants.length > 0) {
+      // Show which models are actively generating with their queue counts
+      const queueByModel = serverStatus.queue_by_model || {};
+
+      if (activeModels.length === 1) {
+        const modelId = activeModels[0];
+        const modelName = getModelDisplayName(modelId) || modelId || "default";
+        const modelInfo = queueByModel[modelId];
+        const queueCount = modelInfo
+          ? modelInfo.pending_count + (modelInfo.is_processing ? 1 : 0)
+          : 0;
+        // Create clickable coordinate links
+        const coordsHtml = processingQuadrants
+          .map(
+            ([x, y]) =>
+              `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+          )
+          .join(" ");
+        const countStr = queueCount > 0 ? ` [${queueCount}]` : "";
+        statusParts.push({
+          html: `🔄 ${modelName}${countStr}: ${coordsHtml}`,
+        });
+      } else {
+        // Multiple models generating in parallel - show each with queue count and coords
+        const queueByModel = serverStatus.queue_by_model || {};
+        const modelPartsHtml = activeModels.map((modelId) => {
+          const name = getModelDisplayName(modelId) || modelId || "default";
+          const modelInfo = queueByModel[modelId];
+          const queueCount = modelInfo
+            ? modelInfo.pending_count + (modelInfo.is_processing ? 1 : 0)
+            : 0;
+          // Get quadrants for this specific model
+          const modelQuadrants =
+            modelInfo && modelInfo.current_item
+              ? modelInfo.current_item.quadrants || []
+              : [];
+          const coordsHtml =
+            modelQuadrants.length > 0
+              ? " " +
+                modelQuadrants
+                  .map(
+                    ([x, y]) =>
+                      `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+                  )
+                  .join(" ")
+              : "";
+          const countStr = queueCount > 0 ? ` [${queueCount}]` : "";
+          return `${name}${countStr}${coordsHtml}`;
+        });
+        statusParts.push({ html: `🔄 ${modelPartsHtml.join(", ")}` });
+      }
+    } else if (
+      serverStatus.is_generating &&
+      serverStatus.quadrants &&
+      serverStatus.quadrants.length > 0
+    ) {
+      // Fallback to old behavior with clickable coords
+      const action =
+        serverStatus.status === "rendering" ? "Rendering" : "Generating";
+      const coordsHtml = serverStatus.quadrants
+        .map(
+          ([x, y]) =>
+            `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+        )
+        .join(" ");
+      statusParts.push({ html: `${action} ${coordsHtml}` });
+    }
+
+    // Show per-model queue counts (only models with items)
+    if (serverStatus.queue_by_model) {
+      const modelQueues = Object.entries(serverStatus.queue_by_model);
+      const queueParts = modelQueues
+        .map(([modelId, info]) => {
+          const name = getModelDisplayName(modelId) || modelId;
+          const count = info.pending_count + (info.is_processing ? 1 : 0);
+          return { name, count };
+        })
+        .filter(({ count }) => count > 0)
+        .map(({ name, count }) => `${name}: ${count}`);
+
+      if (queueParts.length > 0) {
+        statusParts.push(`📋 ${queueParts.join(", ")}`);
+      }
+    }
+  }
+
+  // Update selection display in toolbar-info (separate from status)
+  const selectedDisplay = document.getElementById("selectedQuadrantsDisplay");
+  if (selectedDisplay) {
+    if (count > 0) {
+      const coordsStr = Array.from(selectedQuadrants)
+        .map((key) => {
+          const [x, y] = key.split(",");
+          return `(${x},${y})`;
+        })
+        .join(" ");
+      selectedDisplay.textContent = `✓ ${coordsStr}`;
+      selectedDisplay.style.display = "";
+    } else {
+      selectedDisplay.textContent = "";
+      selectedDisplay.style.display = "none";
+    }
+  }
+
+  // Build status display - some parts may be HTML objects, others plain strings
+  if (statusParts.length > 0) {
+    const statusHtml = statusParts
+      .map((part) => (typeof part === "object" && part.html ? part.html : part))
+      .join(" • ");
+    countEl.innerHTML = statusHtml;
+
+    // Add click handlers for coordinate links
+    countEl.querySelectorAll(".coord-link").forEach((link) => {
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        const x = parseInt(link.dataset.x, 10);
+        const y = parseInt(link.dataset.y, 10);
+        navigateToCoord(x, y);
+      });
+    });
+  } else {
+    countEl.textContent = `${count} selected`;
+  }
+
+  // Update status bar styling
+  const isProcessing =
+    serverStatus &&
+    (serverStatus.is_generating || serverStatus.queue_length > 0);
+  if (isProcessing) {
+    if (limitEl) limitEl.style.display = "none";
+    statusEl.classList.remove("empty");
+    statusEl.classList.add("generating");
+  } else {
+    if (limitEl) limitEl.style.display = "";
+    statusEl.classList.toggle("empty", count === 0);
+    statusEl.classList.remove("generating");
+  }
+
+  // Enable buttons for selection (can add to queue even during processing)
+  deselectBtn.disabled = count === 0;
+  deleteBtn.disabled = count === 0;
+  renderBtn.disabled = count === 0;
+  generateBtn.disabled = count === 0;
+  // Generate with prompt button
+  const generateWithPromptBtn = document.getElementById(
+    "generateWithPromptBtn"
+  );
+  if (generateWithPromptBtn) {
+    generateWithPromptBtn.disabled = count === 0;
+  }
+  // Generate Rectangle requires exactly 2 selected
+  generateRectBtn.disabled = count !== 2;
+}
+
+// Toast notification system
+function showToast(type, title, message, duration = 5000) {
+  const container = document.getElementById("toastContainer");
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+
+  const icons = {
+    success: "✅",
+    error: "❌",
+    info: "ℹ️",
+    loading: "⏳",
+  };
+
+  toast.innerHTML = `
+    <span class="toast-icon">${icons[type] || "ℹ️"}</span>
+    <div class="toast-content">
+      <div class="toast-title">${title}</div>
+      ${message ? `<div class="toast-message">${message}</div>` : ""}
+    </div>
+    <button class="toast-close" onclick="this.parentElement.remove()">×</button>
+  `;
+
+  container.appendChild(toast);
+
+  // Auto-remove after duration (except for loading toasts)
+  if (type !== "loading" && duration > 0) {
+    setTimeout(() => {
+      toast.classList.add("removing");
+      setTimeout(() => toast.remove(), 300);
+    }, duration);
+  }
+
+  return toast;
+}
+
+function clearLoadingToasts() {
+  document.querySelectorAll(".toast.loading").forEach((t) => t.remove());
+}
+
+// Generation/Render state (tracked from server)
+let isGenerating = false;
+let isRendering = false;
+
+async function deleteSelected() {
+  if (selectedQuadrants.size === 0) return;
+
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return [x, y];
+  });
+
+  // Confirm deletion
+  const coordsStr = coords.map(([x, y]) => `(${x},${y})`).join(", ");
+  if (!confirm(`Delete generation data for ${coordsStr}?`)) {
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quadrants: coords }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast("success", "Deleted", result.message);
+      // Deselect and refresh
+      deselectAll();
+      location.reload();
+    } else {
+      showToast("error", "Delete failed", result.error);
+    }
+  } catch (error) {
+    console.error("Delete error:", error);
+    showToast("error", "Delete failed", error.message);
+  }
+}
+
+async function flagSelected() {
+  if (selectedQuadrants.size === 0) return;
+
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return [x, y];
+  });
+
+  // Check if any selected tiles are already flagged - if so, unflag them
+  let anyFlagged = false;
+  coords.forEach(([x, y]) => {
+    const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+    if (tile && tile.dataset.flagged === "true") {
+      anyFlagged = true;
+    }
+  });
+
+  // Toggle: if any are flagged, unflag all; otherwise flag all
+  const shouldFlag = !anyFlagged;
+
+  try {
+    const response = await fetch("/api/flag", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quadrants: coords, flag: shouldFlag }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast("success", result.flagged ? "Flagged" : "Unflagged", result.message);
+
+      // Update tile visual state
+      coords.forEach(([x, y]) => {
+        const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+        if (tile) {
+          if (shouldFlag) {
+            tile.classList.add("flagged");
+            tile.dataset.flagged = "true";
+          } else {
+            tile.classList.remove("flagged");
+            tile.dataset.flagged = "false";
+          }
+        }
+      });
+
+      // Deselect after flagging
+      deselectAll();
+    } else {
+      showToast("error", "Flag failed", result.error);
+    }
+  } catch (error) {
+    console.error("Flag error:", error);
+    showToast("error", "Flag failed", error.message);
+  }
+}
+
+async function clearQueue() {
+  // Get current queue info first
+  try {
+    const statusResponse = await fetch("/api/status");
+    const status = await statusResponse.json();
+
+    const queueLength = status.queue_length || 0;
+    const isGenerating = status.is_generating || false;
+
+    if (queueLength === 0 && !isGenerating) {
+      showToast(
+        "info",
+        "Nothing to clear",
+        "There are no pending items or active generations."
+      );
+      return;
+    }
+
+    // Build confirm message based on what will be cancelled
+    let confirmMessage = "Are you sure you want to clear the queue?";
+    const parts = [];
+    if (queueLength > 0) {
+      parts.push(`${queueLength} pending item(s)`);
+    }
+    if (isGenerating) {
+      parts.push("the current generation in progress");
+    }
+    if (parts.length > 0) {
+      confirmMessage = `Are you sure you want to cancel ${parts.join(
+        " and "
+      )}?`;
+    }
+
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    // Clear the queue
+    const response = await fetch("/api/queue/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast(
+        "success",
+        "Queue cleared",
+        result.message || `Cleared ${result.cleared_count} item(s)`
+      );
+      // Refresh status
+      await checkGenerationStatus();
+    } else {
+      showToast(
+        "error",
+        "Failed to clear queue",
+        result.error || "Unknown error"
+      );
+    }
+  } catch (error) {
+    console.error("Clear queue error:", error);
+    showToast("error", "Request failed", error.message);
+  }
+}
+
+// Prompt dialog functions
+function showPromptDialog() {
+  if (selectedQuadrants.size === 0) return;
+  const dialog = document.getElementById("promptDialog");
+  const input = document.getElementById("promptInput");
+  if (dialog && input) {
+    input.value = "";
+    dialog.style.display = "flex";
+    input.focus();
+  }
+}
+
+function hidePromptDialog() {
+  const dialog = document.getElementById("promptDialog");
+  if (dialog) {
+    dialog.style.display = "none";
+  }
+}
+
+async function submitPromptGeneration() {
+  const input = document.getElementById("promptInput");
+  const prompt = input ? input.value.trim() : "";
+  hidePromptDialog();
+  await generateSelected(prompt);
+}
+
+async function generateSelected(prompt = null) {
+  if (selectedQuadrants.size === 0) return;
+
+  // Separate selected quadrants into those that need generation vs those that already have it
+  const toGenerate = [];
+  const contextQuadrants = [];
+
+  Array.from(selectedQuadrants).forEach((s) => {
+    const [x, y] = s.split(",").map(Number);
+    const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+
+    if (tile && !tile.classList.contains("placeholder")) {
+      // This quadrant already has a generation - use as context
+      contextQuadrants.push([x, y]);
+    } else {
+      // This quadrant needs generation
+      toGenerate.push([x, y]);
+    }
+  });
+
+  // If nothing needs generation, inform the user
+  if (toGenerate.length === 0) {
+    showToast(
+      "info",
+      "Already generated",
+      "All selected quadrants already have generations. Select at least one empty quadrant."
+    );
+    return;
+  }
+
+  const modelId = getSelectedModelId();
+
+  console.log(
+    "Generate requested for:",
+    toGenerate,
+    "with context:",
+    contextQuadrants,
+    "model:",
+    modelId
+  );
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+
+  // Build context info for toast
+  const contextMsg =
+    contextQuadrants.length > 0
+      ? ` (using ${contextQuadrants.length} as context)`
+      : "";
+  const promptMsg = prompt ? " with prompt" : "";
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const requestBody = {
+      quadrants: toGenerate,
+      model_id: modelId,
+    };
+
+    // Include context quadrants if any
+    if (contextQuadrants.length > 0) {
+      requestBody.context = contextQuadrants;
+    }
+
+    // Include prompt if provided
+    if (prompt) {
+      requestBody.prompt = prompt;
+    }
+
+    const response = await fetch("/api/generate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    const result = await response.json();
+
+    if (result.queued) {
+      console.log(
+        "Generation queued at position:",
+        result.position,
+        "model:",
+        result.model_id
+      );
+      // Get model name for display
+      const modelName = getModelDisplayName(result.model_id);
+      const modelInfo = modelName ? ` (${modelName})` : "";
+      showToast(
+        "success",
+        "Added to queue",
+        `${toGenerate.length} quadrant(s)${promptMsg}${contextMsg} → position ${result.position}${modelInfo}`
+      );
+    } else if (!result.success) {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    console.error("Generation error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+  }
+}
+
+async function renderSelected() {
+  if (selectedQuadrants.size === 0) return;
+
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return [x, y];
+  });
+
+  console.log("Render requested for:", coords);
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const response = await fetch("/api/render", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ quadrants: coords }),
+    });
+
+    const result = await response.json();
+
+    if (result.queued) {
+      console.log("Render queued at position:", result.position);
+      showToast(
+        "success",
+        "Added to queue",
+        `${coords.length} quadrant(s) for render → position ${result.position}`
+      );
+    } else if (!result.success) {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    console.error("Render error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+  }
+}
+
+async function generateRectangle() {
+  if (selectedQuadrants.size !== 2) {
+    showToast(
+      "error",
+      "Invalid selection",
+      "Please select exactly 2 quadrants to define the rectangle corners."
+    );
+    return;
+  }
+
+  // Get the two selected coordinates
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return { x, y };
+  });
+
+  // Calculate rectangle bounds (top-left and bottom-right)
+  const minX = Math.min(coords[0].x, coords[1].x);
+  const maxX = Math.max(coords[0].x, coords[1].x);
+  const minY = Math.min(coords[0].y, coords[1].y);
+  const maxY = Math.max(coords[0].y, coords[1].y);
+
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const totalQuadrants = width * height;
+
+  // Build confirmation message
+  const confirmMessage =
+    `Generate rectangle from (${minX}, ${minY}) to (${maxX}, ${maxY})?\n\n` +
+    `Size: ${width} × ${height} = ${totalQuadrants} quadrant(s)\n\n` +
+    `This will create a generation plan and queue all steps.\n` +
+    `Pre-existing generations will be skipped.`;
+
+  if (!confirm(confirmMessage)) {
+    return;
+  }
+
+  const modelId = getSelectedModelId();
+
+  console.log(
+    "Generate rectangle requested:",
+    { tl: [minX, minY], br: [maxX, maxY] },
+    "with model:",
+    modelId
+  );
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+
+  // Show immediate feedback
+  const btn = document.getElementById("generateRectBtn");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  btn.innerHTML = 'Queueing...<span class="spinner"></span>';
+
+  showToast(
+    "loading",
+    "Creating generation plan...",
+    `Rectangle (${minX}, ${minY}) to (${maxX}, ${maxY})`
+  );
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const response = await fetch("/api/generate-rectangle", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        tl: [minX, minY],
+        br: [maxX, maxY],
+        model_id: modelId,
+      }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    // Reset button
+    btn.classList.remove("loading");
+    btn.innerHTML = "Generate Rectangle";
+
+    if (result.success) {
+      if (result.queued_count === 0) {
+        showToast(
+          "info",
+          "Nothing to generate",
+          result.message || "All quadrants already generated."
+        );
+      } else {
+        console.log("Rectangle generation queued:", result);
+        const summary = result.plan_summary || {};
+        const stepTypes = summary.steps_by_type || {};
+        const typeInfo = Object.entries(stepTypes)
+          .map(([type, count]) => `${count}× ${type}`)
+          .join(", ");
+
+        showToast(
+          "success",
+          "Rectangle queued!",
+          `${result.queued_count} step(s) for ${
+            summary.total_quadrants || "?"
+          } quadrant(s)` + (typeInfo ? ` (${typeInfo})` : "")
+        );
+      }
+    } else {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Generate rectangle error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+
+    // Reset button
+    btn.classList.remove("loading");
+    btn.innerHTML = "Generate Rectangle";
+  }
+}
+
+function deselectAll() {
+  selectedQuadrants.clear();
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+  console.log("Deselected all quadrants");
+}
+
+function toggleTileSelection(tileEl, qx, qy) {
+  if (!selectToolActive) return;
+
+  // Check if this tile is currently being generated or in the queue
+  const key = `${qx},${qy}`;
+  if (
+    tileEl.classList.contains("locked") ||
+    tileEl.classList.contains("queued")
+  ) {
+    console.log(
+      `Cannot select quadrant (${qx}, ${qy}) - currently generating or in queue`
+    );
+    return;
+  }
+
+  if (selectedQuadrants.has(key)) {
+    selectedQuadrants.delete(key);
+    tileEl.classList.remove("selected");
+    console.log(`Deselected quadrant (${qx}, ${qy})`);
+  } else {
+    // Check if we've hit the max selection limit
+    if (selectedQuadrants.size >= MAX_SELECTION) {
+      console.log(`Cannot select more than ${MAX_SELECTION} quadrants`);
+      return;
+    }
+    selectedQuadrants.add(key);
+    tileEl.classList.add("selected");
+    console.log(`Selected quadrant (${qx}, ${qy})`);
+  }
+
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+
+  // Log current selection
+  if (selectedQuadrants.size > 0) {
+    console.log("Selected:", Array.from(selectedQuadrants).join("; "));
+  }
+}
+
+// Setup tile click handlers
+document.querySelectorAll(".tile").forEach((tile) => {
+  tile.addEventListener("click", (e) => {
+    // Handle fix water tool clicks
+    if (fixWaterToolActive) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleFixWaterClick(tile, e);
+      return;
+    }
+
+    // Handle water fill tool clicks
+    if (waterFillToolActive) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleWaterFillClick(tile);
+      return;
+    }
+
+    // Handle select tool clicks
+    if (!selectToolActive) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const coords = tile.dataset.coords.split(",").map(Number);
+    toggleTileSelection(tile, coords[0], coords[1]);
+  });
+});
+
+// Initialize selection status
+updateSelectionStatus();
+
+// Status polling for generation progress
+let statusPollInterval = null;
+let lastStatus = null;
+let lastProcessingQuadrants = new Set(); // Track quadrants that were processing
+
+function startStatusPolling() {
+  if (statusPollInterval) return;
+  statusPollInterval = setInterval(checkGenerationStatus, 1000);
+}
+
+// Refresh a specific tile's image (or add image if it was a placeholder)
+function refreshTileImage(qx, qy) {
+  const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+  if (!tile) return;
+
+  const showRender = document.getElementById("showRender")?.checked ? "1" : "0";
+  const timestamp = Date.now();
+  const imgUrl = `/tile/${qx}/${qy}?render=${showRender}&_t=${timestamp}`;
+
+  let img = tile.querySelector("img");
+  if (img) {
+    // Update existing image
+    img.src = imgUrl;
+  } else {
+    // Create new image for placeholder tile
+    img = document.createElement("img");
+    img.src = imgUrl;
+    img.alt = `Tile ${qx},${qy}`;
+    img.onload = () => {
+      // Remove placeholder class once image loads
+      tile.classList.remove("placeholder");
+    };
+    tile.appendChild(img);
+  }
+}
+
+function stopStatusPolling() {
+  if (statusPollInterval) {
+    clearInterval(statusPollInterval);
+    statusPollInterval = null;
+  }
+}
+
+async function checkGenerationStatus() {
+  try {
+    const response = await fetch("/api/status");
+    const status = await response.json();
+
+    console.log("Status poll:", status);
+
+    // Track state changes - consider active_model_count for parallel processing
+    const wasGenerating = isGenerating || isRendering;
+    const hasActiveModels = (status.active_model_count || 0) > 0;
+    isGenerating =
+      (status.is_generating || hasActiveModels) &&
+      status.status !== "rendering";
+    isRendering = status.is_generating && status.status === "rendering";
+    const nowProcessing = isGenerating || isRendering;
+
+    // Get current processing quadrants
+    const currentProcessingQuadrants = new Set(
+      (status.all_processing_quadrants || status.quadrants || []).map(
+        ([x, y]) => `${x},${y}`
+      )
+    );
+
+    // Detect quadrants that just finished processing (were processing, now not)
+    const completedQuadrants = [];
+    lastProcessingQuadrants.forEach((coordKey) => {
+      if (!currentProcessingQuadrants.has(coordKey)) {
+        completedQuadrants.push(coordKey);
+      }
+    });
+
+    // Refresh tiles for completed quadrants
+    if (completedQuadrants.length > 0) {
+      console.log("Refreshing completed quadrants:", completedQuadrants);
+      completedQuadrants.forEach((coordKey) => {
+        const [qx, qy] = coordKey.split(",").map(Number);
+        refreshTileImage(qx, qy);
+      });
+    }
+
+    // Update tracking for next poll
+    lastProcessingQuadrants = currentProcessingQuadrants;
+
+    // Apply visual styles based on server status
+    applyStatusStyles(status);
+
+    // Update render button based on state
+    const renderBtn = document.getElementById("renderBtn");
+
+    if (nowProcessing) {
+      // Show loading state on render button only (generate state is shown in toolbar)
+      if (isRendering) {
+        renderBtn.classList.add("loading");
+        renderBtn.innerHTML = 'Rendering<span class="spinner"></span>';
+      } else {
+        renderBtn.classList.remove("loading");
+        renderBtn.innerHTML = "Render";
+      }
+
+      // Show toast if not already showing
+      if (document.querySelectorAll(".toast.loading").length === 0) {
+        const opName = isRendering ? "Render" : "Generation";
+        showToast(
+          "loading",
+          `${opName} in progress...`,
+          status.message || "Please wait..."
+        );
+      }
+
+      // Update the loading toast message
+      const loadingToast = document.querySelector(
+        ".toast.loading .toast-message"
+      );
+      if (loadingToast && status.message) {
+        loadingToast.textContent = status.message;
+      }
+    } else {
+      // Reset render button
+      renderBtn.classList.remove("loading");
+      renderBtn.innerHTML = "Render";
+    }
+
+    // Handle status transitions
+    if (status.status === "complete" && wasGenerating && !nowProcessing) {
+      clearLoadingToasts();
+      showToast("success", "Complete!", status.message);
+
+      // Check if there are more items in queue
+      if (status.queue_length > 0) {
+        // Build per-model queue message
+        let queueMsg = "";
+        if (status.queue_by_model) {
+          const parts = Object.entries(status.queue_by_model)
+            .map(([modelId, info]) => {
+              const name = getModelDisplayName(modelId) || modelId;
+              const count = info.pending_count + (info.is_processing ? 1 : 0);
+              return { name, count };
+            })
+            .filter(({ count }) => count > 0)
+            .map(({ name, count }) => `${name}: ${count}`);
+          if (parts.length > 0) {
+            queueMsg = parts.join(", ");
+          }
+        }
+        if (queueMsg) {
+          showToast("info", "Processing queue", queueMsg);
+        }
+      } else {
+        // No more items - tiles already refreshed, just stop polling
+        stopStatusPolling();
+      }
+    } else if (status.status === "error" && status.error) {
+      clearLoadingToasts();
+      showToast("error", "Error", status.error);
+
+      // Continue polling if there are more items in queue
+      if (status.queue_length === 0) {
+        stopStatusPolling();
+      }
+    } else if (
+      status.status === "idle" &&
+      status.queue_length === 0 &&
+      !nowProcessing
+    ) {
+      // Idle with no queue - stop polling
+      stopStatusPolling();
+    }
+
+    // Update selection status with server info
+    updateSelectionStatus(status);
+    lastStatus = status;
+  } catch (error) {
+    console.error("Status check failed:", error);
+  }
+}
+
+// Restore saved tool on page load
+function restoreSavedTool() {
+  const savedTool = getSavedTool();
+  if (!savedTool) return;
+
+  // Check if the tool button exists before activating
+  switch (savedTool) {
+    case "select":
+      if (document.getElementById("selectTool")) {
+        toggleSelectTool();
+      }
+      break;
+    case "fixwater":
+      if (document.getElementById("fixWaterTool")) {
+        toggleFixWaterTool();
+      }
+      break;
+    case "waterfill":
+      if (document.getElementById("waterFillTool")) {
+        toggleWaterFillTool();
+      }
+      break;
+    default:
+      // Unknown tool, clear saved state
+      saveSelectedTool("");
+      break;
+  }
+}
+
+// Restore saved quadrant selections on page load
+function restoreSavedQuadrants() {
+  const savedQuadrants = getSavedQuadrants();
+  if (!savedQuadrants || savedQuadrants.length === 0) return;
+
+  let restoredCount = 0;
+
+  savedQuadrants.forEach((key) => {
+    // Check if this quadrant tile exists on the current page
+    const tile = document.querySelector(`.tile[data-coords="${key}"]`);
+    if (tile) {
+      // Don't restore if tile is locked or queued
+      if (
+        !tile.classList.contains("locked") &&
+        !tile.classList.contains("queued")
+      ) {
+        selectedQuadrants.add(key);
+        tile.classList.add("selected");
+        restoredCount++;
+      }
+    }
+  });
+
+  if (restoredCount > 0) {
+    console.log(`Restored ${restoredCount} selected quadrant(s)`);
+    // Update localStorage to only contain valid selections
+    saveSelectedQuadrants();
+    updateSelectionStatus();
+  } else if (savedQuadrants.length > 0) {
+    // Had saved selections but none are on current page - clear storage
+    saveSelectedQuadrants();
+  }
+}
+
+// Initialize on page load
+(async function initialize() {
+  // Initialize model selector
+  initModelSelector();
+
+  // Restore saved tool
+  restoreSavedTool();
+
+  // Restore saved quadrant selections
+  restoreSavedQuadrants();
+
+  try {
+    const response = await fetch("/api/status");
+    const status = await response.json();
+
+    // Apply initial status styles
+    applyStatusStyles(status);
+
+    if (status.is_generating || status.queue_length > 0) {
+      console.log(
+        "Processing in progress or queue non-empty, starting polling..."
+      );
+      isGenerating = status.is_generating && status.status !== "rendering";
+      isRendering = status.is_generating && status.status === "rendering";
+      startStatusPolling();
+    }
+
+    updateSelectionStatus(status);
+  } catch (error) {
+    console.error("Initial status check failed:", error);
+  }
+})();
+
+```
+
+Now update the selection status to enable/disable the flag button:
+
+```javascript
+// Get config from data attributes
+const config = JSON.parse(document.getElementById("app-config").dataset.config);
+
+// LocalStorage keys for persistence
+const STORAGE_KEY_MODEL = "viewer_selected_model";
+const STORAGE_KEY_TOOL = "viewer_selected_tool";
+const STORAGE_KEY_SELECTION = "viewer_selected_quadrants";
+
+// Save selected model ID to localStorage
+function saveSelectedModel(modelId) {
+  try {
+    localStorage.setItem(STORAGE_KEY_MODEL, modelId);
+  } catch (e) {
+    console.warn("Could not save model to localStorage:", e);
+  }
+}
+
+// Get saved model ID from localStorage
+function getSavedModel() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_MODEL);
+  } catch (e) {
+    return null;
+  }
+}
+
+// Save selected tool to localStorage
+function saveSelectedTool(toolName) {
+  try {
+    localStorage.setItem(STORAGE_KEY_TOOL, toolName || "");
+  } catch (e) {
+    console.warn("Could not save tool to localStorage:", e);
+  }
+}
+
+// Get saved tool from localStorage
+function getSavedTool() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_TOOL) || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+// Save selected quadrants to localStorage
+function saveSelectedQuadrants() {
+  try {
+    const quadrantsArray = Array.from(selectedQuadrants);
+    localStorage.setItem(STORAGE_KEY_SELECTION, JSON.stringify(quadrantsArray));
+  } catch (e) {
+    console.warn("Could not save selection to localStorage:", e);
+  }
+}
+
+// Get saved quadrants from localStorage
+function getSavedQuadrants() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_SELECTION);
+    return saved ? JSON.parse(saved) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+// Initialize model selector
+function initModelSelector() {
+  const select = document.getElementById("modelSelect");
+  if (!select || !config.models || config.models.length === 0) {
+    return;
+  }
+
+  // Clear existing options
+  select.innerHTML = "";
+
+  // Check if saved model ID exists in available models
+  const savedModelId = getSavedModel();
+  const savedModelExists =
+    savedModelId && config.models.some((m) => m.model_id === savedModelId);
+
+  // Add options for each model
+  config.models.forEach((model, index) => {
+    const option = document.createElement("option");
+    option.value = model.model_id;
+    option.textContent = model.name;
+
+    // Select saved model if it exists, otherwise use default or first
+    if (savedModelExists && model.model_id === savedModelId) {
+      option.selected = true;
+    } else if (
+      !savedModelExists &&
+      model.model_id === config.default_model_id
+    ) {
+      option.selected = true;
+    } else if (!savedModelExists && !config.default_model_id && index === 0) {
+      option.selected = true;
+    }
+    select.appendChild(option);
+  });
+
+  // Auto-blur after selection and save to localStorage
+  select.addEventListener("change", () => {
+    saveSelectedModel(select.value);
+    select.blur();
+  });
+}
+
+// Get the currently selected model ID
+function getSelectedModelId() {
+  const select = document.getElementById("modelSelect");
+  return select ? select.value : null;
+}
+
+// Get display name for a model ID
+function getModelDisplayName(modelId) {
+  if (!modelId) return null;
+  const configEl = document.getElementById("app-config");
+  if (!configEl) return modelId;
+  try {
+    const config = JSON.parse(configEl.dataset.config);
+    const models = config.models || [];
+    const model = models.find((m) => m.model_id === modelId);
+    return model ? model.name : modelId;
+  } catch {
+    return modelId;
+  }
+}
+
+// Apply locked/queued styles based on server status
+function applyStatusStyles(status) {
+  // Clear all existing locked/queued styles first
+  document.querySelectorAll(".tile.locked, .tile.queued").forEach((tile) => {
+    tile.classList.remove("locked", "queued");
+  });
+
+  // Apply locked style to ALL currently processing quadrants (from all models)
+  const processingQuadrants =
+    status.all_processing_quadrants || status.quadrants || [];
+  const isProcessing = status.is_generating || status.active_model_count > 0;
+
+  if (isProcessing && processingQuadrants.length > 0) {
+    document.body.classList.add("generating");
+    processingQuadrants.forEach(([qx, qy]) => {
+      const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+      if (tile) {
+        tile.classList.add("locked");
+      }
+    });
+  } else if (!isProcessing) {
+    document.body.classList.remove("generating");
+  }
+
+  // Apply queued style to pending queue items AND create overlays
+  // Also create overlays for processing items
+  const processingItems = getProcessingItems(status);
+  updateQueueOverlays(status.queue || [], processingItems);
+}
+
+// Extract currently processing items from status
+function getProcessingItems(status) {
+  const processingItems = [];
+  if (status.queue_by_model) {
+    Object.entries(status.queue_by_model).forEach(([modelId, info]) => {
+      if (info.is_processing && info.current_item) {
+        processingItems.push({
+          ...info.current_item,
+          model_id: modelId,
+          _isProcessing: true,
+        });
+      }
+    });
+  }
+  return processingItems;
+}
+
+// Create/update overlays for pending queue items and processing items
+function updateQueueOverlays(queueItems, processingItems = []) {
+  // Remove existing overlays
+  document.querySelectorAll(".queue-overlay").forEach((el) => el.remove());
+
+  // Also clear queued class from all tiles
+  document.querySelectorAll(".tile.queued").forEach((tile) => {
+    tile.classList.remove("queued");
+  });
+
+  const hasItems =
+    (queueItems && queueItems.length > 0) ||
+    (processingItems && processingItems.length > 0);
+  if (!hasItems) return;
+
+  const grid = document.querySelector(".grid");
+  if (!grid) return;
+
+  // Get grid dimensions from config
+  const gridX = config.x;
+  const gridY = config.y;
+  const sizePx = config.size_px;
+  const showLines = document.getElementById("showLines")?.checked || false;
+  const gap = showLines ? 2 : 0;
+
+  // Helper function to create an overlay for an item
+  function createOverlay(item, options = {}) {
+    const { isProcessing = false, queuePosition = null } = options;
+
+    if (!item.quadrants || item.quadrants.length === 0) return null;
+
+    // Calculate bounding box for this generation
+    const quadrants = item.quadrants;
+    let minCol = Infinity,
+      maxCol = -Infinity;
+    let minRow = Infinity,
+      maxRow = -Infinity;
+
+    // Track which tiles are visible in the current view
+    const visibleQuadrants = [];
+
+    quadrants.forEach(([qx, qy]) => {
+      const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+      if (tile) {
+        visibleQuadrants.push([qx, qy]);
+        const col = qx - gridX;
+        const row = qy - gridY;
+        minCol = Math.min(minCol, col);
+        maxCol = Math.max(maxCol, col);
+        minRow = Math.min(minRow, row);
+        maxRow = Math.max(maxRow, row);
+
+        // Add appropriate class to tile
+        if (isProcessing) {
+          tile.classList.add("locked");
+        } else if (!tile.classList.contains("locked")) {
+          tile.classList.add("queued");
+        }
+      }
+    });
+
+    if (visibleQuadrants.length === 0) return null;
+
+    // Create overlay element
+    const overlay = document.createElement("div");
+    overlay.className = isProcessing
+      ? "queue-overlay processing"
+      : "queue-overlay";
+    overlay.dataset.itemId = item.id;
+
+    // Calculate position and size
+    const left = minCol * (sizePx + gap);
+    const top = minRow * (sizePx + gap);
+    const width = (maxCol - minCol + 1) * sizePx + (maxCol - minCol) * gap;
+    const height = (maxRow - minRow + 1) * sizePx + (maxRow - minRow) * gap;
+
+    overlay.style.left = `${left}px`;
+    overlay.style.top = `${top}px`;
+    overlay.style.width = `${width}px`;
+    overlay.style.height = `${height}px`;
+
+    // Badge: spinner for processing, number for queued
+    const badge = document.createElement("div");
+    badge.className = isProcessing ? "queue-badge processing" : "queue-badge";
+    if (isProcessing) {
+      badge.innerHTML = `<svg class="processing-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+      </svg>`;
+    } else {
+      badge.textContent = queuePosition;
+    }
+    overlay.appendChild(badge);
+
+    // Model name label
+    if (item.model_id) {
+      const modelLabel = document.createElement("div");
+      modelLabel.className = "queue-model-label";
+      modelLabel.textContent =
+        getModelDisplayName(item.model_id) || item.model_id;
+      overlay.appendChild(modelLabel);
+    }
+
+    // Cancel button (visible on hover) - for both processing and queued
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className = "queue-cancel-btn";
+    cancelBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+      <line x1="10" y1="11" x2="10" y2="17"/>
+      <line x1="14" y1="11" x2="14" y2="17"/>
+    </svg>`;
+    cancelBtn.title = isProcessing
+      ? "Cancel this generation (in progress)"
+      : "Cancel this generation";
+    cancelBtn.onclick = (e) => {
+      e.stopPropagation();
+      cancelQueueItem(item.id);
+    };
+    overlay.appendChild(cancelBtn);
+
+    return overlay;
+  }
+
+  // First, create overlays for processing items (with spinner)
+  processingItems.forEach((item) => {
+    const overlay = createOverlay(item, { isProcessing: true });
+    if (overlay) {
+      grid.appendChild(overlay);
+    }
+  });
+
+  // Then, create overlays for queued items (with per-model position numbers)
+  // Track position within each model's queue
+  const modelPositionCounters = {};
+
+  queueItems.forEach((item) => {
+    const modelId = item.model_id || "default";
+    // Initialize or increment the counter for this model
+    if (!modelPositionCounters[modelId]) {
+      modelPositionCounters[modelId] = 1;
+    }
+    const positionInModelQueue = modelPositionCounters[modelId];
+    modelPositionCounters[modelId]++;
+
+    const overlay = createOverlay(item, {
+      queuePosition: positionInModelQueue,
+    });
+    if (overlay) {
+      grid.appendChild(overlay);
+    }
+  });
+}
+
+// Cancel a specific queue item
+async function cancelQueueItem(itemId) {
+  try {
+    const response = await fetch(`/api/queue/cancel/${itemId}`, {
+      method: "POST",
+    });
+    const result = await response.json();
+
+    if (result.success && result.cancelled) {
+      showToast("success", "Cancelled", result.message);
+      // Trigger immediate status update
+      checkGenerationStatus();
+    } else if (result.success && !result.cancelled) {
+      showToast("info", "Not found", result.message);
+    } else {
+      showToast("error", "Error", result.error || "Failed to cancel");
+    }
+  } catch (error) {
+    console.error("Cancel queue item failed:", error);
+    showToast("error", "Error", "Failed to cancel queue item");
+  }
+}
+
+function getParams() {
+  const x = document.getElementById("x").value;
+  const y = document.getElementById("y").value;
+  const nx = document.getElementById("nx").value;
+  const ny = document.getElementById("ny").value;
+  const sizePx = document.getElementById("sizePx").value;
+  const showLines = document.getElementById("showLines").checked ? "1" : "0";
+  const showCoords = document.getElementById("showCoords").checked ? "1" : "0";
+  const showRender = document.getElementById("showRender").checked ? "1" : "0";
+  return { x, y, nx, ny, sizePx, showLines, showCoords, showRender };
+}
+
+function goTo() {
+  const { x, y, nx, ny, sizePx, showLines, showCoords, showRender } =
+    getParams();
+  window.location.href = `?x=${x}&y=${y}&nx=${nx}&ny=${ny}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
+}
+
+function navigate(dx, dy) {
+  const params = getParams();
+  const x = parseInt(params.x) + dx;
+  const y = parseInt(params.y) + dy;
+  window.location.href = `?x=${x}&y=${y}&nx=${params.nx}&ny=${params.ny}&size=${params.sizePx}&lines=${params.showLines}&coords=${params.showCoords}&render=${params.showRender}`;
+}
+
+// Navigate to center the view on a specific coordinate
+function navigateToCoord(targetX, targetY) {
+  const params = getParams();
+  const nx = parseInt(params.nx);
+  const ny = parseInt(params.ny);
+  // Center the target coordinate in the view
+  const x = targetX - Math.floor(nx / 2);
+  const y = targetY - Math.floor(ny / 2);
+  window.location.href = `?x=${x}&y=${y}&nx=${params.nx}&ny=${params.ny}&size=${params.sizePx}&lines=${params.showLines}&coords=${params.showCoords}&render=${params.showRender}`;
+}
+
+// Hard refresh - clear image cache and reload page
+function hardRefresh() {
+  // Add cache-busting timestamp to all tile images to force reload
+  const timestamp = Date.now();
+
+  // Update all tile image sources to bust cache
+  document.querySelectorAll(".tile img").forEach((img) => {
+    const url = new URL(img.src);
+    url.searchParams.set("_t", timestamp);
+    img.src = url.toString();
+  });
+
+  // Also reload the page with cache bypass
+  // The true parameter forces reload from server, not cache
+  window.location.reload(true);
+}
+
+function toggleLines() {
+  const container = document.getElementById("gridContainer");
+  const showLines = document.getElementById("showLines").checked;
+  container.classList.toggle("show-lines", showLines);
+
+  // Update URL without reload
+  const url = new URL(window.location);
+  url.searchParams.set("lines", showLines ? "1" : "0");
+  history.replaceState({}, "", url);
+}
+
+function toggleCoords() {
+  const container = document.getElementById("gridContainer");
+  const showCoords = document.getElementById("showCoords").checked;
+  container.classList.toggle("show-coords", showCoords);
+
+  // Update URL without reload
+  const url = new URL(window.location);
+  url.searchParams.set("coords", showCoords ? "1" : "0");
+  history.replaceState({}, "", url);
+}
+
+function toggleRender() {
+  // This requires a page reload to fetch different data
+  const { x, y, nx, ny, sizePx, showLines, showCoords, showRender } =
+    getParams();
+  window.location.href = `?x=${x}&y=${y}&nx=${nx}&ny=${ny}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
+}
+
+// Keyboard navigation
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+
+  // Ignore keyboard shortcuts when prompt dialog is open
+  const promptDialog = document.getElementById("promptDialog");
+  if (promptDialog && promptDialog.style.display !== "none") return;
+
+  switch (e.key) {
+    case "ArrowLeft":
+      navigate(-1, 0);
+      break;
+    case "ArrowRight":
+      navigate(1, 0);
+      break;
+    case "ArrowUp":
+      navigate(0, -1);
+      break;
+    case "ArrowDown":
+      navigate(0, 1);
+      break;
+    case "l":
+    case "L":
+      document.getElementById("showLines").click();
+      break;
+    case "c":
+    case "C":
+      document.getElementById("showCoords").click();
+      break;
+    case "d":
+    case "D":
+      document.getElementById("showRender").click();
+      break;
+    case "g":
+    case "G":
+      generateSelected();
+      break;
+    case "s":
+    case "S":
+      toggleSelectTool();
+      break;
+    case "w":
+    case "W":
+      toggleFixWaterTool();
+      break;
+    case "f":
+    case "F":
+      toggleWaterFillTool();
+      break;
+    case "Escape":
+      if (selectToolActive) toggleSelectTool();
+      if (fixWaterToolActive) cancelWaterFix();
+      if (waterFillToolActive) cancelWaterFill();
+      break;
+  }
+});
+
+// Select tool state
+let selectToolActive = false;
+const selectedQuadrants = new Set();
+const MAX_SELECTION = 4;
+
+function toggleSelectTool() {
+  // Deactivate other tools if active
+  if (fixWaterToolActive) {
+    cancelWaterFix();
+  }
+  if (waterFillToolActive) {
+    cancelWaterFill();
+  }
+
+  selectToolActive = !selectToolActive;
+  const btn = document.getElementById("selectTool");
+  const tiles = document.querySelectorAll(".tile");
+
+  if (selectToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => tile.classList.add("selectable"));
+    saveSelectedTool("select");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => tile.classList.remove("selectable"));
+    saveSelectedTool("");
+  }
+}
+
+// Fix water tool state
+let fixWaterToolActive = false;
+let fixWaterTargetColor = null;
+let fixWaterQuadrant = null;
+
+function toggleFixWaterTool() {
+  // Deactivate other tools if active
+  if (selectToolActive) {
+    toggleSelectTool();
+  }
+  if (waterFillToolActive) {
+    cancelWaterFill();
+  }
+
+  fixWaterToolActive = !fixWaterToolActive;
+  const btn = document.getElementById("fixWaterTool");
+  const tiles = document.querySelectorAll(".tile");
+  const selectionStatus = document.getElementById("selectionStatus");
+  const waterFixStatus = document.getElementById("waterFixStatus");
+
+  if (fixWaterToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => {
+      // Only make tiles with images selectable
+      if (tile.querySelector("img")) {
+        tile.classList.add("fix-water-selectable");
+      }
+    });
+    // Show water fix status bar, hide selection status
+    selectionStatus.style.display = "none";
+    waterFixStatus.style.display = "flex";
+    // Reset state
+    resetWaterFixState();
+    saveSelectedTool("fixwater");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => {
+      tile.classList.remove("fix-water-selectable");
+      tile.classList.remove("water-fix-selected");
+    });
+    // Hide water fix status bar, show selection status
+    selectionStatus.style.display = "flex";
+    waterFixStatus.style.display = "none";
+    saveSelectedTool("");
+  }
+}
+
+function resetWaterFixState() {
+  fixWaterTargetColor = null;
+  fixWaterQuadrant = null;
+  document.getElementById("targetColorSwatch").style.background = "#333";
+  document.getElementById("targetColorSwatch").classList.remove("has-color");
+  document.getElementById("targetColorHex").textContent =
+    "Click a quadrant to pick color";
+  document.getElementById("waterFixQuadrant").textContent = "";
+  // Reset button state
+  const btn = document.getElementById("applyWaterFixBtn");
+  btn.disabled = true;
+  btn.classList.remove("loading");
+  btn.textContent = "Apply Fix";
+  document.querySelectorAll(".tile.water-fix-selected").forEach((tile) => {
+    tile.classList.remove("water-fix-selected");
+  });
+}
+
+function cancelWaterFix() {
+  if (fixWaterToolActive) {
+    toggleFixWaterTool();
+  }
+}
+
+function rgbToHex(r, g, b) {
+  return (
+    "#" +
+    [r, g, b]
+      .map((x) => {
+        const hex = x.toString(16);
+        return hex.length === 1 ? "0" + hex : hex;
+      })
+      .join("")
+      .toUpperCase()
+  );
+}
+
+function getPixelColorFromImage(img, x, y) {
+  // Create an off-screen canvas
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+
+  // Get the pixel data at the clicked position
+  const pixelData = ctx.getImageData(x, y, 1, 1).data;
+
+  return {
+    r: pixelData[0],
+    g: pixelData[1],
+    b: pixelData[2],
+    a: pixelData[3],
+  };
+}
+
+function handleFixWaterClick(tileEl, e) {
+  if (!fixWaterToolActive) return;
+
+  const img = tileEl.querySelector("img");
+  if (!img) {
+    showToast("error", "No image", "This quadrant has no generation to fix");
+    return;
+  }
+
+  // Get coordinates
+  const coords = tileEl.dataset.coords.split(",").map(Number);
+  const [qx, qy] = coords;
+
+  // Calculate click position relative to the image
+  const rect = img.getBoundingClientRect();
+  const clickX = e.clientX - rect.left;
+  const clickY = e.clientY - rect.top;
+
+  // Scale to natural image dimensions
+  const scaleX = img.naturalWidth / rect.width;
+  const scaleY = img.naturalHeight / rect.height;
+  const imgX = Math.floor(clickX * scaleX);
+  const imgY = Math.floor(clickY * scaleY);
+
+  // Ensure we're within bounds
+  if (
+    imgX < 0 ||
+    imgX >= img.naturalWidth ||
+    imgY < 0 ||
+    imgY >= img.naturalHeight
+  ) {
+    console.log("Click outside image bounds");
+    return;
+  }
+
+  try {
+    // Get the pixel color
+    const color = getPixelColorFromImage(img, imgX, imgY);
+    const hex = rgbToHex(color.r, color.g, color.b);
+
+    console.log(
+      `Picked color at (${imgX}, ${imgY}) in quadrant (${qx}, ${qy}): RGB(${color.r}, ${color.g}, ${color.b}) = ${hex}`
+    );
+
+    // Update state
+    fixWaterTargetColor = hex;
+    fixWaterQuadrant = { x: qx, y: qy };
+
+    // Update UI
+    document.getElementById("targetColorSwatch").style.background = hex;
+    document.getElementById("targetColorSwatch").classList.add("has-color");
+    document.getElementById(
+      "targetColorHex"
+    ).textContent = `${hex} — RGB(${color.r}, ${color.g}, ${color.b})`;
+    document.getElementById(
+      "waterFixQuadrant"
+    ).textContent = `Quadrant (${qx}, ${qy})`;
+    document.getElementById("applyWaterFixBtn").disabled = false;
+
+    // Update selected tile visual
+    document.querySelectorAll(".tile.water-fix-selected").forEach((tile) => {
+      tile.classList.remove("water-fix-selected");
+    });
+    tileEl.classList.add("water-fix-selected");
+
+    showToast("info", "Color picked", `Target color: ${hex} at (${qx}, ${qy})`);
+  } catch (error) {
+    console.error("Error picking color:", error);
+    showToast(
+      "error",
+      "Error picking color",
+      "Could not read pixel color. Try again."
+    );
+  }
+}
+
+async function applyWaterFix() {
+  if (!fixWaterTargetColor || !fixWaterQuadrant) {
+    showToast("error", "No color selected", "Pick a color first");
+    return;
+  }
+
+  // Default replacement color - a nice blue water color
+  const replacementColor = "#2A4A5F";
+
+  const btn = document.getElementById("applyWaterFixBtn");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  btn.textContent = "Applying...";
+
+  showToast(
+    "loading",
+    "Applying water fix...",
+    `Replacing ${fixWaterTargetColor} in (${fixWaterQuadrant.x}, ${fixWaterQuadrant.y})`
+  );
+
+  try {
+    const response = await fetch("/api/fix-water", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        x: fixWaterQuadrant.x,
+        y: fixWaterQuadrant.y,
+        target_color: fixWaterTargetColor,
+        replacement_color: replacementColor,
+      }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    if (result.success) {
+      showToast(
+        "success",
+        "Water fix applied!",
+        result.message || "Color replaced successfully"
+      );
+
+      // Refresh the specific tile image immediately with cache-busting
+      const { x, y } = fixWaterQuadrant;
+      const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+      if (tile) {
+        const img = tile.querySelector("img");
+        if (img) {
+          // Add timestamp to bust browser cache
+          const currentSrc = new URL(img.src);
+          currentSrc.searchParams.set("_t", Date.now());
+          img.src = currentSrc.toString();
+        }
+      }
+
+      // Reset the tool after a short delay
+      setTimeout(() => {
+        cancelWaterFix();
+      }, 1000);
+    } else {
+      showToast("error", "Water fix failed", result.error || "Unknown error");
+      btn.disabled = false;
+      btn.classList.remove("loading");
+      btn.textContent = "Apply Fix";
+    }
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Water fix error:", error);
+    showToast("error", "Request failed", error.message);
+    btn.disabled = false;
+    btn.classList.remove("loading");
+    btn.textContent = "Apply Fix";
+  }
+}
+
+// Water Fill tool - fills entire quadrant with water color
+let waterFillToolActive = false;
+
+function toggleWaterFillTool() {
+  // Deactivate other tools
+  if (selectToolActive) {
+    toggleSelectTool();
+  }
+  if (fixWaterToolActive) {
+    cancelWaterFix();
+  }
+
+  waterFillToolActive = !waterFillToolActive;
+  const btn = document.getElementById("waterFillTool");
+  const tiles = document.querySelectorAll(".tile");
+  const selectionStatus = document.getElementById("selectionStatus");
+  const waterFillStatus = document.getElementById("waterFillStatus");
+
+  if (waterFillToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => {
+      tile.classList.add("water-fill-selectable");
+    });
+    // Show water fill status bar, hide selection status
+    selectionStatus.style.display = "none";
+    waterFillStatus.style.display = "flex";
+    saveSelectedTool("waterfill");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => {
+      tile.classList.remove("water-fill-selectable");
+    });
+    // Hide water fill status bar, show selection status
+    selectionStatus.style.display = "flex";
+    waterFillStatus.style.display = "none";
+    saveSelectedTool("");
+  }
+}
+
+function cancelWaterFill() {
+  if (waterFillToolActive) {
+    toggleWaterFillTool();
+  }
+}
+
+async function handleWaterFillClick(tileEl) {
+  if (!waterFillToolActive) return;
+
+  const coords = tileEl.dataset.coords.split(",").map(Number);
+  const [qx, qy] = coords;
+
+  // Confirm action
+  if (!confirm(`Fill quadrant (${qx}, ${qy}) entirely with water color?`)) {
+    return;
+  }
+
+  const instruction = document.getElementById("waterFillInstruction");
+  instruction.textContent = `Filling (${qx}, ${qy})...`;
+
+  showToast(
+    "loading",
+    "Filling with water...",
+    `Processing quadrant (${qx}, ${qy})`
+  );
+
+  try {
+    const response = await fetch("/api/water-fill", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ x: qx, y: qy }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    if (result.success) {
+      showToast("success", "Water fill complete!", result.message);
+
+      // Refresh the tile image
+      const img = tileEl.querySelector("img");
+      if (img) {
+        const currentSrc = new URL(img.src);
+        currentSrc.searchParams.set("_t", Date.now());
+        img.src = currentSrc.toString();
+      }
+
+      instruction.textContent = "Click a quadrant to fill with water";
+    } else {
+      showToast("error", "Water fill failed", result.error || "Unknown error");
+      instruction.textContent = "Click a quadrant to fill with water";
+    }
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Water fill error:", error);
+    showToast("error", "Request failed", error.message);
+    instruction.textContent = "Click a quadrant to fill with water";
+  }
+}
+
+function updateSelectionStatus(serverStatus = null) {
+  const count = selectedQuadrants.size;
+  const countEl = document.getElementById("selectionCount");
+  const limitEl = document.querySelector(".selection-limit");
+  const statusEl = document.getElementById("selectionStatus");
+  const deselectBtn = document.getElementById("deselectAllBtn");
+  const deleteBtn = document.getElementById("deleteBtn");
+  const flagBtn = document.getElementById("flagBtn");
+  const renderBtn = document.getElementById("renderBtn");
+  const generateBtn = document.getElementById("generateBtn");
+  const generateRectBtn = document.getElementById("generateRectBtn");
+
+  let statusParts = [];
+
+  // Show current processing status from server
+  if (serverStatus) {
+    // Show all active models generating
+    const activeModels = serverStatus.active_models || [];
+    const processingQuadrants =
+      serverStatus.all_processing_quadrants || serverStatus.quadrants || [];
+
+    if (activeModels.length > 0 && processingQuadrants.length > 0) {
+      // Show which models are actively generating with their queue counts
+      const queueByModel = serverStatus.queue_by_model || {};
+
+      if (activeModels.length === 1) {
+        const modelId = activeModels[0];
+        const modelName = getModelDisplayName(modelId) || modelId || "default";
+        const modelInfo = queueByModel[modelId];
+        const queueCount = modelInfo
+          ? modelInfo.pending_count + (modelInfo.is_processing ? 1 : 0)
+          : 0;
+        // Create clickable coordinate links
+        const coordsHtml = processingQuadrants
+          .map(
+            ([x, y]) =>
+              `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+          )
+          .join(" ");
+        const countStr = queueCount > 0 ? ` [${queueCount}]` : "";
+        statusParts.push({
+          html: `🔄 ${modelName}${countStr}: ${coordsHtml}`,
+        });
+      } else {
+        // Multiple models generating in parallel - show each with queue count and coords
+        const queueByModel = serverStatus.queue_by_model || {};
+        const modelPartsHtml = activeModels.map((modelId) => {
+          const name = getModelDisplayName(modelId) || modelId || "default";
+          const modelInfo = queueByModel[modelId];
+          const queueCount = modelInfo
+            ? modelInfo.pending_count + (modelInfo.is_processing ? 1 : 0)
+            : 0;
+          // Get quadrants for this specific model
+          const modelQuadrants =
+            modelInfo && modelInfo.current_item
+              ? modelInfo.current_item.quadrants || []
+              : [];
+          const coordsHtml =
+            modelQuadrants.length > 0
+              ? " " +
+                modelQuadrants
+                  .map(
+                    ([x, y]) =>
+                      `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+                  )
+                  .join(" ")
+              : "";
+          const countStr = queueCount > 0 ? ` [${queueCount}]` : "";
+          return `${name}${countStr}${coordsHtml}`;
+        });
+        statusParts.push({ html: `🔄 ${modelPartsHtml.join(", ")}` });
+      }
+    } else if (
+      serverStatus.is_generating &&
+      serverStatus.quadrants &&
+      serverStatus.quadrants.length > 0
+    ) {
+      // Fallback to old behavior with clickable coords
+      const action =
+        serverStatus.status === "rendering" ? "Rendering" : "Generating";
+      const coordsHtml = serverStatus.quadrants
+        .map(
+          ([x, y]) =>
+            `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+        )
+        .join(" ");
+      statusParts.push({ html: `${action} ${coordsHtml}` });
+    }
+
+    // Show per-model queue counts (only models with items)
+    if (serverStatus.queue_by_model) {
+      const modelQueues = Object.entries(serverStatus.queue_by_model);
+      const queueParts = modelQueues
+        .map(([modelId, info]) => {
+          const name = getModelDisplayName(modelId) || modelId;
+          const count = info.pending_count + (info.is_processing ? 1 : 0);
+          return { name, count };
+        })
+        .filter(({ count }) => count > 0)
+        .map(({ name, count }) => `${name}: ${count}`);
+
+      if (queueParts.length > 0) {
+        statusParts.push(`📋 ${queueParts.join(", ")}`);
+      }
+    }
+  }
+
+  // Update selection display in toolbar-info (separate from status)
+  const selectedDisplay = document.getElementById("selectedQuadrantsDisplay");
+  if (selectedDisplay) {
+    if (count > 0) {
+      const coordsStr = Array.from(selectedQuadrants)
+        .map((key) => {
+          const [x, y] = key.split(",");
+          return `(${x},${y})`;
+        })
+        .join(" ");
+      selectedDisplay.textContent = `✓ ${coordsStr}`;
+      selectedDisplay.style.display = "";
+    } else {
+      selectedDisplay.textContent = "";
+      selectedDisplay.style.display = "none";
+    }
+  }
+
+  // Build status display - some parts may be HTML objects, others plain strings
+  if (statusParts.length > 0) {
+    const statusHtml = statusParts
+      .map((part) => (typeof part === "object" && part.html ? part.html : part))
+      .join(" • ");
+    countEl.innerHTML = statusHtml;
+
+    // Add click handlers for coordinate links
+    countEl.querySelectorAll(".coord-link").forEach((link) => {
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        const x = parseInt(link.dataset.x, 10);
+        const y = parseInt(link.dataset.y, 10);
+        navigateToCoord(x, y);
+      });
+    });
+  } else {
+    countEl.textContent = `${count} selected`;
+  }
+
+  // Update status bar styling
+  const isProcessing =
+    serverStatus &&
+    (serverStatus.is_generating || serverStatus.queue_length > 0);
+  if (isProcessing) {
+    if (limitEl) limitEl.style.display = "none";
+    statusEl.classList.remove("empty");
+    statusEl.classList.add("generating");
+  } else {
+    if (limitEl) limitEl.style.display = "";
+    statusEl.classList.toggle("empty", count === 0);
+    statusEl.classList.remove("generating");
+  }
+
+  // Enable buttons for selection (can add to queue even during processing)
+  deselectBtn.disabled = count === 0;
+  deleteBtn.disabled = count === 0;
+  renderBtn.disabled = count === 0;
+  generateBtn.disabled = count === 0;
+  // Generate with prompt button
+  const generateWithPromptBtn = document.getElementById(
+    "generateWithPromptBtn"
+  );
+  if (generateWithPromptBtn) {
+    generateWithPromptBtn.disabled = count === 0;
+  }
+  // Generate Rectangle requires exactly 2 selected
+  generateRectBtn.disabled = count !== 2;
+}
+
+// Toast notification system
+function showToast(type, title, message, duration = 5000) {
+  const container = document.getElementById("toastContainer");
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+
+  const icons = {
+    success: "✅",
+    error: "❌",
+    info: "ℹ️",
+    loading: "⏳",
+  };
+
+  toast.innerHTML = `
+    <span class="toast-icon">${icons[type] || "ℹ️"}</span>
+    <div class="toast-content">
+      <div class="toast-title">${title}</div>
+      ${message ? `<div class="toast-message">${message}</div>` : ""}
+    </div>
+    <button class="toast-close" onclick="this.parentElement.remove()">×</button>
+  `;
+
+  container.appendChild(toast);
+
+  // Auto-remove after duration (except for loading toasts)
+  if (type !== "loading" && duration > 0) {
+    setTimeout(() => {
+      toast.classList.add("removing");
+      setTimeout(() => toast.remove(), 300);
+    }, duration);
+  }
+
+  return toast;
+}
+
+function clearLoadingToasts() {
+  document.querySelectorAll(".toast.loading").forEach((t) => t.remove());
+}
+
+// Generation/Render state (tracked from server)
+let isGenerating = false;
+let isRendering = false;
+
+async function deleteSelected() {
+  if (selectedQuadrants.size === 0) return;
+
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return [x, y];
+  });
+
+  // Confirm deletion
+  const coordsStr = coords.map(([x, y]) => `(${x},${y})`).join(", ");
+  if (!confirm(`Delete generation data for ${coordsStr}?`)) {
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quadrants: coords }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast("success", "Deleted", result.message);
+      // Deselect and refresh
+      deselectAll();
+      location.reload();
+    } else {
+      showToast("error", "Delete failed", result.error);
+    }
+  } catch (error) {
+    console.error("Delete error:", error);
+    showToast("error", "Delete failed", error.message);
+  }
+}
+
+async function flagSelected() {
+  if (selectedQuadrants.size === 0) return;
+
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return [x, y];
+  });
+
+  // Check if any selected tiles are already flagged - if so, unflag them
+  let anyFlagged = false;
+  coords.forEach(([x, y]) => {
+    const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+    if (tile && tile.dataset.flagged === "true") {
+      anyFlagged = true;
+    }
+  });
+
+  // Toggle: if any are flagged, unflag all; otherwise flag all
+  const shouldFlag = !anyFlagged;
+
+  try {
+    const response = await fetch("/api/flag", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quadrants: coords, flag: shouldFlag }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast("success", result.flagged ? "Flagged" : "Unflagged", result.message);
+
+      // Update tile visual state
+      coords.forEach(([x, y]) => {
+        const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+        if (tile) {
+          if (shouldFlag) {
+            tile.classList.add("flagged");
+            tile.dataset.flagged = "true";
+          } else {
+            tile.classList.remove("flagged");
+            tile.dataset.flagged = "false";
+          }
+        }
+      });
+
+      // Deselect after flagging
+      deselectAll();
+    } else {
+      showToast("error", "Flag failed", result.error);
+    }
+  } catch (error) {
+    console.error("Flag error:", error);
+    showToast("error", "Flag failed", error.message);
+  }
+}
+
+async function clearQueue() {
+  // Get current queue info first
+  try {
+    const statusResponse = await fetch("/api/status");
+    const status = await statusResponse.json();
+
+    const queueLength = status.queue_length || 0;
+    const isGenerating = status.is_generating || false;
+
+    if (queueLength === 0 && !isGenerating) {
+      showToast(
+        "info",
+        "Nothing to clear",
+        "There are no pending items or active generations."
+      );
+      return;
+    }
+
+    // Build confirm message based on what will be cancelled
+    let confirmMessage = "Are you sure you want to clear the queue?";
+    const parts = [];
+    if (queueLength > 0) {
+      parts.push(`${queueLength} pending item(s)`);
+    }
+    if (isGenerating) {
+      parts.push("the current generation in progress");
+    }
+    if (parts.length > 0) {
+      confirmMessage = `Are you sure you want to cancel ${parts.join(
+        " and "
+      )}?`;
+    }
+
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    // Clear the queue
+    const response = await fetch("/api/queue/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast(
+        "success",
+        "Queue cleared",
+        result.message || `Cleared ${result.cleared_count} item(s)`
+      );
+      // Refresh status
+      await checkGenerationStatus();
+    } else {
+      showToast(
+        "error",
+        "Failed to clear queue",
+        result.error || "Unknown error"
+      );
+    }
+  } catch (error) {
+    console.error("Clear queue error:", error);
+    showToast("error", "Request failed", error.message);
+  }
+}
+
+// Prompt dialog functions
+function showPromptDialog() {
+  if (selectedQuadrants.size === 0) return;
+  const dialog = document.getElementById("promptDialog");
+  const input = document.getElementById("promptInput");
+  if (dialog && input) {
+    input.value = "";
+    dialog.style.display = "flex";
+    input.focus();
+  }
+}
+
+function hidePromptDialog() {
+  const dialog = document.getElementById("promptDialog");
+  if (dialog) {
+    dialog.style.display = "none";
+  }
+}
+
+async function submitPromptGeneration() {
+  const input = document.getElementById("promptInput");
+  const prompt = input ? input.value.trim() : "";
+  hidePromptDialog();
+  await generateSelected(prompt);
+}
+
+async function generateSelected(prompt = null) {
+  if (selectedQuadrants.size === 0) return;
+
+  // Separate selected quadrants into those that need generation vs those that already have it
+  const toGenerate = [];
+  const contextQuadrants = [];
+
+  Array.from(selectedQuadrants).forEach((s) => {
+    const [x, y] = s.split(",").map(Number);
+    const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+
+    if (tile && !tile.classList.contains("placeholder")) {
+      // This quadrant already has a generation - use as context
+      contextQuadrants.push([x, y]);
+    } else {
+      // This quadrant needs generation
+      toGenerate.push([x, y]);
+    }
+  });
+
+  // If nothing needs generation, inform the user
+  if (toGenerate.length === 0) {
+    showToast(
+      "info",
+      "Already generated",
+      "All selected quadrants already have generations. Select at least one empty quadrant."
+    );
+    return;
+  }
+
+  const modelId = getSelectedModelId();
+
+  console.log(
+    "Generate requested for:",
+    toGenerate,
+    "with context:",
+    contextQuadrants,
+    "model:",
+    modelId
+  );
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+
+  // Build context info for toast
+  const contextMsg =
+    contextQuadrants.length > 0
+      ? ` (using ${contextQuadrants.length} as context)`
+      : "";
+  const promptMsg = prompt ? " with prompt" : "";
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const requestBody = {
+      quadrants: toGenerate,
+      model_id: modelId,
+    };
+
+    // Include context quadrants if any
+    if (contextQuadrants.length > 0) {
+      requestBody.context = contextQuadrants;
+    }
+
+    // Include prompt if provided
+    if (prompt) {
+      requestBody.prompt = prompt;
+    }
+
+    const response = await fetch("/api/generate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    const result = await response.json();
+
+    if (result.queued) {
+      console.log(
+        "Generation queued at position:",
+        result.position,
+        "model:",
+        result.model_id
+      );
+      // Get model name for display
+      const modelName = getModelDisplayName(result.model_id);
+      const modelInfo = modelName ? ` (${modelName})` : "";
+      showToast(
+        "success",
+        "Added to queue",
+        `${toGenerate.length} quadrant(s)${promptMsg}${contextMsg} → position ${result.position}${modelInfo}`
+      );
+    } else if (!result.success) {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    console.error("Generation error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+  }
+}
+
+async function renderSelected() {
+  if (selectedQuadrants.size === 0) return;
+
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return [x, y];
+  });
+
+  console.log("Render requested for:", coords);
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const response = await fetch("/api/render", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ quadrants: coords }),
+    });
+
+    const result = await response.json();
+
+    if (result.queued) {
+      console.log("Render queued at position:", result.position);
+      showToast(
+        "success",
+        "Added to queue",
+        `${coords.length} quadrant(s) for render → position ${result.position}`
+      );
+    } else if (!result.success) {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    console.error("Render error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+  }
+}
+
+async function generateRectangle() {
+  if (selectedQuadrants.size !== 2) {
+    showToast(
+      "error",
+      "Invalid selection",
+      "Please select exactly 2 quadrants to define the rectangle corners."
+    );
+    return;
+  }
+
+  // Get the two selected coordinates
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return { x, y };
+  });
+
+  // Calculate rectangle bounds (top-left and bottom-right)
+  const minX = Math.min(coords[0].x, coords[1].x);
+  const maxX = Math.max(coords[0].x, coords[1].x);
+  const minY = Math.min(coords[0].y, coords[1].y);
+  const maxY = Math.max(coords[0].y, coords[1].y);
+
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const totalQuadrants = width * height;
+
+  // Build confirmation message
+  const confirmMessage =
+    `Generate rectangle from (${minX}, ${minY}) to (${maxX}, ${maxY})?\n\n` +
+    `Size: ${width} × ${height} = ${totalQuadrants} quadrant(s)\n\n` +
+    `This will create a generation plan and queue all steps.\n` +
+    `Pre-existing generations will be skipped.`;
+
+  if (!confirm(confirmMessage)) {
+    return;
+  }
+
+  const modelId = getSelectedModelId();
+
+  console.log(
+    "Generate rectangle requested:",
+    { tl: [minX, minY], br: [maxX, maxY] },
+    "with model:",
+    modelId
+  );
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+
+  // Show immediate feedback
+  const btn = document.getElementById("generateRectBtn");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  btn.innerHTML = 'Queueing...<span class="spinner"></span>';
+
+  showToast(
+    "loading",
+    "Creating generation plan...",
+    `Rectangle (${minX}, ${minY}) to (${maxX}, ${maxY})`
+  );
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const response = await fetch("/api/generate-rectangle", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        tl: [minX, minY],
+        br: [maxX, maxY],
+        model_id: modelId,
+      }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    // Reset button
+    btn.classList.remove("loading");
+    btn.innerHTML = "Generate Rectangle";
+
+    if (result.success) {
+      if (result.queued_count === 0) {
+        showToast(
+          "info",
+          "Nothing to generate",
+          result.message || "All quadrants already generated."
+        );
+      } else {
+        console.log("Rectangle generation queued:", result);
+        const summary = result.plan_summary || {};
+        const stepTypes = summary.steps_by_type || {};
+        const typeInfo = Object.entries(stepTypes)
+          .map(([type, count]) => `${count}× ${type}`)
+          .join(", ");
+
+        showToast(
+          "success",
+          "Rectangle queued!",
+          `${result.queued_count} step(s) for ${
+            summary.total_quadrants || "?"
+          } quadrant(s)` + (typeInfo ? ` (${typeInfo})` : "")
+        );
+      }
+    } else {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Generate rectangle error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+
+    // Reset button
+    btn.classList.remove("loading");
+    btn.innerHTML = "Generate Rectangle";
+  }
+}
+
+function deselectAll() {
+  selectedQuadrants.clear();
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+  console.log("Deselected all quadrants");
+}
+
+function toggleTileSelection(tileEl, qx, qy) {
+  if (!selectToolActive) return;
+
+  // Check if this tile is currently being generated or in the queue
+  const key = `${qx},${qy}`;
+  if (
+    tileEl.classList.contains("locked") ||
+    tileEl.classList.contains("queued")
+  ) {
+    console.log(
+      `Cannot select quadrant (${qx}, ${qy}) - currently generating or in queue`
+    );
+    return;
+  }
+
+  if (selectedQuadrants.has(key)) {
+    selectedQuadrants.delete(key);
+    tileEl.classList.remove("selected");
+    console.log(`Deselected quadrant (${qx}, ${qy})`);
+  } else {
+    // Check if we've hit the max selection limit
+    if (selectedQuadrants.size >= MAX_SELECTION) {
+      console.log(`Cannot select more than ${MAX_SELECTION} quadrants`);
+      return;
+    }
+    selectedQuadrants.add(key);
+    tileEl.classList.add("selected");
+    console.log(`Selected quadrant (${qx}, ${qy})`);
+  }
+
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+
+  // Log current selection
+  if (selectedQuadrants.size > 0) {
+    console.log("Selected:", Array.from(selectedQuadrants).join("; "));
+  }
+}
+
+// Setup tile click handlers
+document.querySelectorAll(".tile").forEach((tile) => {
+  tile.addEventListener("click", (e) => {
+    // Handle fix water tool clicks
+    if (fixWaterToolActive) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleFixWaterClick(tile, e);
+      return;
+    }
+
+    // Handle water fill tool clicks
+    if (waterFillToolActive) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleWaterFillClick(tile);
+      return;
+    }
+
+    // Handle select tool clicks
+    if (!selectToolActive) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const coords = tile.dataset.coords.split(",").map(Number);
+    toggleTileSelection(tile, coords[0], coords[1]);
+  });
+});
+
+// Initialize selection status
+updateSelectionStatus();
+
+// Status polling for generation progress
+let statusPollInterval = null;
+let lastStatus = null;
+let lastProcessingQuadrants = new Set(); // Track quadrants that were processing
+
+function startStatusPolling() {
+  if (statusPollInterval) return;
+  statusPollInterval = setInterval(checkGenerationStatus, 1000);
+}
+
+// Refresh a specific tile's image (or add image if it was a placeholder)
+function refreshTileImage(qx, qy) {
+  const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+  if (!tile) return;
+
+  const showRender = document.getElementById("showRender")?.checked ? "1" : "0";
+  const timestamp = Date.now();
+  const imgUrl = `/tile/${qx}/${qy}?render=${showRender}&_t=${timestamp}`;
+
+  let img = tile.querySelector("img");
+  if (img) {
+    // Update existing image
+    img.src = imgUrl;
+  } else {
+    // Create new image for placeholder tile
+    img = document.createElement("img");
+    img.src = imgUrl;
+    img.alt = `Tile ${qx},${qy}`;
+    img.onload = () => {
+      // Remove placeholder class once image loads
+      tile.classList.remove("placeholder");
+    };
+    tile.appendChild(img);
+  }
+}
+
+function stopStatusPolling() {
+  if (statusPollInterval) {
+    clearInterval(statusPollInterval);
+    statusPollInterval = null;
+  }
+}
+
+async function checkGenerationStatus() {
+  try {
+    const response = await fetch("/api/status");
+    const status = await response.json();
+
+    console.log("Status poll:", status);
+
+    // Track state changes - consider active_model_count for parallel processing
+    const wasGenerating = isGenerating || isRendering;
+    const hasActiveModels = (status.active_model_count || 0) > 0;
+    isGenerating =
+      (status.is_generating || hasActiveModels) &&
+      status.status !== "rendering";
+    isRendering = status.is_generating && status.status === "rendering";
+    const nowProcessing = isGenerating || isRendering;
+
+    // Get current processing quadrants
+    const currentProcessingQuadrants = new Set(
+      (status.all_processing_quadrants || status.quadrants || []).map(
+        ([x, y]) => `${x},${y}`
+      )
+    );
+
+    // Detect quadrants that just finished processing (were processing, now not)
+    const completedQuadrants = [];
+    lastProcessingQuadrants.forEach((coordKey) => {
+      if (!currentProcessingQuadrants.has(coordKey)) {
+        completedQuadrants.push(coordKey);
+      }
+    });
+
+    // Refresh tiles for completed quadrants
+    if (completedQuadrants.length > 0) {
+      console.log("Refreshing completed quadrants:", completedQuadrants);
+      completedQuadrants.forEach((coordKey) => {
+        const [qx, qy] = coordKey.split(",").map(Number);
+        refreshTileImage(qx, qy);
+      });
+    }
+
+    // Update tracking for next poll
+    lastProcessingQuadrants = currentProcessingQuadrants;
+
+    // Apply visual styles based on server status
+    applyStatusStyles(status);
+
+    // Update render button based on state
+    const renderBtn = document.getElementById("renderBtn");
+
+    if (nowProcessing) {
+      // Show loading state on render button only (generate state is shown in toolbar)
+      if (isRendering) {
+        renderBtn.classList.add("loading");
+        renderBtn.innerHTML = 'Rendering<span class="spinner"></span>';
+      } else {
+        renderBtn.classList.remove("loading");
+        renderBtn.innerHTML = "Render";
+      }
+
+      // Show toast if not already showing
+      if (document.querySelectorAll(".toast.loading").length === 0) {
+        const opName = isRendering ? "Render" : "Generation";
+        showToast(
+          "loading",
+          `${opName} in progress...`,
+          status.message || "Please wait..."
+        );
+      }
+
+      // Update the loading toast message
+      const loadingToast = document.querySelector(
+        ".toast.loading .toast-message"
+      );
+      if (loadingToast && status.message) {
+        loadingToast.textContent = status.message;
+      }
+    } else {
+      // Reset render button
+      renderBtn.classList.remove("loading");
+      renderBtn.innerHTML = "Render";
+    }
+
+    // Handle status transitions
+    if (status.status === "complete" && wasGenerating && !nowProcessing) {
+      clearLoadingToasts();
+      showToast("success", "Complete!", status.message);
+
+      // Check if there are more items in queue
+      if (status.queue_length > 0) {
+        // Build per-model queue message
+        let queueMsg = "";
+        if (status.queue_by_model) {
+          const parts = Object.entries(status.queue_by_model)
+            .map(([modelId, info]) => {
+              const name = getModelDisplayName(modelId) || modelId;
+              const count = info.pending_count + (info.is_processing ? 1 : 0);
+              return { name, count };
+            })
+            .filter(({ count }) => count > 0)
+            .map(({ name, count }) => `${name}: ${count}`);
+          if (parts.length > 0) {
+            queueMsg = parts.join(", ");
+          }
+        }
+        if (queueMsg) {
+          showToast("info", "Processing queue", queueMsg);
+        }
+      } else {
+        // No more items - tiles already refreshed, just stop polling
+        stopStatusPolling();
+      }
+    } else if (status.status === "error" && status.error) {
+      clearLoadingToasts();
+      showToast("error", "Error", status.error);
+
+      // Continue polling if there are more items in queue
+      if (status.queue_length === 0) {
+        stopStatusPolling();
+      }
+    } else if (
+      status.status === "idle" &&
+      status.queue_length === 0 &&
+      !nowProcessing
+    ) {
+      // Idle with no queue - stop polling
+      stopStatusPolling();
+    }
+
+    // Update selection status with server info
+    updateSelectionStatus(status);
+    lastStatus = status;
+  } catch (error) {
+    console.error("Status check failed:", error);
+  }
+}
+
+// Restore saved tool on page load
+function restoreSavedTool() {
+  const savedTool = getSavedTool();
+  if (!savedTool) return;
+
+  // Check if the tool button exists before activating
+  switch (savedTool) {
+    case "select":
+      if (document.getElementById("selectTool")) {
+        toggleSelectTool();
+      }
+      break;
+    case "fixwater":
+      if (document.getElementById("fixWaterTool")) {
+        toggleFixWaterTool();
+      }
+      break;
+    case "waterfill":
+      if (document.getElementById("waterFillTool")) {
+        toggleWaterFillTool();
+      }
+      break;
+    default:
+      // Unknown tool, clear saved state
+      saveSelectedTool("");
+      break;
+  }
+}
+
+// Restore saved quadrant selections on page load
+function restoreSavedQuadrants() {
+  const savedQuadrants = getSavedQuadrants();
+  if (!savedQuadrants || savedQuadrants.length === 0) return;
+
+  let restoredCount = 0;
+
+  savedQuadrants.forEach((key) => {
+    // Check if this quadrant tile exists on the current page
+    const tile = document.querySelector(`.tile[data-coords="${key}"]`);
+    if (tile) {
+      // Don't restore if tile is locked or queued
+      if (
+        !tile.classList.contains("locked") &&
+        !tile.classList.contains("queued")
+      ) {
+        selectedQuadrants.add(key);
+        tile.classList.add("selected");
+        restoredCount++;
+      }
+    }
+  });
+
+  if (restoredCount > 0) {
+    console.log(`Restored ${restoredCount} selected quadrant(s)`);
+    // Update localStorage to only contain valid selections
+    saveSelectedQuadrants();
+    updateSelectionStatus();
+  } else if (savedQuadrants.length > 0) {
+    // Had saved selections but none are on current page - clear storage
+    saveSelectedQuadrants();
+  }
+}
+
+// Initialize on page load
+(async function initialize() {
+  // Initialize model selector
+  initModelSelector();
+
+  // Restore saved tool
+  restoreSavedTool();
+
+  // Restore saved quadrant selections
+  restoreSavedQuadrants();
+
+  try {
+    const response = await fetch("/api/status");
+    const status = await response.json();
+
+    // Apply initial status styles
+    applyStatusStyles(status);
+
+    if (status.is_generating || status.queue_length > 0) {
+      console.log(
+        "Processing in progress or queue non-empty, starting polling..."
+      );
+      isGenerating = status.is_generating && status.status !== "rendering";
+      isRendering = status.is_generating && status.status === "rendering";
+      startStatusPolling();
+    }
+
+    updateSelectionStatus(status);
+  } catch (error) {
+    console.error("Initial status check failed:", error);
+  }
+})();
+
+```
+
+```javascript
+// Get config from data attributes
+const config = JSON.parse(document.getElementById("app-config").dataset.config);
+
+// LocalStorage keys for persistence
+const STORAGE_KEY_MODEL = "viewer_selected_model";
+const STORAGE_KEY_TOOL = "viewer_selected_tool";
+const STORAGE_KEY_SELECTION = "viewer_selected_quadrants";
+
+// Save selected model ID to localStorage
+function saveSelectedModel(modelId) {
+  try {
+    localStorage.setItem(STORAGE_KEY_MODEL, modelId);
+  } catch (e) {
+    console.warn("Could not save model to localStorage:", e);
+  }
+}
+
+// Get saved model ID from localStorage
+function getSavedModel() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_MODEL);
+  } catch (e) {
+    return null;
+  }
+}
+
+// Save selected tool to localStorage
+function saveSelectedTool(toolName) {
+  try {
+    localStorage.setItem(STORAGE_KEY_TOOL, toolName || "");
+  } catch (e) {
+    console.warn("Could not save tool to localStorage:", e);
+  }
+}
+
+// Get saved tool from localStorage
+function getSavedTool() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_TOOL) || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+// Save selected quadrants to localStorage
+function saveSelectedQuadrants() {
+  try {
+    const quadrantsArray = Array.from(selectedQuadrants);
+    localStorage.setItem(STORAGE_KEY_SELECTION, JSON.stringify(quadrantsArray));
+  } catch (e) {
+    console.warn("Could not save selection to localStorage:", e);
+  }
+}
+
+// Get saved quadrants from localStorage
+function getSavedQuadrants() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_SELECTION);
+    return saved ? JSON.parse(saved) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+// Initialize model selector
+function initModelSelector() {
+  const select = document.getElementById("modelSelect");
+  if (!select || !config.models || config.models.length === 0) {
+    return;
+  }
+
+  // Clear existing options
+  select.innerHTML = "";
+
+  // Check if saved model ID exists in available models
+  const savedModelId = getSavedModel();
+  const savedModelExists =
+    savedModelId && config.models.some((m) => m.model_id === savedModelId);
+
+  // Add options for each model
+  config.models.forEach((model, index) => {
+    const option = document.createElement("option");
+    option.value = model.model_id;
+    option.textContent = model.name;
+
+    // Select saved model if it exists, otherwise use default or first
+    if (savedModelExists && model.model_id === savedModelId) {
+      option.selected = true;
+    } else if (
+      !savedModelExists &&
+      model.model_id === config.default_model_id
+    ) {
+      option.selected = true;
+    } else if (!savedModelExists && !config.default_model_id && index === 0) {
+      option.selected = true;
+    }
+    select.appendChild(option);
+  });
+
+  // Auto-blur after selection and save to localStorage
+  select.addEventListener("change", () => {
+    saveSelectedModel(select.value);
+    select.blur();
+  });
+}
+
+// Get the currently selected model ID
+function getSelectedModelId() {
+  const select = document.getElementById("modelSelect");
+  return select ? select.value : null;
+}
+
+// Get display name for a model ID
+function getModelDisplayName(modelId) {
+  if (!modelId) return null;
+  const configEl = document.getElementById("app-config");
+  if (!configEl) return modelId;
+  try {
+    const config = JSON.parse(configEl.dataset.config);
+    const models = config.models || [];
+    const model = models.find((m) => m.model_id === modelId);
+    return model ? model.name : modelId;
+  } catch {
+    return modelId;
+  }
+}
+
+// Apply locked/queued styles based on server status
+function applyStatusStyles(status) {
+  // Clear all existing locked/queued styles first
+  document.querySelectorAll(".tile.locked, .tile.queued").forEach((tile) => {
+    tile.classList.remove("locked", "queued");
+  });
+
+  // Apply locked style to ALL currently processing quadrants (from all models)
+  const processingQuadrants =
+    status.all_processing_quadrants || status.quadrants || [];
+  const isProcessing = status.is_generating || status.active_model_count > 0;
+
+  if (isProcessing && processingQuadrants.length > 0) {
+    document.body.classList.add("generating");
+    processingQuadrants.forEach(([qx, qy]) => {
+      const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+      if (tile) {
+        tile.classList.add("locked");
+      }
+    });
+  } else if (!isProcessing) {
+    document.body.classList.remove("generating");
+  }
+
+  // Apply queued style to pending queue items AND create overlays
+  // Also create overlays for processing items
+  const processingItems = getProcessingItems(status);
+  updateQueueOverlays(status.queue || [], processingItems);
+}
+
+// Extract currently processing items from status
+function getProcessingItems(status) {
+  const processingItems = [];
+  if (status.queue_by_model) {
+    Object.entries(status.queue_by_model).forEach(([modelId, info]) => {
+      if (info.is_processing && info.current_item) {
+        processingItems.push({
+          ...info.current_item,
+          model_id: modelId,
+          _isProcessing: true,
+        });
+      }
+    });
+  }
+  return processingItems;
+}
+
+// Create/update overlays for pending queue items and processing items
+function updateQueueOverlays(queueItems, processingItems = []) {
+  // Remove existing overlays
+  document.querySelectorAll(".queue-overlay").forEach((el) => el.remove());
+
+  // Also clear queued class from all tiles
+  document.querySelectorAll(".tile.queued").forEach((tile) => {
+    tile.classList.remove("queued");
+  });
+
+  const hasItems =
+    (queueItems && queueItems.length > 0) ||
+    (processingItems && processingItems.length > 0);
+  if (!hasItems) return;
+
+  const grid = document.querySelector(".grid");
+  if (!grid) return;
+
+  // Get grid dimensions from config
+  const gridX = config.x;
+  const gridY = config.y;
+  const sizePx = config.size_px;
+  const showLines = document.getElementById("showLines")?.checked || false;
+  const gap = showLines ? 2 : 0;
+
+  // Helper function to create an overlay for an item
+  function createOverlay(item, options = {}) {
+    const { isProcessing = false, queuePosition = null } = options;
+
+    if (!item.quadrants || item.quadrants.length === 0) return null;
+
+    // Calculate bounding box for this generation
+    const quadrants = item.quadrants;
+    let minCol = Infinity,
+      maxCol = -Infinity;
+    let minRow = Infinity,
+      maxRow = -Infinity;
+
+    // Track which tiles are visible in the current view
+    const visibleQuadrants = [];
+
+    quadrants.forEach(([qx, qy]) => {
+      const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+      if (tile) {
+        visibleQuadrants.push([qx, qy]);
+        const col = qx - gridX;
+        const row = qy - gridY;
+        minCol = Math.min(minCol, col);
+        maxCol = Math.max(maxCol, col);
+        minRow = Math.min(minRow, row);
+        maxRow = Math.max(maxRow, row);
+
+        // Add appropriate class to tile
+        if (isProcessing) {
+          tile.classList.add("locked");
+        } else if (!tile.classList.contains("locked")) {
+          tile.classList.add("queued");
+        }
+      }
+    });
+
+    if (visibleQuadrants.length === 0) return null;
+
+    // Create overlay element
+    const overlay = document.createElement("div");
+    overlay.className = isProcessing
+      ? "queue-overlay processing"
+      : "queue-overlay";
+    overlay.dataset.itemId = item.id;
+
+    // Calculate position and size
+    const left = minCol * (sizePx + gap);
+    const top = minRow * (sizePx + gap);
+    const width = (maxCol - minCol + 1) * sizePx + (maxCol - minCol) * gap;
+    const height = (maxRow - minRow + 1) * sizePx + (maxRow - minRow) * gap;
+
+    overlay.style.left = `${left}px`;
+    overlay.style.top = `${top}px`;
+    overlay.style.width = `${width}px`;
+    overlay.style.height = `${height}px`;
+
+    // Badge: spinner for processing, number for queued
+    const badge = document.createElement("div");
+    badge.className = isProcessing ? "queue-badge processing" : "queue-badge";
+    if (isProcessing) {
+      badge.innerHTML = `<svg class="processing-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+      </svg>`;
+    } else {
+      badge.textContent = queuePosition;
+    }
+    overlay.appendChild(badge);
+
+    // Model name label
+    if (item.model_id) {
+      const modelLabel = document.createElement("div");
+      modelLabel.className = "queue-model-label";
+      modelLabel.textContent =
+        getModelDisplayName(item.model_id) || item.model_id;
+      overlay.appendChild(modelLabel);
+    }
+
+    // Cancel button (visible on hover) - for both processing and queued
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className = "queue-cancel-btn";
+    cancelBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+      <line x1="10" y1="11" x2="10" y2="17"/>
+      <line x1="14" y1="11" x2="14" y2="17"/>
+    </svg>`;
+    cancelBtn.title = isProcessing
+      ? "Cancel this generation (in progress)"
+      : "Cancel this generation";
+    cancelBtn.onclick = (e) => {
+      e.stopPropagation();
+      cancelQueueItem(item.id);
+    };
+    overlay.appendChild(cancelBtn);
+
+    return overlay;
+  }
+
+  // First, create overlays for processing items (with spinner)
+  processingItems.forEach((item) => {
+    const overlay = createOverlay(item, { isProcessing: true });
+    if (overlay) {
+      grid.appendChild(overlay);
+    }
+  });
+
+  // Then, create overlays for queued items (with per-model position numbers)
+  // Track position within each model's queue
+  const modelPositionCounters = {};
+
+  queueItems.forEach((item) => {
+    const modelId = item.model_id || "default";
+    // Initialize or increment the counter for this model
+    if (!modelPositionCounters[modelId]) {
+      modelPositionCounters[modelId] = 1;
+    }
+    const positionInModelQueue = modelPositionCounters[modelId];
+    modelPositionCounters[modelId]++;
+
+    const overlay = createOverlay(item, {
+      queuePosition: positionInModelQueue,
+    });
+    if (overlay) {
+      grid.appendChild(overlay);
+    }
+  });
+}
+
+// Cancel a specific queue item
+async function cancelQueueItem(itemId) {
+  try {
+    const response = await fetch(`/api/queue/cancel/${itemId}`, {
+      method: "POST",
+    });
+    const result = await response.json();
+
+    if (result.success && result.cancelled) {
+      showToast("success", "Cancelled", result.message);
+      // Trigger immediate status update
+      checkGenerationStatus();
+    } else if (result.success && !result.cancelled) {
+      showToast("info", "Not found", result.message);
+    } else {
+      showToast("error", "Error", result.error || "Failed to cancel");
+    }
+  } catch (error) {
+    console.error("Cancel queue item failed:", error);
+    showToast("error", "Error", "Failed to cancel queue item");
+  }
+}
+
+function getParams() {
+  const x = document.getElementById("x").value;
+  const y = document.getElementById("y").value;
+  const nx = document.getElementById("nx").value;
+  const ny = document.getElementById("ny").value;
+  const sizePx = document.getElementById("sizePx").value;
+  const showLines = document.getElementById("showLines").checked ? "1" : "0";
+  const showCoords = document.getElementById("showCoords").checked ? "1" : "0";
+  const showRender = document.getElementById("showRender").checked ? "1" : "0";
+  return { x, y, nx, ny, sizePx, showLines, showCoords, showRender };
+}
+
+function goTo() {
+  const { x, y, nx, ny, sizePx, showLines, showCoords, showRender } =
+    getParams();
+  window.location.href = `?x=${x}&y=${y}&nx=${nx}&ny=${ny}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
+}
+
+function navigate(dx, dy) {
+  const params = getParams();
+  const x = parseInt(params.x) + dx;
+  const y = parseInt(params.y) + dy;
+  window.location.href = `?x=${x}&y=${y}&nx=${params.nx}&ny=${params.ny}&size=${params.sizePx}&lines=${params.showLines}&coords=${params.showCoords}&render=${params.showRender}`;
+}
+
+// Navigate to center the view on a specific coordinate
+function navigateToCoord(targetX, targetY) {
+  const params = getParams();
+  const nx = parseInt(params.nx);
+  const ny = parseInt(params.ny);
+  // Center the target coordinate in the view
+  const x = targetX - Math.floor(nx / 2);
+  const y = targetY - Math.floor(ny / 2);
+  window.location.href = `?x=${x}&y=${y}&nx=${params.nx}&ny=${params.ny}&size=${params.sizePx}&lines=${params.showLines}&coords=${params.showCoords}&render=${params.showRender}`;
+}
+
+// Hard refresh - clear image cache and reload page
+function hardRefresh() {
+  // Add cache-busting timestamp to all tile images to force reload
+  const timestamp = Date.now();
+
+  // Update all tile image sources to bust cache
+  document.querySelectorAll(".tile img").forEach((img) => {
+    const url = new URL(img.src);
+    url.searchParams.set("_t", timestamp);
+    img.src = url.toString();
+  });
+
+  // Also reload the page with cache bypass
+  // The true parameter forces reload from server, not cache
+  window.location.reload(true);
+}
+
+function toggleLines() {
+  const container = document.getElementById("gridContainer");
+  const showLines = document.getElementById("showLines").checked;
+  container.classList.toggle("show-lines", showLines);
+
+  // Update URL without reload
+  const url = new URL(window.location);
+  url.searchParams.set("lines", showLines ? "1" : "0");
+  history.replaceState({}, "", url);
+}
+
+function toggleCoords() {
+  const container = document.getElementById("gridContainer");
+  const showCoords = document.getElementById("showCoords").checked;
+  container.classList.toggle("show-coords", showCoords);
+
+  // Update URL without reload
+  const url = new URL(window.location);
+  url.searchParams.set("coords", showCoords ? "1" : "0");
+  history.replaceState({}, "", url);
+}
+
+function toggleRender() {
+  // This requires a page reload to fetch different data
+  const { x, y, nx, ny, sizePx, showLines, showCoords, showRender } =
+    getParams();
+  window.location.href = `?x=${x}&y=${y}&nx=${nx}&ny=${ny}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
+}
+
+// Keyboard navigation
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+
+  // Ignore keyboard shortcuts when prompt dialog is open
+  const promptDialog = document.getElementById("promptDialog");
+  if (promptDialog && promptDialog.style.display !== "none") return;
+
+  switch (e.key) {
+    case "ArrowLeft":
+      navigate(-1, 0);
+      break;
+    case "ArrowRight":
+      navigate(1, 0);
+      break;
+    case "ArrowUp":
+      navigate(0, -1);
+      break;
+    case "ArrowDown":
+      navigate(0, 1);
+      break;
+    case "l":
+    case "L":
+      document.getElementById("showLines").click();
+      break;
+    case "c":
+    case "C":
+      document.getElementById("showCoords").click();
+      break;
+    case "d":
+    case "D":
+      document.getElementById("showRender").click();
+      break;
+    case "g":
+    case "G":
+      generateSelected();
+      break;
+    case "s":
+    case "S":
+      toggleSelectTool();
+      break;
+    case "w":
+    case "W":
+      toggleFixWaterTool();
+      break;
+    case "f":
+    case "F":
+      toggleWaterFillTool();
+      break;
+    case "Escape":
+      if (selectToolActive) toggleSelectTool();
+      if (fixWaterToolActive) cancelWaterFix();
+      if (waterFillToolActive) cancelWaterFill();
+      break;
+  }
+});
+
+// Select tool state
+let selectToolActive = false;
+const selectedQuadrants = new Set();
+const MAX_SELECTION = 4;
+
+function toggleSelectTool() {
+  // Deactivate other tools if active
+  if (fixWaterToolActive) {
+    cancelWaterFix();
+  }
+  if (waterFillToolActive) {
+    cancelWaterFill();
+  }
+
+  selectToolActive = !selectToolActive;
+  const btn = document.getElementById("selectTool");
+  const tiles = document.querySelectorAll(".tile");
+
+  if (selectToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => tile.classList.add("selectable"));
+    saveSelectedTool("select");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => tile.classList.remove("selectable"));
+    saveSelectedTool("");
+  }
+}
+
+// Fix water tool state
+let fixWaterToolActive = false;
+let fixWaterTargetColor = null;
+let fixWaterQuadrant = null;
+
+function toggleFixWaterTool() {
+  // Deactivate other tools if active
+  if (selectToolActive) {
+    toggleSelectTool();
+  }
+  if (waterFillToolActive) {
+    cancelWaterFill();
+  }
+
+  fixWaterToolActive = !fixWaterToolActive;
+  const btn = document.getElementById("fixWaterTool");
+  const tiles = document.querySelectorAll(".tile");
+  const selectionStatus = document.getElementById("selectionStatus");
+  const waterFixStatus = document.getElementById("waterFixStatus");
+
+  if (fixWaterToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => {
+      // Only make tiles with images selectable
+      if (tile.querySelector("img")) {
+        tile.classList.add("fix-water-selectable");
+      }
+    });
+    // Show water fix status bar, hide selection status
+    selectionStatus.style.display = "none";
+    waterFixStatus.style.display = "flex";
+    // Reset state
+    resetWaterFixState();
+    saveSelectedTool("fixwater");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => {
+      tile.classList.remove("fix-water-selectable");
+      tile.classList.remove("water-fix-selected");
+    });
+    // Hide water fix status bar, show selection status
+    selectionStatus.style.display = "flex";
+    waterFixStatus.style.display = "none";
+    saveSelectedTool("");
+  }
+}
+
+function resetWaterFixState() {
+  fixWaterTargetColor = null;
+  fixWaterQuadrant = null;
+  document.getElementById("targetColorSwatch").style.background = "#333";
+  document.getElementById("targetColorSwatch").classList.remove("has-color");
+  document.getElementById("targetColorHex").textContent =
+    "Click a quadrant to pick color";
+  document.getElementById("waterFixQuadrant").textContent = "";
+  // Reset button state
+  const btn = document.getElementById("applyWaterFixBtn");
+  btn.disabled = true;
+  btn.classList.remove("loading");
+  btn.textContent = "Apply Fix";
+  document.querySelectorAll(".tile.water-fix-selected").forEach((tile) => {
+    tile.classList.remove("water-fix-selected");
+  });
+}
+
+function cancelWaterFix() {
+  if (fixWaterToolActive) {
+    toggleFixWaterTool();
+  }
+}
+
+function rgbToHex(r, g, b) {
+  return (
+    "#" +
+    [r, g, b]
+      .map((x) => {
+        const hex = x.toString(16);
+        return hex.length === 1 ? "0" + hex : hex;
+      })
+      .join("")
+      .toUpperCase()
+  );
+}
+
+function getPixelColorFromImage(img, x, y) {
+  // Create an off-screen canvas
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+
+  // Get the pixel data at the clicked position
+  const pixelData = ctx.getImageData(x, y, 1, 1).data;
+
+  return {
+    r: pixelData[0],
+    g: pixelData[1],
+    b: pixelData[2],
+    a: pixelData[3],
+  };
+}
+
+function handleFixWaterClick(tileEl, e) {
+  if (!fixWaterToolActive) return;
+
+  const img = tileEl.querySelector("img");
+  if (!img) {
+    showToast("error", "No image", "This quadrant has no generation to fix");
+    return;
+  }
+
+  // Get coordinates
+  const coords = tileEl.dataset.coords.split(",").map(Number);
+  const [qx, qy] = coords;
+
+  // Calculate click position relative to the image
+  const rect = img.getBoundingClientRect();
+  const clickX = e.clientX - rect.left;
+  const clickY = e.clientY - rect.top;
+
+  // Scale to natural image dimensions
+  const scaleX = img.naturalWidth / rect.width;
+  const scaleY = img.naturalHeight / rect.height;
+  const imgX = Math.floor(clickX * scaleX);
+  const imgY = Math.floor(clickY * scaleY);
+
+  // Ensure we're within bounds
+  if (
+    imgX < 0 ||
+    imgX >= img.naturalWidth ||
+    imgY < 0 ||
+    imgY >= img.naturalHeight
+  ) {
+    console.log("Click outside image bounds");
+    return;
+  }
+
+  try {
+    // Get the pixel color
+    const color = getPixelColorFromImage(img, imgX, imgY);
+    const hex = rgbToHex(color.r, color.g, color.b);
+
+    console.log(
+      `Picked color at (${imgX}, ${imgY}) in quadrant (${qx}, ${qy}): RGB(${color.r}, ${color.g}, ${color.b}) = ${hex}`
+    );
+
+    // Update state
+    fixWaterTargetColor = hex;
+    fixWaterQuadrant = { x: qx, y: qy };
+
+    // Update UI
+    document.getElementById("targetColorSwatch").style.background = hex;
+    document.getElementById("targetColorSwatch").classList.add("has-color");
+    document.getElementById(
+      "targetColorHex"
+    ).textContent = `${hex} — RGB(${color.r}, ${color.g}, ${color.b})`;
+    document.getElementById(
+      "waterFixQuadrant"
+    ).textContent = `Quadrant (${qx}, ${qy})`;
+    document.getElementById("applyWaterFixBtn").disabled = false;
+
+    // Update selected tile visual
+    document.querySelectorAll(".tile.water-fix-selected").forEach((tile) => {
+      tile.classList.remove("water-fix-selected");
+    });
+    tileEl.classList.add("water-fix-selected");
+
+    showToast("info", "Color picked", `Target color: ${hex} at (${qx}, ${qy})`);
+  } catch (error) {
+    console.error("Error picking color:", error);
+    showToast(
+      "error",
+      "Error picking color",
+      "Could not read pixel color. Try again."
+    );
+  }
+}
+
+async function applyWaterFix() {
+  if (!fixWaterTargetColor || !fixWaterQuadrant) {
+    showToast("error", "No color selected", "Pick a color first");
+    return;
+  }
+
+  // Default replacement color - a nice blue water color
+  const replacementColor = "#2A4A5F";
+
+  const btn = document.getElementById("applyWaterFixBtn");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  btn.textContent = "Applying...";
+
+  showToast(
+    "loading",
+    "Applying water fix...",
+    `Replacing ${fixWaterTargetColor} in (${fixWaterQuadrant.x}, ${fixWaterQuadrant.y})`
+  );
+
+  try {
+    const response = await fetch("/api/fix-water", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        x: fixWaterQuadrant.x,
+        y: fixWaterQuadrant.y,
+        target_color: fixWaterTargetColor,
+        replacement_color: replacementColor,
+      }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    if (result.success) {
+      showToast(
+        "success",
+        "Water fix applied!",
+        result.message || "Color replaced successfully"
+      );
+
+      // Refresh the specific tile image immediately with cache-busting
+      const { x, y } = fixWaterQuadrant;
+      const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+      if (tile) {
+        const img = tile.querySelector("img");
+        if (img) {
+          // Add timestamp to bust browser cache
+          const currentSrc = new URL(img.src);
+          currentSrc.searchParams.set("_t", Date.now());
+          img.src = currentSrc.toString();
+        }
+      }
+
+      // Reset the tool after a short delay
+      setTimeout(() => {
+        cancelWaterFix();
+      }, 1000);
+    } else {
+      showToast("error", "Water fix failed", result.error || "Unknown error");
+      btn.disabled = false;
+      btn.classList.remove("loading");
+      btn.textContent = "Apply Fix";
+    }
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Water fix error:", error);
+    showToast("error", "Request failed", error.message);
+    btn.disabled = false;
+    btn.classList.remove("loading");
+    btn.textContent = "Apply Fix";
+  }
+}
+
+// Water Fill tool - fills entire quadrant with water color
+let waterFillToolActive = false;
+
+function toggleWaterFillTool() {
+  // Deactivate other tools
+  if (selectToolActive) {
+    toggleSelectTool();
+  }
+  if (fixWaterToolActive) {
+    cancelWaterFix();
+  }
+
+  waterFillToolActive = !waterFillToolActive;
+  const btn = document.getElementById("waterFillTool");
+  const tiles = document.querySelectorAll(".tile");
+  const selectionStatus = document.getElementById("selectionStatus");
+  const waterFillStatus = document.getElementById("waterFillStatus");
+
+  if (waterFillToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => {
+      tile.classList.add("water-fill-selectable");
+    });
+    // Show water fill status bar, hide selection status
+    selectionStatus.style.display = "none";
+    waterFillStatus.style.display = "flex";
+    saveSelectedTool("waterfill");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => {
+      tile.classList.remove("water-fill-selectable");
+    });
+    // Hide water fill status bar, show selection status
+    selectionStatus.style.display = "flex";
+    waterFillStatus.style.display = "none";
+    saveSelectedTool("");
+  }
+}
+
+function cancelWaterFill() {
+  if (waterFillToolActive) {
+    toggleWaterFillTool();
+  }
+}
+
+async function handleWaterFillClick(tileEl) {
+  if (!waterFillToolActive) return;
+
+  const coords = tileEl.dataset.coords.split(",").map(Number);
+  const [qx, qy] = coords;
+
+  // Confirm action
+  if (!confirm(`Fill quadrant (${qx}, ${qy}) entirely with water color?`)) {
+    return;
+  }
+
+  const instruction = document.getElementById("waterFillInstruction");
+  instruction.textContent = `Filling (${qx}, ${qy})...`;
+
+  showToast(
+    "loading",
+    "Filling with water...",
+    `Processing quadrant (${qx}, ${qy})`
+  );
+
+  try {
+    const response = await fetch("/api/water-fill", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ x: qx, y: qy }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    if (result.success) {
+      showToast("success", "Water fill complete!", result.message);
+
+      // Refresh the tile image
+      const img = tileEl.querySelector("img");
+      if (img) {
+        const currentSrc = new URL(img.src);
+        currentSrc.searchParams.set("_t", Date.now());
+        img.src = currentSrc.toString();
+      }
+
+      instruction.textContent = "Click a quadrant to fill with water";
+    } else {
+      showToast("error", "Water fill failed", result.error || "Unknown error");
+      instruction.textContent = "Click a quadrant to fill with water";
+    }
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Water fill error:", error);
+    showToast("error", "Request failed", error.message);
+    instruction.textContent = "Click a quadrant to fill with water";
+  }
+}
+
+function updateSelectionStatus(serverStatus = null) {
+  const count = selectedQuadrants.size;
+  const countEl = document.getElementById("selectionCount");
+  const limitEl = document.querySelector(".selection-limit");
+  const statusEl = document.getElementById("selectionStatus");
+  const deselectBtn = document.getElementById("deselectAllBtn");
+  const deleteBtn = document.getElementById("deleteBtn");
+  const flagBtn = document.getElementById("flagBtn");
+  const renderBtn = document.getElementById("renderBtn");
+  const generateBtn = document.getElementById("generateBtn");
+  const generateRectBtn = document.getElementById("generateRectBtn");
+
+  let statusParts = [];
+
+  // Show current processing status from server
+  if (serverStatus) {
+    // Show all active models generating
+    const activeModels = serverStatus.active_models || [];
+    const processingQuadrants =
+      serverStatus.all_processing_quadrants || serverStatus.quadrants || [];
+
+    if (activeModels.length > 0 && processingQuadrants.length > 0) {
+      // Show which models are actively generating with their queue counts
+      const queueByModel = serverStatus.queue_by_model || {};
+
+      if (activeModels.length === 1) {
+        const modelId = activeModels[0];
+        const modelName = getModelDisplayName(modelId) || modelId || "default";
+        const modelInfo = queueByModel[modelId];
+        const queueCount = modelInfo
+          ? modelInfo.pending_count + (modelInfo.is_processing ? 1 : 0)
+          : 0;
+        // Create clickable coordinate links
+        const coordsHtml = processingQuadrants
+          .map(
+            ([x, y]) =>
+              `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+          )
+          .join(" ");
+        const countStr = queueCount > 0 ? ` [${queueCount}]` : "";
+        statusParts.push({
+          html: `🔄 ${modelName}${countStr}: ${coordsHtml}`,
+        });
+      } else {
+        // Multiple models generating in parallel - show each with queue count and coords
+        const queueByModel = serverStatus.queue_by_model || {};
+        const modelPartsHtml = activeModels.map((modelId) => {
+          const name = getModelDisplayName(modelId) || modelId || "default";
+          const modelInfo = queueByModel[modelId];
+          const queueCount = modelInfo
+            ? modelInfo.pending_count + (modelInfo.is_processing ? 1 : 0)
+            : 0;
+          // Get quadrants for this specific model
+          const modelQuadrants =
+            modelInfo && modelInfo.current_item
+              ? modelInfo.current_item.quadrants || []
+              : [];
+          const coordsHtml =
+            modelQuadrants.length > 0
+              ? " " +
+                modelQuadrants
+                  .map(
+                    ([x, y]) =>
+                      `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+                  )
+                  .join(" ")
+              : "";
+          const countStr = queueCount > 0 ? ` [${queueCount}]` : "";
+          return `${name}${countStr}${coordsHtml}`;
+        });
+        statusParts.push({ html: `🔄 ${modelPartsHtml.join(", ")}` });
+      }
+    } else if (
+      serverStatus.is_generating &&
+      serverStatus.quadrants &&
+      serverStatus.quadrants.length > 0
+    ) {
+      // Fallback to old behavior with clickable coords
+      const action =
+        serverStatus.status === "rendering" ? "Rendering" : "Generating";
+      const coordsHtml = serverStatus.quadrants
+        .map(
+          ([x, y]) =>
+            `<a href="#" class="coord-link" data-x="${x}" data-y="${y}">(${x},${y})</a>`
+        )
+        .join(" ");
+      statusParts.push({ html: `${action} ${coordsHtml}` });
+    }
+
+    // Show per-model queue counts (only models with items)
+    if (serverStatus.queue_by_model) {
+      const modelQueues = Object.entries(serverStatus.queue_by_model);
+      const queueParts = modelQueues
+        .map(([modelId, info]) => {
+          const name = getModelDisplayName(modelId) || modelId;
+          const count = info.pending_count + (info.is_processing ? 1 : 0);
+          return { name, count };
+        })
+        .filter(({ count }) => count > 0)
+        .map(({ name, count }) => `${name}: ${count}`);
+
+      if (queueParts.length > 0) {
+        statusParts.push(`📋 ${queueParts.join(", ")}`);
+      }
+    }
+  }
+
+  // Update selection display in toolbar-info (separate from status)
+  const selectedDisplay = document.getElementById("selectedQuadrantsDisplay");
+  if (selectedDisplay) {
+    if (count > 0) {
+      const coordsStr = Array.from(selectedQuadrants)
+        .map((key) => {
+          const [x, y] = key.split(",");
+          return `(${x},${y})`;
+        })
+        .join(" ");
+      selectedDisplay.textContent = `✓ ${coordsStr}`;
+      selectedDisplay.style.display = "";
+    } else {
+      selectedDisplay.textContent = "";
+      selectedDisplay.style.display = "none";
+    }
+  }
+
+  // Build status display - some parts may be HTML objects, others plain strings
+  if (statusParts.length > 0) {
+    const statusHtml = statusParts
+      .map((part) => (typeof part === "object" && part.html ? part.html : part))
+      .join(" • ");
+    countEl.innerHTML = statusHtml;
+
+    // Add click handlers for coordinate links
+    countEl.querySelectorAll(".coord-link").forEach((link) => {
+      link.addEventListener("click", (e) => {
+        e.preventDefault();
+        const x = parseInt(link.dataset.x, 10);
+        const y = parseInt(link.dataset.y, 10);
+        navigateToCoord(x, y);
+      });
+    });
+  } else {
+    countEl.textContent = `${count} selected`;
+  }
+
+  // Update status bar styling
+  const isProcessing =
+    serverStatus &&
+    (serverStatus.is_generating || serverStatus.queue_length > 0);
+  if (isProcessing) {
+    if (limitEl) limitEl.style.display = "none";
+    statusEl.classList.remove("empty");
+    statusEl.classList.add("generating");
+  } else {
+    if (limitEl) limitEl.style.display = "";
+    statusEl.classList.toggle("empty", count === 0);
+    statusEl.classList.remove("generating");
+  }
+
+  // Enable buttons for selection (can add to queue even during processing)
+  deselectBtn.disabled = count === 0;
+  deleteBtn.disabled = count === 0;
+  if (flagBtn) flagBtn.disabled = count === 0;
+  renderBtn.disabled = count === 0;
+  generateBtn.disabled = count === 0;
+  // Generate with prompt button
+  const generateWithPromptBtn = document.getElementById(
+    "generateWithPromptBtn"
+  );
+  if (generateWithPromptBtn) {
+    generateWithPromptBtn.disabled = count === 0;
+  }
+  // Generate Rectangle requires exactly 2 selected
+  generateRectBtn.disabled = count !== 2;
+}
+
+// Toast notification system
+function showToast(type, title, message, duration = 5000) {
+  const container = document.getElementById("toastContainer");
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+
+  const icons = {
+    success: "✅",
+    error: "❌",
+    info: "ℹ️",
+    loading: "⏳",
+  };
+
+  toast.innerHTML = `
+    <span class="toast-icon">${icons[type] || "ℹ️"}</span>
+    <div class="toast-content">
+      <div class="toast-title">${title}</div>
+      ${message ? `<div class="toast-message">${message}</div>` : ""}
+    </div>
+    <button class="toast-close" onclick="this.parentElement.remove()">×</button>
+  `;
+
+  container.appendChild(toast);
+
+  // Auto-remove after duration (except for loading toasts)
+  if (type !== "loading" && duration > 0) {
+    setTimeout(() => {
+      toast.classList.add("removing");
+      setTimeout(() => toast.remove(), 300);
+    }, duration);
+  }
+
+  return toast;
+}
+
+function clearLoadingToasts() {
+  document.querySelectorAll(".toast.loading").forEach((t) => t.remove());
+}
+
+// Generation/Render state (tracked from server)
+let isGenerating = false;
+let isRendering = false;
+
+async function deleteSelected() {
+  if (selectedQuadrants.size === 0) return;
+
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return [x, y];
+  });
+
+  // Confirm deletion
+  const coordsStr = coords.map(([x, y]) => `(${x},${y})`).join(", ");
+  if (!confirm(`Delete generation data for ${coordsStr}?`)) {
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quadrants: coords }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast("success", "Deleted", result.message);
+      // Deselect and refresh
+      deselectAll();
+      location.reload();
+    } else {
+      showToast("error", "Delete failed", result.error);
+    }
+  } catch (error) {
+    console.error("Delete error:", error);
+    showToast("error", "Delete failed", error.message);
+  }
+}
+
+async function flagSelected() {
+  if (selectedQuadrants.size === 0) return;
+
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return [x, y];
+  });
+
+  // Check if any selected tiles are already flagged - if so, unflag them
+  let anyFlagged = false;
+  coords.forEach(([x, y]) => {
+    const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+    if (tile && tile.dataset.flagged === "true") {
+      anyFlagged = true;
+    }
+  });
+
+  // Toggle: if any are flagged, unflag all; otherwise flag all
+  const shouldFlag = !anyFlagged;
+
+  try {
+    const response = await fetch("/api/flag", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quadrants: coords, flag: shouldFlag }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast("success", result.flagged ? "Flagged" : "Unflagged", result.message);
+
+      // Update tile visual state
+      coords.forEach(([x, y]) => {
+        const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+        if (tile) {
+          if (shouldFlag) {
+            tile.classList.add("flagged");
+            tile.dataset.flagged = "true";
+          } else {
+            tile.classList.remove("flagged");
+            tile.dataset.flagged = "false";
+          }
+        }
+      });
+
+      // Deselect after flagging
+      deselectAll();
+    } else {
+      showToast("error", "Flag failed", result.error);
+    }
+  } catch (error) {
+    console.error("Flag error:", error);
+    showToast("error", "Flag failed", error.message);
+  }
+}
+
+async function clearQueue() {
+  // Get current queue info first
+  try {
+    const statusResponse = await fetch("/api/status");
+    const status = await statusResponse.json();
+
+    const queueLength = status.queue_length || 0;
+    const isGenerating = status.is_generating || false;
+
+    if (queueLength === 0 && !isGenerating) {
+      showToast(
+        "info",
+        "Nothing to clear",
+        "There are no pending items or active generations."
+      );
+      return;
+    }
+
+    // Build confirm message based on what will be cancelled
+    let confirmMessage = "Are you sure you want to clear the queue?";
+    const parts = [];
+    if (queueLength > 0) {
+      parts.push(`${queueLength} pending item(s)`);
+    }
+    if (isGenerating) {
+      parts.push("the current generation in progress");
+    }
+    if (parts.length > 0) {
+      confirmMessage = `Are you sure you want to cancel ${parts.join(
+        " and "
+      )}?`;
+    }
+
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    // Clear the queue
+    const response = await fetch("/api/queue/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast(
+        "success",
+        "Queue cleared",
+        result.message || `Cleared ${result.cleared_count} item(s)`
+      );
+      // Refresh status
+      await checkGenerationStatus();
+    } else {
+      showToast(
+        "error",
+        "Failed to clear queue",
+        result.error || "Unknown error"
+      );
+    }
+  } catch (error) {
+    console.error("Clear queue error:", error);
+    showToast("error", "Request failed", error.message);
+  }
+}
+
+// Prompt dialog functions
+function showPromptDialog() {
+  if (selectedQuadrants.size === 0) return;
+  const dialog = document.getElementById("promptDialog");
+  const input = document.getElementById("promptInput");
+  if (dialog && input) {
+    input.value = "";
+    dialog.style.display = "flex";
+    input.focus();
+  }
+}
+
+function hidePromptDialog() {
+  const dialog = document.getElementById("promptDialog");
+  if (dialog) {
+    dialog.style.display = "none";
+  }
+}
+
+async function submitPromptGeneration() {
+  const input = document.getElementById("promptInput");
+  const prompt = input ? input.value.trim() : "";
+  hidePromptDialog();
+  await generateSelected(prompt);
+}
+
+async function generateSelected(prompt = null) {
+  if (selectedQuadrants.size === 0) return;
+
+  // Separate selected quadrants into those that need generation vs those that already have it
+  const toGenerate = [];
+  const contextQuadrants = [];
+
+  Array.from(selectedQuadrants).forEach((s) => {
+    const [x, y] = s.split(",").map(Number);
+    const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+
+    if (tile && !tile.classList.contains("placeholder")) {
+      // This quadrant already has a generation - use as context
+      contextQuadrants.push([x, y]);
+    } else {
+      // This quadrant needs generation
+      toGenerate.push([x, y]);
+    }
+  });
+
+  // If nothing needs generation, inform the user
+  if (toGenerate.length === 0) {
+    showToast(
+      "info",
+      "Already generated",
+      "All selected quadrants already have generations. Select at least one empty quadrant."
+    );
+    return;
+  }
+
+  const modelId = getSelectedModelId();
+
+  console.log(
+    "Generate requested for:",
+    toGenerate,
+    "with context:",
+    contextQuadrants,
+    "model:",
+    modelId
+  );
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+
+  // Build context info for toast
+  const contextMsg =
+    contextQuadrants.length > 0
+      ? ` (using ${contextQuadrants.length} as context)`
+      : "";
+  const promptMsg = prompt ? " with prompt" : "";
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const requestBody = {
+      quadrants: toGenerate,
+      model_id: modelId,
+    };
+
+    // Include context quadrants if any
+    if (contextQuadrants.length > 0) {
+      requestBody.context = contextQuadrants;
+    }
+
+    // Include prompt if provided
+    if (prompt) {
+      requestBody.prompt = prompt;
+    }
+
+    const response = await fetch("/api/generate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    const result = await response.json();
+
+    if (result.queued) {
+      console.log(
+        "Generation queued at position:",
+        result.position,
+        "model:",
+        result.model_id
+      );
+      // Get model name for display
+      const modelName = getModelDisplayName(result.model_id);
+      const modelInfo = modelName ? ` (${modelName})` : "";
+      showToast(
+        "success",
+        "Added to queue",
+        `${toGenerate.length} quadrant(s)${promptMsg}${contextMsg} → position ${result.position}${modelInfo}`
+      );
+    } else if (!result.success) {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    console.error("Generation error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+  }
+}
+
+async function renderSelected() {
+  if (selectedQuadrants.size === 0) return;
+
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return [x, y];
+  });
+
+  console.log("Render requested for:", coords);
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const response = await fetch("/api/render", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ quadrants: coords }),
+    });
+
+    const result = await response.json();
+
+    if (result.queued) {
+      console.log("Render queued at position:", result.position);
+      showToast(
+        "success",
+        "Added to queue",
+        `${coords.length} quadrant(s) for render → position ${result.position}`
+      );
+    } else if (!result.success) {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    console.error("Render error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+  }
+}
+
+async function generateRectangle() {
+  if (selectedQuadrants.size !== 2) {
+    showToast(
+      "error",
+      "Invalid selection",
+      "Please select exactly 2 quadrants to define the rectangle corners."
+    );
+    return;
+  }
+
+  // Get the two selected coordinates
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return { x, y };
+  });
+
+  // Calculate rectangle bounds (top-left and bottom-right)
+  const minX = Math.min(coords[0].x, coords[1].x);
+  const maxX = Math.max(coords[0].x, coords[1].x);
+  const minY = Math.min(coords[0].y, coords[1].y);
+  const maxY = Math.max(coords[0].y, coords[1].y);
+
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const totalQuadrants = width * height;
+
+  // Build confirmation message
+  const confirmMessage =
+    `Generate rectangle from (${minX}, ${minY}) to (${maxX}, ${maxY})?\n\n` +
+    `Size: ${width} × ${height} = ${totalQuadrants} quadrant(s)\n\n` +
+    `This will create a generation plan and queue all steps.\n` +
+    `Pre-existing generations will be skipped.`;
+
+  if (!confirm(confirmMessage)) {
+    return;
+  }
+
+  const modelId = getSelectedModelId();
+
+  console.log(
+    "Generate rectangle requested:",
+    { tl: [minX, minY], br: [maxX, maxY] },
+    "with model:",
+    modelId
+  );
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+
+  // Show immediate feedback
+  const btn = document.getElementById("generateRectBtn");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  btn.innerHTML = 'Queueing...<span class="spinner"></span>';
+
+  showToast(
+    "loading",
+    "Creating generation plan...",
+    `Rectangle (${minX}, ${minY}) to (${maxX}, ${maxY})`
+  );
+
+  // Start polling for status updates
+  startStatusPolling();
+
+  try {
+    const response = await fetch("/api/generate-rectangle", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        tl: [minX, minY],
+        br: [maxX, maxY],
+        model_id: modelId,
+      }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    // Reset button
+    btn.classList.remove("loading");
+    btn.innerHTML = "Generate Rectangle";
+
+    if (result.success) {
+      if (result.queued_count === 0) {
+        showToast(
+          "info",
+          "Nothing to generate",
+          result.message || "All quadrants already generated."
+        );
+      } else {
+        console.log("Rectangle generation queued:", result);
+        const summary = result.plan_summary || {};
+        const stepTypes = summary.steps_by_type || {};
+        const typeInfo = Object.entries(stepTypes)
+          .map(([type, count]) => `${count}× ${type}`)
+          .join(", ");
+
+        showToast(
+          "success",
+          "Rectangle queued!",
+          `${result.queued_count} step(s) for ${
+            summary.total_quadrants || "?"
+          } quadrant(s)` + (typeInfo ? ` (${typeInfo})` : "")
+        );
+      }
+    } else {
+      showToast("error", "Failed to queue", result.error || "Unknown error");
+    }
+
+    // Fetch latest status to update UI
+    await checkGenerationStatus();
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Generate rectangle error:", error);
+    showToast(
+      "error",
+      "Request failed",
+      error.message || "Could not connect to server."
+    );
+
+    // Reset button
+    btn.classList.remove("loading");
+    btn.innerHTML = "Generate Rectangle";
+  }
+}
+
+function deselectAll() {
+  selectedQuadrants.clear();
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+  console.log("Deselected all quadrants");
+}
+
+function toggleTileSelection(tileEl, qx, qy) {
+  if (!selectToolActive) return;
+
+  // Check if this tile is currently being generated or in the queue
+  const key = `${qx},${qy}`;
+  if (
+    tileEl.classList.contains("locked") ||
+    tileEl.classList.contains("queued")
+  ) {
+    console.log(
+      `Cannot select quadrant (${qx}, ${qy}) - currently generating or in queue`
+    );
+    return;
+  }
+
+  if (selectedQuadrants.has(key)) {
+    selectedQuadrants.delete(key);
+    tileEl.classList.remove("selected");
+    console.log(`Deselected quadrant (${qx}, ${qy})`);
+  } else {
+    // Check if we've hit the max selection limit
+    if (selectedQuadrants.size >= MAX_SELECTION) {
+      console.log(`Cannot select more than ${MAX_SELECTION} quadrants`);
+      return;
+    }
+    selectedQuadrants.add(key);
+    tileEl.classList.add("selected");
+    console.log(`Selected quadrant (${qx}, ${qy})`);
+  }
+
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+
+  // Log current selection
+  if (selectedQuadrants.size > 0) {
+    console.log("Selected:", Array.from(selectedQuadrants).join("; "));
+  }
+}
+
+// Setup tile click handlers
+document.querySelectorAll(".tile").forEach((tile) => {
+  tile.addEventListener("click", (e) => {
+    // Handle fix water tool clicks
+    if (fixWaterToolActive) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleFixWaterClick(tile, e);
+      return;
+    }
+
+    // Handle water fill tool clicks
+    if (waterFillToolActive) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleWaterFillClick(tile);
+      return;
+    }
+
+    // Handle select tool clicks
+    if (!selectToolActive) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const coords = tile.dataset.coords.split(",").map(Number);
+    toggleTileSelection(tile, coords[0], coords[1]);
+  });
+});
+
+// Initialize selection status
+updateSelectionStatus();
+
+// Status polling for generation progress
+let statusPollInterval = null;
+let lastStatus = null;
+let lastProcessingQuadrants = new Set(); // Track quadrants that were processing
+
+function startStatusPolling() {
+  if (statusPollInterval) return;
+  statusPollInterval = setInterval(checkGenerationStatus, 1000);
+}
+
+// Refresh a specific tile's image (or add image if it was a placeholder)
+function refreshTileImage(qx, qy) {
+  const tile = document.querySelector(`.tile[data-coords="${qx},${qy}"]`);
+  if (!tile) return;
+
+  const showRender = document.getElementById("showRender")?.checked ? "1" : "0";
+  const timestamp = Date.now();
+  const imgUrl = `/tile/${qx}/${qy}?render=${showRender}&_t=${timestamp}`;
+
+  let img = tile.querySelector("img");
+  if (img) {
+    // Update existing image
+    img.src = imgUrl;
+  } else {
+    // Create new image for placeholder tile
+    img = document.createElement("img");
+    img.src = imgUrl;
+    img.alt = `Tile ${qx},${qy}`;
+    img.onload = () => {
+      // Remove placeholder class once image loads
+      tile.classList.remove("placeholder");
+    };
+    tile.appendChild(img);
+  }
+}
+
+function stopStatusPolling() {
+  if (statusPollInterval) {
+    clearInterval(statusPollInterval);
+    statusPollInterval = null;
+  }
+}
+
+async function checkGenerationStatus() {
+  try {
+    const response = await fetch("/api/status");
+    const status = await response.json();
+
+    console.log("Status poll:", status);
+
+    // Track state changes - consider active_model_count for parallel processing
+    const wasGenerating = isGenerating || isRendering;
+    const hasActiveModels = (status.active_model_count || 0) > 0;
+    isGenerating =
+      (status.is_generating || hasActiveModels) &&
+      status.status !== "rendering";
+    isRendering = status.is_generating && status.status === "rendering";
+    const nowProcessing = isGenerating || isRendering;
+
+    // Get current processing quadrants
+    const currentProcessingQuadrants = new Set(
+      (status.all_processing_quadrants || status.quadrants || []).map(
+        ([x, y]) => `${x},${y}`
+      )
+    );
+
+    // Detect quadrants that just finished processing (were processing, now not)
+    const completedQuadrants = [];
+    lastProcessingQuadrants.forEach((coordKey) => {
+      if (!currentProcessingQuadrants.has(coordKey)) {
+        completedQuadrants.push(coordKey);
+      }
+    });
+
+    // Refresh tiles for completed quadrants
+    if (completedQuadrants.length > 0) {
+      console.log("Refreshing completed quadrants:", completedQuadrants);
+      completedQuadrants.forEach((coordKey) => {
+        const [qx, qy] = coordKey.split(",").map(Number);
+        refreshTileImage(qx, qy);
+      });
+    }
+
+    // Update tracking for next poll
+    lastProcessingQuadrants = currentProcessingQuadrants;
+
+    // Apply visual styles based on server status
+    applyStatusStyles(status);
+
+    // Update render button based on state
+    const renderBtn = document.getElementById("renderBtn");
+
+    if (nowProcessing) {
+      // Show loading state on render button only (generate state is shown in toolbar)
+      if (isRendering) {
+        renderBtn.classList.add("loading");
+        renderBtn.innerHTML = 'Rendering<span class="spinner"></span>';
+      } else {
+        renderBtn.classList.remove("loading");
+        renderBtn.innerHTML = "Render";
+      }
+
+      // Show toast if not already showing
+      if (document.querySelectorAll(".toast.loading").length === 0) {
+        const opName = isRendering ? "Render" : "Generation";
+        showToast(
+          "loading",
+          `${opName} in progress...`,
+          status.message || "Please wait..."
+        );
+      }
+
+      // Update the loading toast message
+      const loadingToast = document.querySelector(
+        ".toast.loading .toast-message"
+      );
+      if (loadingToast && status.message) {
+        loadingToast.textContent = status.message;
+      }
+    } else {
+      // Reset render button
+      renderBtn.classList.remove("loading");
+      renderBtn.innerHTML = "Render";
+    }
+
+    // Handle status transitions
+    if (status.status === "complete" && wasGenerating && !nowProcessing) {
+      clearLoadingToasts();
+      showToast("success", "Complete!", status.message);
+
+      // Check if there are more items in queue
+      if (status.queue_length > 0) {
+        // Build per-model queue message
+        let queueMsg = "";
+        if (status.queue_by_model) {
+          const parts = Object.entries(status.queue_by_model)
+            .map(([modelId, info]) => {
+              const name = getModelDisplayName(modelId) || modelId;
+              const count = info.pending_count + (info.is_processing ? 1 : 0);
+              return { name, count };
+            })
+            .filter(({ count }) => count > 0)
+            .map(({ name, count }) => `${name}: ${count}`);
+          if (parts.length > 0) {
+            queueMsg = parts.join(", ");
+          }
+        }
+        if (queueMsg) {
+          showToast("info", "Processing queue", queueMsg);
+        }
+      } else {
+        // No more items - tiles already refreshed, just stop polling
+        stopStatusPolling();
+      }
+    } else if (status.status === "error" && status.error) {
+      clearLoadingToasts();
+      showToast("error", "Error", status.error);
+
+      // Continue polling if there are more items in queue
+      if (status.queue_length === 0) {
+        stopStatusPolling();
+      }
+    } else if (
+      status.status === "idle" &&
+      status.queue_length === 0 &&
+      !nowProcessing
+    ) {
+      // Idle with no queue - stop polling
+      stopStatusPolling();
+    }
+
+    // Update selection status with server info
+    updateSelectionStatus(status);
+    lastStatus = status;
+  } catch (error) {
+    console.error("Status check failed:", error);
+  }
+}
+
+// Restore saved tool on page load
+function restoreSavedTool() {
+  const savedTool = getSavedTool();
+  if (!savedTool) return;
+
+  // Check if the tool button exists before activating
+  switch (savedTool) {
+    case "select":
+      if (document.getElementById("selectTool")) {
+        toggleSelectTool();
+      }
+      break;
+    case "fixwater":
+      if (document.getElementById("fixWaterTool")) {
+        toggleFixWaterTool();
+      }
+      break;
+    case "waterfill":
+      if (document.getElementById("waterFillTool")) {
+        toggleWaterFillTool();
+      }
+      break;
+    default:
+      // Unknown tool, clear saved state
+      saveSelectedTool("");
+      break;
+  }
+}
+
+// Restore saved quadrant selections on page load
+function restoreSavedQuadrants() {
+  const savedQuadrants = getSavedQuadrants();
+  if (!savedQuadrants || savedQuadrants.length === 0) return;
+
+  let restoredCount = 0;
+
+  savedQuadrants.forEach((key) => {
+    // Check if this quadrant tile exists on the current page
+    const tile = document.querySelector(`.tile[data-coords="${key}"]`);
+    if (tile) {
+      // Don't restore if tile is locked or queued
+      if (
+        !tile.classList.contains("locked") &&
+        !tile.classList.contains("queued")
+      ) {
+        selectedQuadrants.add(key);
+        tile.classList.add("selected");
+        restoredCount++;
+      }
+    }
+  });
+
+  if (restoredCount > 0) {
+    console.log(`Restored ${restoredCount} selected quadrant(s)`);
+    // Update localStorage to only contain valid selections
+    saveSelectedQuadrants();
+    updateSelectionStatus();
+  } else if (savedQuadrants.length > 0) {
+    // Had saved selections but none are on current page - clear storage
+    saveSelectedQuadrants();
+  }
+}
+
+// Initialize on page load
+(async function initialize() {
+  // Initialize model selector
+  initModelSelector();
+
+  // Restore saved tool
+  restoreSavedTool();
+
+  // Restore saved quadrant selections
+  restoreSavedQuadrants();
+
+  try {
+    const response = await fetch("/api/status");
+    const status = await response.json();
+
+    // Apply initial status styles
+    applyStatusStyles(status);
+
+    if (status.is_generating || status.queue_length > 0) {
+      console.log(
+        "Processing in progress or queue non-empty, starting polling..."
+      );
+      isGenerating = status.is_generating && status.status !== "rendering";
+      isRendering = status.is_generating && status.status === "rendering";
+      startStatusPolling();
+    }
+
+    updateSelectionStatus(status);
+  } catch (error) {
+    console.error("Initial status check failed:", error);
+  }
+})();
+
+```
+
+Now let me add CSS for the flagged tiles and flag button:
+
+```css
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "SF Mono", "Monaco", "Inconsolata", monospace;
+  font-size: 12px;
+  background: #1a1a2e;
+  color: #eee;
+  min-height: 100vh;
+  padding: 15px;
+  padding-top: 95px; /* Space for fixed toolbar */
+}
+
+.toolbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: #1a1a2e;
+  padding: 10px 15px;
+  z-index: 100;
+  border-bottom: 1px solid #333;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+.toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+
+.toolbar-info {
+  color: #666;
+  font-size: 0.75rem;
+}
+
+.toolbar-info span + span {
+  margin-left: 12px;
+}
+
+.toolbar-info .selected-quadrants {
+  color: #00d9ff;
+  font-weight: bold;
+}
+
+.controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.controls label {
+  color: #888;
+  font-size: 0.8rem;
+}
+
+.controls input[type="number"] {
+  width: 50px;
+  padding: 5px 6px;
+  border: 1px solid #333;
+  border-radius: 3px;
+  background: #16213e;
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.8rem;
+}
+
+.controls button {
+  padding: 5px 12px;
+  background: #00d9ff;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: bold;
+}
+
+.controls button:hover {
+  background: #00b8d4;
+}
+
+.toggle-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding-left: 12px;
+  border-left: 1px solid #333;
+}
+
+.toggle-group label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.75rem;
+}
+
+.toggle-group input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: #00d9ff;
+  cursor: pointer;
+}
+
+.grid-container {
+  display: inline-block;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.grid-container.show-lines {
+  border: 2px solid #333;
+}
+
+.grid {
+  display: grid;
+  background: #333;
+}
+
+.grid-container.show-lines .grid {
+  gap: 2px;
+}
+
+.grid-container:not(.show-lines) .grid {
+  gap: 0;
+  background: transparent;
+}
+
+.grid-container:not(.show-lines) {
+  border: none;
+}
+
+.tile {
+  position: relative;
+  background: #2a2a4a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tile img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.tile.placeholder {
+  background: #3a3a5a;
+}
+
+.tile .coords {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.65rem;
+  color: #00d9ff;
+  transition: opacity 0.2s;
+}
+
+.tile.placeholder .coords {
+  color: #666;
+}
+
+.grid-container:not(.show-coords) .tile .coords {
+  opacity: 0;
+}
+
+/* Tool button styles */
+.tools-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tools-label {
+  color: #666;
+  font-size: 0.7rem;
+}
+
+.tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: #2a2a3e;
+  color: #666;
+  border: 1px solid #444;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  transition: all 0.15s ease;
+}
+
+.tool-btn:hover {
+  background: #3a3a4e;
+  color: #999;
+  border-color: #555;
+}
+
+.tool-btn.active {
+  background: #10b981;
+  color: #fff;
+  border-color: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+}
+
+.tool-btn.active:hover {
+  background: #059669;
+  border-color: #059669;
+}
+
+.tool-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Selection styles */
+.tile.selected {
+  outline: 3px solid #ff3333;
+  outline-offset: -3px;
+  z-index: 10;
+}
+
+.grid-container.show-lines .tile.selected {
+  outline-color: #ff3333;
+}
+
+.tile.selectable {
+  cursor: pointer;
+}
+
+.tile.placeholder.selected {
+  background: rgba(255, 51, 51, 0.15);
+}
+
+/* Locked tiles (during generation) */
+.tile.locked {
+  outline: 3px solid #a855f7;
+  outline-offset: -3px;
+  z-index: 10;
+}
+
+.grid-container.show-lines .tile.locked {
+  outline-color: #a855f7;
+}
+
+.tile.placeholder.locked {
+  background: rgba(168, 85, 247, 0.2);
+}
+
+/* Queued tiles (in queue, waiting to be generated) */
+.tile.queued {
+  outline: 3px dashed #c084fc !important;
+  outline-offset: -3px;
+  z-index: 9;
+  animation: pulse-queue 1.5s ease-in-out infinite;
+  /* Fallback: box-shadow for browsers that don't render dashed outlines well */
+  box-shadow: inset 0 0 0 3px rgba(192, 132, 252, 0.5);
+}
+
+@keyframes pulse-queue {
+  0%,
+  100% {
+    outline-color: #c084fc;
+    box-shadow: inset 0 0 0 3px rgba(192, 132, 252, 0.5);
+  }
+  50% {
+    outline-color: #8b5cf6;
+    box-shadow: inset 0 0 0 3px rgba(139, 92, 246, 0.7);
+  }
+}
+
+.grid-container.show-lines .tile.queued {
+  outline-color: #c084fc;
+}
+
+.tile.placeholder.queued {
+  background: rgba(168, 85, 247, 0.3) !important;
+}
+
+/* Allow selection while generating - only disable clicking on locked/queued tiles */
+body.generating .tile.locked.selectable,
+body.generating .tile.queued.selectable {
+  cursor: not-allowed;
+}
+
+/* Selection status bar */
+.selection-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  background: rgba(255, 51, 51, 0.1);
+  border: 1px solid rgba(255, 51, 51, 0.3);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: #ff6666;
+  margin-top: 8px;
+}
+
+.selection-status.empty {
+  background: transparent;
+  border-color: #333;
+  color: #666;
+}
+
+.selection-status.generating {
+  background: rgba(168, 85, 247, 0.1);
+  border-color: rgba(168, 85, 247, 0.4);
+  color: #a855f7;
+}
+
+/* Clickable coordinate links in status bar */
+.coord-link {
+  color: #00d9ff;
+  text-decoration: none;
+  cursor: pointer;
+  padding: 1px 3px;
+  border-radius: 3px;
+  transition: background-color 0.15s ease;
+}
+
+.coord-link:hover {
+  background-color: rgba(0, 217, 255, 0.2);
+  text-decoration: underline;
+}
+
+.selection-limit {
+  color: #888;
+  font-size: 0.65rem;
+}
+
+.deselect-btn {
+  padding: 3px 8px;
+  background: #ff3333;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  margin-left: auto;
+  transition: all 0.2s;
+}
+
+.deselect-btn:hover:not(:disabled) {
+  background: #ff5555;
+}
+
+.deselect-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+}
+
+.delete-btn {
+  padding: 3px 8px;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  transition: all 0.2s;
+}
+
+.delete-btn:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.delete-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+}
+
+.flag-btn {
+  padding: 3px 8px;
+  background: #f97316;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  transition: all 0.2s;
+}
+
+.flag-btn:hover:not(:disabled) {
+  background: #ea580c;
+}
+
+.flag-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+}
+
+.render-btn {
+  padding: 4px 12px;
+  background: #f59e0b;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.render-btn:hover:not(:disabled) {
+  background: #d97706;
+}
+
+.render-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+.render-btn.loading {
+  background: #666;
+  cursor: wait;
+}
+
+.render-btn .spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.generate-btn {
+  padding: 4px 12px;
+  background: #00d9ff;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.generate-btn:hover:not(:disabled) {
+  background: #00b8d4;
+}
+
+.generate-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+/* Generate Rectangle button */
+.generate-rect-btn {
+  padding: 4px 12px;
+  background: #8b5cf6;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.generate-rect-btn:hover:not(:disabled) {
+  background: #7c3aed;
+}
+
+.generate-rect-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+.generate-rect-btn.loading {
+  background: #666;
+  cursor: wait;
+}
+
+.generate-rect-btn .spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+/* Clear Queue button */
+.clear-queue-btn {
+  padding: 4px 10px;
+  background: #6b7280;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  margin-left: 8px;
+}
+
+.clear-queue-btn:hover {
+  background: #ef4444;
+}
+
+.clear-queue-btn:active {
+  background: #dc2626;
+}
+
+.hard-refresh-btn {
+  padding: 4px 10px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  margin-left: 8px;
+}
+
+.hard-refresh-btn:hover {
+  background: #2563eb;
+}
+
+.hard-refresh-btn:active {
+  background: #1d4ed8;
+}
+
+/* Toast notification system */
+.toast-container {
+  position: fixed;
+  bottom: 15px;
+  right: 15px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  max-width: 320px;
+}
+
+.toast {
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  animation: slideIn 0.3s ease-out;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.toast.success {
+  background: linear-gradient(135deg, #065f46 0%, #047857 100%);
+  border: 1px solid #10b981;
+  color: #d1fae5;
+}
+
+.toast.error {
+  background: linear-gradient(135deg, #7f1d1d 0%, #991b1b 100%);
+  border: 1px solid #ef4444;
+  color: #fee2e2;
+}
+
+.toast.info {
+  background: linear-gradient(135deg, #1e3a5f 0%, #1e40af 100%);
+  border: 1px solid #3b82f6;
+  color: #dbeafe;
+}
+
+.toast.loading {
+  background: linear-gradient(135deg, #374151 0%, #4b5563 100%);
+  border: 1px solid #6b7280;
+  color: #e5e7eb;
+}
+
+.toast-icon {
+  flex-shrink: 0;
+  font-size: 1rem;
+}
+
+.toast-content {
+  flex: 1;
+}
+
+.toast-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.toast-message {
+  opacity: 0.9;
+  font-size: 0.7rem;
+}
+
+.toast-close {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+  font-size: 1rem;
+  padding: 0;
+  line-height: 1;
+}
+
+.toast-close:hover {
+  opacity: 1;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOut {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+.toast.removing {
+  animation: slideOut 0.3s ease-in forwards;
+}
+
+/* Loading spinner for generate button */
+.generate-btn.loading {
+  background: #666;
+  color: #fff;
+  cursor: wait;
+}
+
+.generate-btn .spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Water fix tool styles */
+.water-fix-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: #60a5fa;
+  margin-top: 8px;
+}
+
+.water-fix-label {
+  color: #93c5fd;
+  font-weight: 500;
+}
+
+.color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3), inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+  background: #333;
+}
+
+.color-swatch.has-color {
+  cursor: pointer;
+}
+
+.color-hex {
+  font-family: "SF Mono", "Monaco", "Inconsolata", monospace;
+  font-size: 0.75rem;
+  color: #93c5fd;
+  min-width: 180px;
+}
+
+.water-fix-quadrant {
+  color: #60a5fa;
+  font-size: 0.7rem;
+}
+
+.apply-water-fix-btn {
+  padding: 4px 12px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+  margin-left: auto;
+}
+
+.apply-water-fix-btn:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.apply-water-fix-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+.apply-water-fix-btn.loading {
+  background: #666;
+  cursor: wait;
+}
+
+.cancel-water-fix-btn {
+  padding: 4px 8px;
+  background: #4b5563;
+  color: #d1d5db;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  transition: all 0.2s;
+}
+
+.cancel-water-fix-btn:hover {
+  background: #6b7280;
+}
+
+/* Fix water tool active state */
+.tile.fix-water-selectable {
+  cursor: crosshair;
+}
+
+.tile.fix-water-selectable:hover {
+  outline: 2px solid #3b82f6;
+  outline-offset: -2px;
+}
+
+.tile.water-fix-selected {
+  outline: 3px solid #3b82f6;
+  outline-offset: -3px;
+  z-index: 10;
+}
+
+/* Water fill tool styles */
+.water-fill-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: rgba(74, 99, 114, 0.15);
+  border: 1px solid rgba(74, 99, 114, 0.4);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: #7ba3b8;
+  margin-top: 8px;
+}
+
+.water-fill-label {
+  color: #93c5fd;
+  font-weight: 500;
+}
+
+.water-color-preview {
+  background: #4a6372 !important;
+}
+
+.water-fill-instruction {
+  color: #7ba3b8;
+}
+
+.tile.water-fill-selectable {
+  cursor: pointer;
+}
+
+.tile.water-fill-selectable:hover {
+  outline: 2px solid #4a6372;
+  outline-offset: -2px;
+}
+
+/* Model selector styles */
+.model-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.model-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #888;
+  font-size: 0.75rem;
+}
+
+.model-select {
+  padding: 4px 8px;
+  border: 1px solid #333;
+  border-radius: 3px;
+  background: #16213e;
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  min-width: 140px;
+}
+
+.model-select:hover {
+  border-color: #00d9ff;
+}
+
+.model-select:focus {
+  outline: none;
+  border-color: #00d9ff;
+  box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.2);
+}
+
+.model-select option {
+  background: #16213e;
+  color: #fff;
+  padding: 4px;
+}
+
+/* Generate with Prompt button */
+.generate-prompt-btn {
+  background: linear-gradient(135deg, #9b59b6, #8e44ad);
+  color: #fff;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.generate-prompt-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #a569c0, #9b59b6);
+  transform: translateY(-1px);
+}
+
+.generate-prompt-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Prompt Dialog */
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dialog-content {
+  background: #1a1a2e;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 24px;
+  min-width: 400px;
+  max-width: 500px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.dialog-content h3 {
+  margin: 0 0 12px 0;
+  color: #fff;
+  font-size: 18px;
+}
+
+.dialog-description {
+  color: #aaa;
+  font-size: 14px;
+  margin: 0 0 16px 0;
+}
+
+.prompt-input {
+  width: 100%;
+  background: #0f0f1a;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 14px;
+  padding: 12px;
+  resize: vertical;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.prompt-input:focus {
+  outline: none;
+  border-color: #9b59b6;
+  box-shadow: 0 0 0 2px rgba(155, 89, 182, 0.2);
+}
+
+.prompt-input::placeholder {
+  color: #666;
+}
+
+.dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.dialog-cancel-btn {
+  background: #333;
+  color: #fff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+
+.dialog-cancel-btn:hover {
+  background: #444;
+}
+
+.dialog-submit-btn {
+  background: linear-gradient(135deg, #9b59b6, #8e44ad);
+  color: #fff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.dialog-submit-btn:hover {
+  background: linear-gradient(135deg, #a569c0, #9b59b6);
+}
+
+/* Queue Overlays - show pending generations as grouped rectangles */
+.queue-overlay {
+  position: absolute;
+  border: 3px dashed #c084fc;
+  border-radius: 4px;
+  pointer-events: auto;
+  z-index: 20;
+  animation: pulse-queue-overlay 1.5s ease-in-out infinite;
+  box-sizing: border-box;
+}
+
+/* Processing overlay - solid border, different color */
+.queue-overlay.processing {
+  border-style: solid;
+  border-color: #a855f7;
+  animation: pulse-processing-overlay 1s ease-in-out infinite;
+}
+
+@keyframes pulse-queue-overlay {
+  0%,
+  100% {
+    border-color: #c084fc;
+    box-shadow: 0 0 12px rgba(192, 132, 252, 0.3);
+  }
+  50% {
+    border-color: #8b5cf6;
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.5);
+  }
+}
+
+@keyframes pulse-processing-overlay {
+  0%,
+  100% {
+    border-color: #a855f7;
+    box-shadow: 0 0 16px rgba(168, 85, 247, 0.4);
+  }
+  50% {
+    border-color: #c084fc;
+    box-shadow: 0 0 24px rgba(192, 132, 252, 0.7);
+  }
+}
+
+.queue-overlay:hover {
+  border-color: #a855f7;
+  box-shadow: 0 0 16px rgba(168, 85, 247, 0.6);
+}
+
+/* Queue position badge */
+.queue-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  min-width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #8b5cf6, #a855f7);
+  color: white;
+  font-size: 12px;
+  font-weight: bold;
+  font-family: "SF Mono", "Monaco", monospace;
+  border-radius: 6px;
+  padding: 0 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 1;
+}
+
+/* Processing badge - with spinner */
+.queue-badge.processing {
+  background: linear-gradient(135deg, #10b981, #059669);
+  min-width: 28px;
+  height: 28px;
+}
+
+/* Spinner animation for processing badge */
+.processing-spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Model label below badge */
+.queue-model-label {
+  position: absolute;
+  top: 34px;
+  left: 6px;
+  font-size: 9px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(139, 92, 246, 0.8);
+  padding: 2px 6px;
+  border-radius: 3px;
+  max-width: calc(100% - 40px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Cancel button - visible on hover */
+.queue-cancel-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(220, 38, 38, 0.9);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.queue-overlay:hover .queue-cancel-btn {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.queue-cancel-btn:hover {
+  background: #dc2626;
+  transform: scale(1.1);
+}
+
+.queue-cancel-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Make grid position relative for overlay positioning */
+.grid {
+  position: relative;
+}
+
+```
+
+Now add CSS for flagged tiles:
+
+```css
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "SF Mono", "Monaco", "Inconsolata", monospace;
+  font-size: 12px;
+  background: #1a1a2e;
+  color: #eee;
+  min-height: 100vh;
+  padding: 15px;
+  padding-top: 95px; /* Space for fixed toolbar */
+}
+
+.toolbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: #1a1a2e;
+  padding: 10px 15px;
+  z-index: 100;
+  border-bottom: 1px solid #333;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+.toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+
+.toolbar-info {
+  color: #666;
+  font-size: 0.75rem;
+}
+
+.toolbar-info span + span {
+  margin-left: 12px;
+}
+
+.toolbar-info .selected-quadrants {
+  color: #00d9ff;
+  font-weight: bold;
+}
+
+.controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.controls label {
+  color: #888;
+  font-size: 0.8rem;
+}
+
+.controls input[type="number"] {
+  width: 50px;
+  padding: 5px 6px;
+  border: 1px solid #333;
+  border-radius: 3px;
+  background: #16213e;
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.8rem;
+}
+
+.controls button {
+  padding: 5px 12px;
+  background: #00d9ff;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: bold;
+}
+
+.controls button:hover {
+  background: #00b8d4;
+}
+
+.toggle-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding-left: 12px;
+  border-left: 1px solid #333;
+}
+
+.toggle-group label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.75rem;
+}
+
+.toggle-group input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: #00d9ff;
+  cursor: pointer;
+}
+
+.grid-container {
+  display: inline-block;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.grid-container.show-lines {
+  border: 2px solid #333;
+}
+
+.grid {
+  display: grid;
+  background: #333;
+}
+
+.grid-container.show-lines .grid {
+  gap: 2px;
+}
+
+.grid-container:not(.show-lines) .grid {
+  gap: 0;
+  background: transparent;
+}
+
+.grid-container:not(.show-lines) {
+  border: none;
+}
+
+.tile {
+  position: relative;
+  background: #2a2a4a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tile img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.tile.placeholder {
+  background: #3a3a5a;
+}
+
+.tile .coords {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.65rem;
+  color: #00d9ff;
+  transition: opacity 0.2s;
+}
+
+.tile.placeholder .coords {
+  color: #666;
+}
+
+.grid-container:not(.show-coords) .tile .coords {
+  opacity: 0;
+}
+
+/* Tool button styles */
+.tools-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tools-label {
+  color: #666;
+  font-size: 0.7rem;
+}
+
+.tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: #2a2a3e;
+  color: #666;
+  border: 1px solid #444;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  transition: all 0.15s ease;
+}
+
+.tool-btn:hover {
+  background: #3a3a4e;
+  color: #999;
+  border-color: #555;
+}
+
+.tool-btn.active {
+  background: #10b981;
+  color: #fff;
+  border-color: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+}
+
+.tool-btn.active:hover {
+  background: #059669;
+  border-color: #059669;
+}
+
+.tool-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Selection styles */
+.tile.selected {
+  outline: 3px solid #ff3333;
+  outline-offset: -3px;
+  z-index: 10;
+}
+
+.grid-container.show-lines .tile.selected {
+  outline-color: #ff3333;
+}
+
+.tile.selectable {
+  cursor: pointer;
+}
+
+.tile.placeholder.selected {
+  background: rgba(255, 51, 51, 0.15);
+}
+
+/* Flagged tile styles */
+.tile.flagged {
+  position: relative;
+}
+
+.tile.flagged::before {
+  content: "🚩";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 16px;
+  z-index: 20;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+
+.tile.flagged::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px solid #f97316;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Locked tiles (during generation) */
+.tile.locked {
+  outline: 3px solid #a855f7;
+  outline-offset: -3px;
+  z-index: 10;
+}
+
+.grid-container.show-lines .tile.locked {
+  outline-color: #a855f7;
+}
+
+.tile.placeholder.locked {
+  background: rgba(168, 85, 247, 0.2);
+}
+
+/* Queued tiles (in queue, waiting to be generated) */
+.tile.queued {
+  outline: 3px dashed #c084fc !important;
+  outline-offset: -3px;
+  z-index: 9;
+  animation: pulse-queue 1.5s ease-in-out infinite;
+  /* Fallback: box-shadow for browsers that don't render dashed outlines well */
+  box-shadow: inset 0 0 0 3px rgba(192, 132, 252, 0.5);
+}
+
+@keyframes pulse-queue {
+  0%,
+  100% {
+    outline-color: #c084fc;
+    box-shadow: inset 0 0 0 3px rgba(192, 132, 252, 0.5);
+  }
+  50% {
+    outline-color: #8b5cf6;
+    box-shadow: inset 0 0 0 3px rgba(139, 92, 246, 0.7);
+  }
+}
+
+.grid-container.show-lines .tile.queued {
+  outline-color: #c084fc;
+}
+
+.tile.placeholder.queued {
+  background: rgba(168, 85, 247, 0.3) !important;
+}
+
+/* Allow selection while generating - only disable clicking on locked/queued tiles */
+body.generating .tile.locked.selectable,
+body.generating .tile.queued.selectable {
+  cursor: not-allowed;
+}
+
+/* Selection status bar */
+.selection-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  background: rgba(255, 51, 51, 0.1);
+  border: 1px solid rgba(255, 51, 51, 0.3);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: #ff6666;
+  margin-top: 8px;
+}
+
+.selection-status.empty {
+  background: transparent;
+  border-color: #333;
+  color: #666;
+}
+
+.selection-status.generating {
+  background: rgba(168, 85, 247, 0.1);
+  border-color: rgba(168, 85, 247, 0.4);
+  color: #a855f7;
+}
+
+/* Clickable coordinate links in status bar */
+.coord-link {
+  color: #00d9ff;
+  text-decoration: none;
+  cursor: pointer;
+  padding: 1px 3px;
+  border-radius: 3px;
+  transition: background-color 0.15s ease;
+}
+
+.coord-link:hover {
+  background-color: rgba(0, 217, 255, 0.2);
+  text-decoration: underline;
+}
+
+.selection-limit {
+  color: #888;
+  font-size: 0.65rem;
+}
+
+.deselect-btn {
+  padding: 3px 8px;
+  background: #ff3333;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  margin-left: auto;
+  transition: all 0.2s;
+}
+
+.deselect-btn:hover:not(:disabled) {
+  background: #ff5555;
+}
+
+.deselect-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+}
+
+.delete-btn {
+  padding: 3px 8px;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  transition: all 0.2s;
+}
+
+.delete-btn:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.delete-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+}
+
+.flag-btn {
+  padding: 3px 8px;
+  background: #f97316;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  transition: all 0.2s;
+}
+
+.flag-btn:hover:not(:disabled) {
+  background: #ea580c;
+}
+
+.flag-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+}
+
+.render-btn {
+  padding: 4px 12px;
+  background: #f59e0b;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.render-btn:hover:not(:disabled) {
+  background: #d97706;
+}
+
+.render-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+.render-btn.loading {
+  background: #666;
+  cursor: wait;
+}
+
+.render-btn .spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.generate-btn {
+  padding: 4px 12px;
+  background: #00d9ff;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.generate-btn:hover:not(:disabled) {
+  background: #00b8d4;
+}
+
+.generate-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+/* Generate Rectangle button */
+.generate-rect-btn {
+  padding: 4px 12px;
+  background: #8b5cf6;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.generate-rect-btn:hover:not(:disabled) {
+  background: #7c3aed;
+}
+
+.generate-rect-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+.generate-rect-btn.loading {
+  background: #666;
+  cursor: wait;
+}
+
+.generate-rect-btn .spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+/* Clear Queue button */
+.clear-queue-btn {
+  padding: 4px 10px;
+  background: #6b7280;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  margin-left: 8px;
+}
+
+.clear-queue-btn:hover {
+  background: #ef4444;
+}
+
+.clear-queue-btn:active {
+  background: #dc2626;
+}
+
+.hard-refresh-btn {
+  padding: 4px 10px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  margin-left: 8px;
+}
+
+.hard-refresh-btn:hover {
+  background: #2563eb;
+}
+
+.hard-refresh-btn:active {
+  background: #1d4ed8;
+}
+
+/* Toast notification system */
+.toast-container {
+  position: fixed;
+  bottom: 15px;
+  right: 15px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  max-width: 320px;
+}
+
+.toast {
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  animation: slideIn 0.3s ease-out;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.toast.success {
+  background: linear-gradient(135deg, #065f46 0%, #047857 100%);
+  border: 1px solid #10b981;
+  color: #d1fae5;
+}
+
+.toast.error {
+  background: linear-gradient(135deg, #7f1d1d 0%, #991b1b 100%);
+  border: 1px solid #ef4444;
+  color: #fee2e2;
+}
+
+.toast.info {
+  background: linear-gradient(135deg, #1e3a5f 0%, #1e40af 100%);
+  border: 1px solid #3b82f6;
+  color: #dbeafe;
+}
+
+.toast.loading {
+  background: linear-gradient(135deg, #374151 0%, #4b5563 100%);
+  border: 1px solid #6b7280;
+  color: #e5e7eb;
+}
+
+.toast-icon {
+  flex-shrink: 0;
+  font-size: 1rem;
+}
+
+.toast-content {
+  flex: 1;
+}
+
+.toast-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.toast-message {
+  opacity: 0.9;
+  font-size: 0.7rem;
+}
+
+.toast-close {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+  font-size: 1rem;
+  padding: 0;
+  line-height: 1;
+}
+
+.toast-close:hover {
+  opacity: 1;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOut {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+.toast.removing {
+  animation: slideOut 0.3s ease-in forwards;
+}
+
+/* Loading spinner for generate button */
+.generate-btn.loading {
+  background: #666;
+  color: #fff;
+  cursor: wait;
+}
+
+.generate-btn .spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Water fix tool styles */
+.water-fix-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: #60a5fa;
+  margin-top: 8px;
+}
+
+.water-fix-label {
+  color: #93c5fd;
+  font-weight: 500;
+}
+
+.color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3), inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+  background: #333;
+}
+
+.color-swatch.has-color {
+  cursor: pointer;
+}
+
+.color-hex {
+  font-family: "SF Mono", "Monaco", "Inconsolata", monospace;
+  font-size: 0.75rem;
+  color: #93c5fd;
+  min-width: 180px;
+}
+
+.water-fix-quadrant {
+  color: #60a5fa;
+  font-size: 0.7rem;
+}
+
+.apply-water-fix-btn {
+  padding: 4px 12px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+  margin-left: auto;
+}
+
+.apply-water-fix-btn:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.apply-water-fix-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+.apply-water-fix-btn.loading {
+  background: #666;
+  cursor: wait;
+}
+
+.cancel-water-fix-btn {
+  padding: 4px 8px;
+  background: #4b5563;
+  color: #d1d5db;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  transition: all 0.2s;
+}
+
+.cancel-water-fix-btn:hover {
+  background: #6b7280;
+}
+
+/* Fix water tool active state */
+.tile.fix-water-selectable {
+  cursor: crosshair;
+}
+
+.tile.fix-water-selectable:hover {
+  outline: 2px solid #3b82f6;
+  outline-offset: -2px;
+}
+
+.tile.water-fix-selected {
+  outline: 3px solid #3b82f6;
+  outline-offset: -3px;
+  z-index: 10;
+}
+
+/* Water fill tool styles */
+.water-fill-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: rgba(74, 99, 114, 0.15);
+  border: 1px solid rgba(74, 99, 114, 0.4);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: #7ba3b8;
+  margin-top: 8px;
+}
+
+.water-fill-label {
+  color: #93c5fd;
+  font-weight: 500;
+}
+
+.water-color-preview {
+  background: #4a6372 !important;
+}
+
+.water-fill-instruction {
+  color: #7ba3b8;
+}
+
+.tile.water-fill-selectable {
+  cursor: pointer;
+}
+
+.tile.water-fill-selectable:hover {
+  outline: 2px solid #4a6372;
+  outline-offset: -2px;
+}
+
+/* Model selector styles */
+.model-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.model-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #888;
+  font-size: 0.75rem;
+}
+
+.model-select {
+  padding: 4px 8px;
+  border: 1px solid #333;
+  border-radius: 3px;
+  background: #16213e;
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  min-width: 140px;
+}
+
+.model-select:hover {
+  border-color: #00d9ff;
+}
+
+.model-select:focus {
+  outline: none;
+  border-color: #00d9ff;
+  box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.2);
+}
+
+.model-select option {
+  background: #16213e;
+  color: #fff;
+  padding: 4px;
+}
+
+/* Generate with Prompt button */
+.generate-prompt-btn {
+  background: linear-gradient(135deg, #9b59b6, #8e44ad);
+  color: #fff;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.generate-prompt-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #a569c0, #9b59b6);
+  transform: translateY(-1px);
+}
+
+.generate-prompt-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Prompt Dialog */
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dialog-content {
+  background: #1a1a2e;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 24px;
+  min-width: 400px;
+  max-width: 500px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.dialog-content h3 {
+  margin: 0 0 12px 0;
+  color: #fff;
+  font-size: 18px;
+}
+
+.dialog-description {
+  color: #aaa;
+  font-size: 14px;
+  margin: 0 0 16px 0;
+}
+
+.prompt-input {
+  width: 100%;
+  background: #0f0f1a;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 14px;
+  padding: 12px;
+  resize: vertical;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.prompt-input:focus {
+  outline: none;
+  border-color: #9b59b6;
+  box-shadow: 0 0 0 2px rgba(155, 89, 182, 0.2);
+}
+
+.prompt-input::placeholder {
+  color: #666;
+}
+
+.dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.dialog-cancel-btn {
+  background: #333;
+  color: #fff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+
+.dialog-cancel-btn:hover {
+  background: #444;
+}
+
+.dialog-submit-btn {
+  background: linear-gradient(135deg, #9b59b6, #8e44ad);
+  color: #fff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.dialog-submit-btn:hover {
+  background: linear-gradient(135deg, #a569c0, #9b59b6);
+}
+
+/* Queue Overlays - show pending generations as grouped rectangles */
+.queue-overlay {
+  position: absolute;
+  border: 3px dashed #c084fc;
+  border-radius: 4px;
+  pointer-events: auto;
+  z-index: 20;
+  animation: pulse-queue-overlay 1.5s ease-in-out infinite;
+  box-sizing: border-box;
+}
+
+/* Processing overlay - solid border, different color */
+.queue-overlay.processing {
+  border-style: solid;
+  border-color: #a855f7;
+  animation: pulse-processing-overlay 1s ease-in-out infinite;
+}
+
+@keyframes pulse-queue-overlay {
+  0%,
+  100% {
+    border-color: #c084fc;
+    box-shadow: 0 0 12px rgba(192, 132, 252, 0.3);
+  }
+  50% {
+    border-color: #8b5cf6;
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.5);
+  }
+}
+
+@keyframes pulse-processing-overlay {
+  0%,
+  100% {
+    border-color: #a855f7;
+    box-shadow: 0 0 16px rgba(168, 85, 247, 0.4);
+  }
+  50% {
+    border-color: #c084fc;
+    box-shadow: 0 0 24px rgba(192, 132, 252, 0.7);
+  }
+}
+
+.queue-overlay:hover {
+  border-color: #a855f7;
+  box-shadow: 0 0 16px rgba(168, 85, 247, 0.6);
+}
+
+/* Queue position badge */
+.queue-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  min-width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #8b5cf6, #a855f7);
+  color: white;
+  font-size: 12px;
+  font-weight: bold;
+  font-family: "SF Mono", "Monaco", monospace;
+  border-radius: 6px;
+  padding: 0 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 1;
+}
+
+/* Processing badge - with spinner */
+.queue-badge.processing {
+  background: linear-gradient(135deg, #10b981, #059669);
+  min-width: 28px;
+  height: 28px;
+}
+
+/* Spinner animation for processing badge */
+.processing-spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Model label below badge */
+.queue-model-label {
+  position: absolute;
+  top: 34px;
+  left: 6px;
+  font-size: 9px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(139, 92, 246, 0.8);
+  padding: 2px 6px;
+  border-radius: 3px;
+  max-width: calc(100% - 40px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Cancel button - visible on hover */
+.queue-cancel-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(220, 38, 38, 0.9);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.queue-overlay:hover .queue-cancel-btn {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.queue-cancel-btn:hover {
+  background: #dc2626;
+  transform: scale(1.1);
+}
+
+.queue-cancel-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Make grid position relative for overlay positioning */
+.grid {
+  position: relative;
+}
+
+```
+
+Done! I've added the flag feature:
+
+**Backend:**
+- Added `ensure_flagged_column_exists()` to migrate existing databases
+- Added `/api/flag` endpoint to flag/unflag quadrants
+
+**Frontend:**
+- Added "🚩 Flag" button in the selection bar
+- Flagged tiles show a 🚩 emoji in the top-right corner and an orange border
+- Toggle behavior: if any selected tiles are flagged, clicking Flag will unflag them all; otherwise it flags them all
+- Updates visually without page reload
+
+**How to use:**
+1. Select quadrants with the Select tool
+2. Click "🚩 Flag" to flag them (or unflag if already flagged)
+3. Flagged tiles will show the flag indicator and orange border
+
+---
+
+**User**
+
+OK now things are a bit crowded button-wise - can you split the "generate" etc buttons into two rows in the status bar?
+
+---
+
+**Cursor**
+
+I'll restructure the selection-status bar into two rows:
+
+```html
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Generated Tiles Viewer</title>
+    <link rel="stylesheet" href="/static/viewer.css" />
+    <style>
+      /* Dynamic grid sizing based on template variables */
+      .grid {
+        grid-template-columns: repeat({{ nx }}, {{ size_px }}px);
+        grid-auto-rows: {{ size_px }}px;
+      }
+      .tile.placeholder {
+        min-width: {{ size_px }}px;
+        min-height: {{ size_px }}px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Config data for JS -->
+    <script
+      id="app-config"
+      type="application/json"
+      data-config='{"x": {{ x }}, "y": {{ y }}, "nx": {{ nx }}, "ny": {{ ny }}, "size_px": {{ size_px }}, "models": {{ models_config | safe }}, "default_model_id": "{{ default_model_id }}"}'
+    ></script>
+
+    <!-- Toast notification container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Fixed toolbar -->
+    <div class="toolbar">
+      <div class="toolbar-row">
+        <div class="controls">
+          <label>X: <input type="number" id="x" value="{{ x }}" /></label>
+          <label>Y: <input type="number" id="y" value="{{ y }}" /></label>
+          <label
+            >NX: <input type="number" id="nx" value="{{ nx }}" min="1" max="20"
+          /></label>
+          <label
+            >NY: <input type="number" id="ny" value="{{ ny }}" min="1" max="20"
+          /></label>
+          <label
+            >Size:
+            <input type="number" id="sizePx" value="{{ size_px }}" step="32"
+          /></label>
+          <button onclick="goTo()">Go</button>
+          <div class="toggle-group">
+            <label
+              ><input
+                type="checkbox"
+                id="showLines"
+                {%
+                if
+                show_lines
+                %}checked{%
+                endif
+                %}
+                onchange="toggleLines()"
+              />
+              Lines</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                id="showCoords"
+                {%
+                if
+                show_coords
+                %}checked{%
+                endif
+                %}
+                onchange="toggleCoords()"
+              />
+              Coords</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                id="showRender"
+                {%
+                if
+                show_render
+                %}checked{%
+                endif
+                %}
+                onchange="toggleRender()"
+              />
+              Renders</label
+            >
+          </div>
+          <div class="toggle-group model-group">
+            <label class="model-label"
+              >Model:
+              <select id="modelSelect" class="model-select">
+                <!-- Populated by JavaScript -->
+              </select>
+            </label>
+          </div>
+          <div class="toggle-group tools-group">
+            <span class="tools-label">Tools:</span>
+            <button
+              id="selectTool"
+              class="tool-btn"
+              onclick="toggleSelectTool()"
+              title="Select quadrants (S)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"></path>
+                <path d="M13 13l6 6"></path>
+              </svg>
+              Select
+            </button>
+            <button
+              id="fixWaterTool"
+              class="tool-btn"
+              onclick="toggleFixWaterTool()"
+              title="Fix water color (W)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+              </svg>
+              Fix Water
+            </button>
+            <button
+              id="waterFillTool"
+              class="tool-btn"
+              onclick="toggleWaterFillTool()"
+              title="Fill quadrant with water (F)"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                <path d="M12 8v8"></path>
+                <path d="M8 12h8"></path>
+              </svg>
+              Water Fill
+            </button>
+          </div>
+        </div>
+        <div class="toolbar-info">
+          <span>({{ x }}, {{ y }}) → ({{ x + nx - 1 }}, {{ y + ny - 1 }})</span>
+          <span id="selectedQuadrantsDisplay" class="selected-quadrants"></span>
+          <span>{{ generation_dir }}</span>
+        </div>
+      </div>
+      <div class="selection-status" id="selectionStatus">
+        <div class="status-row">
+          <span id="selectionCount">0 quadrants selected</span>
+          <span class="selection-limit">(max 4)</span>
+          <button
+            id="deselectAllBtn"
+            class="deselect-btn"
+            onclick="deselectAll()"
+            disabled
+          >
+            Deselect All
+          </button>
+          <button
+            id="deleteBtn"
+            class="delete-btn"
+            onclick="deleteSelected()"
+            disabled
+          >
+            Delete
+          </button>
+          <button
+            id="flagBtn"
+            class="flag-btn"
+            onclick="flagSelected()"
+            disabled
+            title="Flag selected quadrants for review"
+          >
+            🚩 Flag
+          </button>
+        </div>
+        <div class="status-row actions-row">
+          <button
+            id="renderBtn"
+            class="render-btn"
+            onclick="renderSelected()"
+            disabled
+          >
+            Render
+          </button>
+          <button
+            id="generateBtn"
+            class="generate-btn"
+            onclick="generateSelected()"
+            disabled
+          >
+            Generate
+          </button>
+          <button
+            id="generateWithPromptBtn"
+            class="generate-prompt-btn"
+            onclick="showPromptDialog()"
+            disabled
+            title="Generate with additional prompt text"
+          >
+            + Prompt
+          </button>
+          <button
+            id="generateRectBtn"
+            class="generate-rect-btn"
+            onclick="generateRectangle()"
+            disabled
+            title="Select exactly 2 quadrants to define rectangle corners"
+          >
+            Generate Rectangle
+          </button>
+          <button
+            id="clearQueueBtn"
+            class="clear-queue-btn"
+            onclick="clearQueue()"
+            title="Clear all pending items from the generation queue"
+          >
+            Clear Queue
+          </button>
+          <button
+            id="hardRefreshBtn"
+            class="hard-refresh-btn"
+            onclick="hardRefresh()"
+            title="Clear image cache and reload page"
+          >
+            ↻ Refresh
+          </button>
+        </div>
+      </div>
+      <div class="water-fix-status" id="waterFixStatus" style="display: none">
+        <span class="water-fix-label">Target Color:</span>
+        <span class="color-swatch" id="targetColorSwatch"></span>
+        <span class="color-hex" id="targetColorHex"
+          >Click a quadrant to pick color</span
+        >
+        <span class="water-fix-quadrant" id="waterFixQuadrant"></span>
+        <button
+          id="applyWaterFixBtn"
+          class="apply-water-fix-btn"
+          onclick="applyWaterFix()"
+          disabled
+        >
+          Apply Fix
+        </button>
+        <button
+          id="cancelWaterFixBtn"
+          class="cancel-water-fix-btn"
+          onclick="cancelWaterFix()"
+        >
+          Cancel
+        </button>
+      </div>
+      <div class="water-fill-status" id="waterFillStatus" style="display: none">
+        <span class="water-fill-label">Water Fill:</span>
+        <span class="color-swatch water-color-preview"></span>
+        <span class="water-fill-instruction" id="waterFillInstruction"
+          >Click a quadrant to fill with water</span
+        >
+        <button
+          id="cancelWaterFillBtn"
+          class="cancel-water-fix-btn"
+          onclick="cancelWaterFill()"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+
+    <div
+      class="grid-container {% if show_lines %}show-lines{% endif %} {% if show_coords %}show-coords{% endif %}"
+      id="gridContainer"
+    >
+      <div class="grid">
+        {% for dy in range(ny) %} {% for dx in range(nx) %} {% set qx = x + dx
+        %} {% set qy = y + dy %} {% set has_gen = tiles.get((dx, dy), False) %}
+        {% set is_flagged = flagged_tiles.get((dx, dy), False) %}
+        <div
+          class="tile {% if not has_gen %}placeholder{% endif %}{% if is_flagged %} flagged{% endif %}"
+          data-coords="{{ qx }},{{ qy }}"
+          data-flagged="{{ 'true' if is_flagged else 'false' }}"
+        >
+          <span class="coords">({{ qx }}, {{ qy }})</span>
+          {% if has_gen %}
+          <img
+            src="/tile/{{ qx }}/{{ qy }}?render={{ '1' if show_render else '0' }}"
+            alt="Tile {{ qx }},{{ qy }}"
+          />
+          {% endif %}
+        </div>
+        {% endfor %} {% endfor %}
+      </div>
+    </div>
+
+    <!-- Prompt Dialog -->
+    <div id="promptDialog" class="dialog-overlay" style="display: none">
+      <div class="dialog-content">
+        <h3>Generate with Prompt</h3>
+        <p class="dialog-description">
+          Add additional instructions for the generation:
+        </p>
+        <textarea
+          id="promptInput"
+          class="prompt-input"
+          placeholder="e.g., 'Add more trees' or 'Make the water darker'"
+          rows="3"
+        ></textarea>
+        <div class="dialog-buttons">
+          <button class="dialog-cancel-btn" onclick="hidePromptDialog()">
+            Cancel
+          </button>
+          <button class="dialog-submit-btn" onclick="submitPromptGeneration()">
+            Generate
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/viewer.js"></script>
+  </body>
+</html>
+
+```
+
+Now update the CSS for the two-row layout:
+
+```css
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "SF Mono", "Monaco", "Inconsolata", monospace;
+  font-size: 12px;
+  background: #1a1a2e;
+  color: #eee;
+  min-height: 100vh;
+  padding: 15px;
+  padding-top: 95px; /* Space for fixed toolbar */
+}
+
+.toolbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: #1a1a2e;
+  padding: 10px 15px;
+  z-index: 100;
+  border-bottom: 1px solid #333;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+.toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+
+.toolbar-info {
+  color: #666;
+  font-size: 0.75rem;
+}
+
+.toolbar-info span + span {
+  margin-left: 12px;
+}
+
+.toolbar-info .selected-quadrants {
+  color: #00d9ff;
+  font-weight: bold;
+}
+
+.controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.controls label {
+  color: #888;
+  font-size: 0.8rem;
+}
+
+.controls input[type="number"] {
+  width: 50px;
+  padding: 5px 6px;
+  border: 1px solid #333;
+  border-radius: 3px;
+  background: #16213e;
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.8rem;
+}
+
+.controls button {
+  padding: 5px 12px;
+  background: #00d9ff;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: bold;
+}
+
+.controls button:hover {
+  background: #00b8d4;
+}
+
+.toggle-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding-left: 12px;
+  border-left: 1px solid #333;
+}
+
+.toggle-group label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.75rem;
+}
+
+.toggle-group input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: #00d9ff;
+  cursor: pointer;
+}
+
+.grid-container {
+  display: inline-block;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.grid-container.show-lines {
+  border: 2px solid #333;
+}
+
+.grid {
+  display: grid;
+  background: #333;
+}
+
+.grid-container.show-lines .grid {
+  gap: 2px;
+}
+
+.grid-container:not(.show-lines) .grid {
+  gap: 0;
+  background: transparent;
+}
+
+.grid-container:not(.show-lines) {
+  border: none;
+}
+
+.tile {
+  position: relative;
+  background: #2a2a4a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tile img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.tile.placeholder {
+  background: #3a3a5a;
+}
+
+.tile .coords {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.65rem;
+  color: #00d9ff;
+  transition: opacity 0.2s;
+}
+
+.tile.placeholder .coords {
+  color: #666;
+}
+
+.grid-container:not(.show-coords) .tile .coords {
+  opacity: 0;
+}
+
+/* Tool button styles */
+.tools-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tools-label {
+  color: #666;
+  font-size: 0.7rem;
+}
+
+.tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: #2a2a3e;
+  color: #666;
+  border: 1px solid #444;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  transition: all 0.15s ease;
+}
+
+.tool-btn:hover {
+  background: #3a3a4e;
+  color: #999;
+  border-color: #555;
+}
+
+.tool-btn.active {
+  background: #10b981;
+  color: #fff;
+  border-color: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+}
+
+.tool-btn.active:hover {
+  background: #059669;
+  border-color: #059669;
+}
+
+.tool-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Selection styles */
+.tile.selected {
+  outline: 3px solid #ff3333;
+  outline-offset: -3px;
+  z-index: 10;
+}
+
+.grid-container.show-lines .tile.selected {
+  outline-color: #ff3333;
+}
+
+.tile.selectable {
+  cursor: pointer;
+}
+
+.tile.placeholder.selected {
+  background: rgba(255, 51, 51, 0.15);
+}
+
+/* Flagged tile styles */
+.tile.flagged {
+  position: relative;
+}
+
+.tile.flagged::before {
+  content: "🚩";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 16px;
+  z-index: 20;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+
+.tile.flagged::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px solid #f97316;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Locked tiles (during generation) */
+.tile.locked {
+  outline: 3px solid #a855f7;
+  outline-offset: -3px;
+  z-index: 10;
+}
+
+.grid-container.show-lines .tile.locked {
+  outline-color: #a855f7;
+}
+
+.tile.placeholder.locked {
+  background: rgba(168, 85, 247, 0.2);
+}
+
+/* Queued tiles (in queue, waiting to be generated) */
+.tile.queued {
+  outline: 3px dashed #c084fc !important;
+  outline-offset: -3px;
+  z-index: 9;
+  animation: pulse-queue 1.5s ease-in-out infinite;
+  /* Fallback: box-shadow for browsers that don't render dashed outlines well */
+  box-shadow: inset 0 0 0 3px rgba(192, 132, 252, 0.5);
+}
+
+@keyframes pulse-queue {
+  0%,
+  100% {
+    outline-color: #c084fc;
+    box-shadow: inset 0 0 0 3px rgba(192, 132, 252, 0.5);
+  }
+  50% {
+    outline-color: #8b5cf6;
+    box-shadow: inset 0 0 0 3px rgba(139, 92, 246, 0.7);
+  }
+}
+
+.grid-container.show-lines .tile.queued {
+  outline-color: #c084fc;
+}
+
+.tile.placeholder.queued {
+  background: rgba(168, 85, 247, 0.3) !important;
+}
+
+/* Allow selection while generating - only disable clicking on locked/queued tiles */
+body.generating .tile.locked.selectable,
+body.generating .tile.queued.selectable {
+  cursor: not-allowed;
+}
+
+/* Selection status bar */
+.selection-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(255, 51, 51, 0.1);
+  border: 1px solid rgba(255, 51, 51, 0.3);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: #ff6666;
+  margin-top: 8px;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.status-row.actions-row {
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.selection-status.empty {
+  background: transparent;
+  border-color: #333;
+  color: #666;
+}
+
+.selection-status.empty .actions-row {
+  border-top-color: rgba(255, 255, 255, 0.05);
+}
+
+.selection-status.generating {
+  background: rgba(168, 85, 247, 0.1);
+  border-color: rgba(168, 85, 247, 0.4);
+  color: #a855f7;
+}
+
+.selection-status.generating .actions-row {
+  border-top-color: rgba(168, 85, 247, 0.2);
+}
+
+/* Clickable coordinate links in status bar */
+.coord-link {
+  color: #00d9ff;
+  text-decoration: none;
+  cursor: pointer;
+  padding: 1px 3px;
+  border-radius: 3px;
+  transition: background-color 0.15s ease;
+}
+
+.coord-link:hover {
+  background-color: rgba(0, 217, 255, 0.2);
+  text-decoration: underline;
+}
+
+.selection-limit {
+  color: #888;
+  font-size: 0.65rem;
+}
+
+.deselect-btn {
+  padding: 3px 8px;
+  background: #ff3333;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  margin-left: auto;
+  transition: all 0.2s;
+}
+
+.deselect-btn:hover:not(:disabled) {
+  background: #ff5555;
+}
+
+.deselect-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+}
+
+.delete-btn {
+  padding: 3px 8px;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  transition: all 0.2s;
+}
+
+.delete-btn:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.delete-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+}
+
+.flag-btn {
+  padding: 3px 8px;
+  background: #f97316;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  transition: all 0.2s;
+}
+
+.flag-btn:hover:not(:disabled) {
+  background: #ea580c;
+}
+
+.flag-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+}
+
+.render-btn {
+  padding: 4px 12px;
+  background: #f59e0b;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.render-btn:hover:not(:disabled) {
+  background: #d97706;
+}
+
+.render-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+.render-btn.loading {
+  background: #666;
+  cursor: wait;
+}
+
+.render-btn .spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.generate-btn {
+  padding: 4px 12px;
+  background: #00d9ff;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.generate-btn:hover:not(:disabled) {
+  background: #00b8d4;
+}
+
+.generate-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+/* Generate Rectangle button */
+.generate-rect-btn {
+  padding: 4px 12px;
+  background: #8b5cf6;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.generate-rect-btn:hover:not(:disabled) {
+  background: #7c3aed;
+}
+
+.generate-rect-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+.generate-rect-btn.loading {
+  background: #666;
+  cursor: wait;
+}
+
+.generate-rect-btn .spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+/* Clear Queue button */
+.clear-queue-btn {
+  padding: 4px 10px;
+  background: #6b7280;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  margin-left: 8px;
+}
+
+.clear-queue-btn:hover {
+  background: #ef4444;
+}
+
+.clear-queue-btn:active {
+  background: #dc2626;
+}
+
+.hard-refresh-btn {
+  padding: 4px 10px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  margin-left: 8px;
+}
+
+.hard-refresh-btn:hover {
+  background: #2563eb;
+}
+
+.hard-refresh-btn:active {
+  background: #1d4ed8;
+}
+
+/* Toast notification system */
+.toast-container {
+  position: fixed;
+  bottom: 15px;
+  right: 15px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  max-width: 320px;
+}
+
+.toast {
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  animation: slideIn 0.3s ease-out;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.toast.success {
+  background: linear-gradient(135deg, #065f46 0%, #047857 100%);
+  border: 1px solid #10b981;
+  color: #d1fae5;
+}
+
+.toast.error {
+  background: linear-gradient(135deg, #7f1d1d 0%, #991b1b 100%);
+  border: 1px solid #ef4444;
+  color: #fee2e2;
+}
+
+.toast.info {
+  background: linear-gradient(135deg, #1e3a5f 0%, #1e40af 100%);
+  border: 1px solid #3b82f6;
+  color: #dbeafe;
+}
+
+.toast.loading {
+  background: linear-gradient(135deg, #374151 0%, #4b5563 100%);
+  border: 1px solid #6b7280;
+  color: #e5e7eb;
+}
+
+.toast-icon {
+  flex-shrink: 0;
+  font-size: 1rem;
+}
+
+.toast-content {
+  flex: 1;
+}
+
+.toast-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.toast-message {
+  opacity: 0.9;
+  font-size: 0.7rem;
+}
+
+.toast-close {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+  font-size: 1rem;
+  padding: 0;
+  line-height: 1;
+}
+
+.toast-close:hover {
+  opacity: 1;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOut {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+.toast.removing {
+  animation: slideOut 0.3s ease-in forwards;
+}
+
+/* Loading spinner for generate button */
+.generate-btn.loading {
+  background: #666;
+  color: #fff;
+  cursor: wait;
+}
+
+.generate-btn .spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Water fix tool styles */
+.water-fix-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: #60a5fa;
+  margin-top: 8px;
+}
+
+.water-fix-label {
+  color: #93c5fd;
+  font-weight: 500;
+}
+
+.color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3), inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+  background: #333;
+}
+
+.color-swatch.has-color {
+  cursor: pointer;
+}
+
+.color-hex {
+  font-family: "SF Mono", "Monaco", "Inconsolata", monospace;
+  font-size: 0.75rem;
+  color: #93c5fd;
+  min-width: 180px;
+}
+
+.water-fix-quadrant {
+  color: #60a5fa;
+  font-size: 0.7rem;
+}
+
+.apply-water-fix-btn {
+  padding: 4px 12px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+  margin-left: auto;
+}
+
+.apply-water-fix-btn:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.apply-water-fix-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+.apply-water-fix-btn.loading {
+  background: #666;
+  cursor: wait;
+}
+
+.cancel-water-fix-btn {
+  padding: 4px 8px;
+  background: #4b5563;
+  color: #d1d5db;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  transition: all 0.2s;
+}
+
+.cancel-water-fix-btn:hover {
+  background: #6b7280;
+}
+
+/* Fix water tool active state */
+.tile.fix-water-selectable {
+  cursor: crosshair;
+}
+
+.tile.fix-water-selectable:hover {
+  outline: 2px solid #3b82f6;
+  outline-offset: -2px;
+}
+
+.tile.water-fix-selected {
+  outline: 3px solid #3b82f6;
+  outline-offset: -3px;
+  z-index: 10;
+}
+
+/* Water fill tool styles */
+.water-fill-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: rgba(74, 99, 114, 0.15);
+  border: 1px solid rgba(74, 99, 114, 0.4);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: #7ba3b8;
+  margin-top: 8px;
+}
+
+.water-fill-label {
+  color: #93c5fd;
+  font-weight: 500;
+}
+
+.water-color-preview {
+  background: #4a6372 !important;
+}
+
+.water-fill-instruction {
+  color: #7ba3b8;
+}
+
+.tile.water-fill-selectable {
+  cursor: pointer;
+}
+
+.tile.water-fill-selectable:hover {
+  outline: 2px solid #4a6372;
+  outline-offset: -2px;
+}
+
+/* Model selector styles */
+.model-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.model-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #888;
+  font-size: 0.75rem;
+}
+
+.model-select {
+  padding: 4px 8px;
+  border: 1px solid #333;
+  border-radius: 3px;
+  background: #16213e;
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  min-width: 140px;
+}
+
+.model-select:hover {
+  border-color: #00d9ff;
+}
+
+.model-select:focus {
+  outline: none;
+  border-color: #00d9ff;
+  box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.2);
+}
+
+.model-select option {
+  background: #16213e;
+  color: #fff;
+  padding: 4px;
+}
+
+/* Generate with Prompt button */
+.generate-prompt-btn {
+  background: linear-gradient(135deg, #9b59b6, #8e44ad);
+  color: #fff;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.generate-prompt-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #a569c0, #9b59b6);
+  transform: translateY(-1px);
+}
+
+.generate-prompt-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Prompt Dialog */
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dialog-content {
+  background: #1a1a2e;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 24px;
+  min-width: 400px;
+  max-width: 500px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.dialog-content h3 {
+  margin: 0 0 12px 0;
+  color: #fff;
+  font-size: 18px;
+}
+
+.dialog-description {
+  color: #aaa;
+  font-size: 14px;
+  margin: 0 0 16px 0;
+}
+
+.prompt-input {
+  width: 100%;
+  background: #0f0f1a;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 14px;
+  padding: 12px;
+  resize: vertical;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.prompt-input:focus {
+  outline: none;
+  border-color: #9b59b6;
+  box-shadow: 0 0 0 2px rgba(155, 89, 182, 0.2);
+}
+
+.prompt-input::placeholder {
+  color: #666;
+}
+
+.dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.dialog-cancel-btn {
+  background: #333;
+  color: #fff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+
+.dialog-cancel-btn:hover {
+  background: #444;
+}
+
+.dialog-submit-btn {
+  background: linear-gradient(135deg, #9b59b6, #8e44ad);
+  color: #fff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.dialog-submit-btn:hover {
+  background: linear-gradient(135deg, #a569c0, #9b59b6);
+}
+
+/* Queue Overlays - show pending generations as grouped rectangles */
+.queue-overlay {
+  position: absolute;
+  border: 3px dashed #c084fc;
+  border-radius: 4px;
+  pointer-events: auto;
+  z-index: 20;
+  animation: pulse-queue-overlay 1.5s ease-in-out infinite;
+  box-sizing: border-box;
+}
+
+/* Processing overlay - solid border, different color */
+.queue-overlay.processing {
+  border-style: solid;
+  border-color: #a855f7;
+  animation: pulse-processing-overlay 1s ease-in-out infinite;
+}
+
+@keyframes pulse-queue-overlay {
+  0%,
+  100% {
+    border-color: #c084fc;
+    box-shadow: 0 0 12px rgba(192, 132, 252, 0.3);
+  }
+  50% {
+    border-color: #8b5cf6;
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.5);
+  }
+}
+
+@keyframes pulse-processing-overlay {
+  0%,
+  100% {
+    border-color: #a855f7;
+    box-shadow: 0 0 16px rgba(168, 85, 247, 0.4);
+  }
+  50% {
+    border-color: #c084fc;
+    box-shadow: 0 0 24px rgba(192, 132, 252, 0.7);
+  }
+}
+
+.queue-overlay:hover {
+  border-color: #a855f7;
+  box-shadow: 0 0 16px rgba(168, 85, 247, 0.6);
+}
+
+/* Queue position badge */
+.queue-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  min-width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #8b5cf6, #a855f7);
+  color: white;
+  font-size: 12px;
+  font-weight: bold;
+  font-family: "SF Mono", "Monaco", monospace;
+  border-radius: 6px;
+  padding: 0 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 1;
+}
+
+/* Processing badge - with spinner */
+.queue-badge.processing {
+  background: linear-gradient(135deg, #10b981, #059669);
+  min-width: 28px;
+  height: 28px;
+}
+
+/* Spinner animation for processing badge */
+.processing-spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Model label below badge */
+.queue-model-label {
+  position: absolute;
+  top: 34px;
+  left: 6px;
+  font-size: 9px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(139, 92, 246, 0.8);
+  padding: 2px 6px;
+  border-radius: 3px;
+  max-width: calc(100% - 40px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Cancel button - visible on hover */
+.queue-cancel-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(220, 38, 38, 0.9);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.queue-overlay:hover .queue-cancel-btn {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.queue-cancel-btn:hover {
+  background: #dc2626;
+  transform: scale(1.1);
+}
+
+.queue-cancel-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Make grid position relative for overlay positioning */
+.grid {
+  position: relative;
+}
+
+```
+
+Done! The selection status bar is now split into two rows:
+
+- **Row 1**: Status text + selection buttons (Deselect All, Delete, Flag)
+- **Row 2**: Action buttons (Render, Generate, + Prompt, Generate Rectangle, Clear Queue, Refresh)
+
+The rows are separated by a subtle border line that adapts to the current state (empty, selected, or generating).
+
+---
+
+**User**
+
+Can you make the lower set of buttons right-aligned?
+
+---
+
+**Cursor**
+
+```css
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "SF Mono", "Monaco", "Inconsolata", monospace;
+  font-size: 12px;
+  background: #1a1a2e;
+  color: #eee;
+  min-height: 100vh;
+  padding: 15px;
+  padding-top: 95px; /* Space for fixed toolbar */
+}
+
+.toolbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: #1a1a2e;
+  padding: 10px 15px;
+  z-index: 100;
+  border-bottom: 1px solid #333;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+.toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+
+.toolbar-info {
+  color: #666;
+  font-size: 0.75rem;
+}
+
+.toolbar-info span + span {
+  margin-left: 12px;
+}
+
+.toolbar-info .selected-quadrants {
+  color: #00d9ff;
+  font-weight: bold;
+}
+
+.controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.controls label {
+  color: #888;
+  font-size: 0.8rem;
+}
+
+.controls input[type="number"] {
+  width: 50px;
+  padding: 5px 6px;
+  border: 1px solid #333;
+  border-radius: 3px;
+  background: #16213e;
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.8rem;
+}
+
+.controls button {
+  padding: 5px 12px;
+  background: #00d9ff;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: bold;
+}
+
+.controls button:hover {
+  background: #00b8d4;
+}
+
+.toggle-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding-left: 12px;
+  border-left: 1px solid #333;
+}
+
+.toggle-group label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.75rem;
+}
+
+.toggle-group input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: #00d9ff;
+  cursor: pointer;
+}
+
+.grid-container {
+  display: inline-block;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.grid-container.show-lines {
+  border: 2px solid #333;
+}
+
+.grid {
+  display: grid;
+  background: #333;
+}
+
+.grid-container.show-lines .grid {
+  gap: 2px;
+}
+
+.grid-container:not(.show-lines) .grid {
+  gap: 0;
+  background: transparent;
+}
+
+.grid-container:not(.show-lines) {
+  border: none;
+}
+
+.tile {
+  position: relative;
+  background: #2a2a4a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tile img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.tile.placeholder {
+  background: #3a3a5a;
+}
+
+.tile .coords {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.65rem;
+  color: #00d9ff;
+  transition: opacity 0.2s;
+}
+
+.tile.placeholder .coords {
+  color: #666;
+}
+
+.grid-container:not(.show-coords) .tile .coords {
+  opacity: 0;
+}
+
+/* Tool button styles */
+.tools-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tools-label {
+  color: #666;
+  font-size: 0.7rem;
+}
+
+.tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: #2a2a3e;
+  color: #666;
+  border: 1px solid #444;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  transition: all 0.15s ease;
+}
+
+.tool-btn:hover {
+  background: #3a3a4e;
+  color: #999;
+  border-color: #555;
+}
+
+.tool-btn.active {
+  background: #10b981;
+  color: #fff;
+  border-color: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+}
+
+.tool-btn.active:hover {
+  background: #059669;
+  border-color: #059669;
+}
+
+.tool-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Selection styles */
+.tile.selected {
+  outline: 3px solid #ff3333;
+  outline-offset: -3px;
+  z-index: 10;
+}
+
+.grid-container.show-lines .tile.selected {
+  outline-color: #ff3333;
+}
+
+.tile.selectable {
+  cursor: pointer;
+}
+
+.tile.placeholder.selected {
+  background: rgba(255, 51, 51, 0.15);
+}
+
+/* Flagged tile styles */
+.tile.flagged {
+  position: relative;
+}
+
+.tile.flagged::before {
+  content: "🚩";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 16px;
+  z-index: 20;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+
+.tile.flagged::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px solid #f97316;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Locked tiles (during generation) */
+.tile.locked {
+  outline: 3px solid #a855f7;
+  outline-offset: -3px;
+  z-index: 10;
+}
+
+.grid-container.show-lines .tile.locked {
+  outline-color: #a855f7;
+}
+
+.tile.placeholder.locked {
+  background: rgba(168, 85, 247, 0.2);
+}
+
+/* Queued tiles (in queue, waiting to be generated) */
+.tile.queued {
+  outline: 3px dashed #c084fc !important;
+  outline-offset: -3px;
+  z-index: 9;
+  animation: pulse-queue 1.5s ease-in-out infinite;
+  /* Fallback: box-shadow for browsers that don't render dashed outlines well */
+  box-shadow: inset 0 0 0 3px rgba(192, 132, 252, 0.5);
+}
+
+@keyframes pulse-queue {
+  0%,
+  100% {
+    outline-color: #c084fc;
+    box-shadow: inset 0 0 0 3px rgba(192, 132, 252, 0.5);
+  }
+  50% {
+    outline-color: #8b5cf6;
+    box-shadow: inset 0 0 0 3px rgba(139, 92, 246, 0.7);
+  }
+}
+
+.grid-container.show-lines .tile.queued {
+  outline-color: #c084fc;
+}
+
+.tile.placeholder.queued {
+  background: rgba(168, 85, 247, 0.3) !important;
+}
+
+/* Allow selection while generating - only disable clicking on locked/queued tiles */
+body.generating .tile.locked.selectable,
+body.generating .tile.queued.selectable {
+  cursor: not-allowed;
+}
+
+/* Selection status bar */
+.selection-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(255, 51, 51, 0.1);
+  border: 1px solid rgba(255, 51, 51, 0.3);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: #ff6666;
+  margin-top: 8px;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.status-row.actions-row {
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  justify-content: flex-end;
+}
+
+.selection-status.empty {
+  background: transparent;
+  border-color: #333;
+  color: #666;
+}
+
+.selection-status.empty .actions-row {
+  border-top-color: rgba(255, 255, 255, 0.05);
+}
+
+.selection-status.generating {
+  background: rgba(168, 85, 247, 0.1);
+  border-color: rgba(168, 85, 247, 0.4);
+  color: #a855f7;
+}
+
+.selection-status.generating .actions-row {
+  border-top-color: rgba(168, 85, 247, 0.2);
+}
+
+/* Clickable coordinate links in status bar */
+.coord-link {
+  color: #00d9ff;
+  text-decoration: none;
+  cursor: pointer;
+  padding: 1px 3px;
+  border-radius: 3px;
+  transition: background-color 0.15s ease;
+}
+
+.coord-link:hover {
+  background-color: rgba(0, 217, 255, 0.2);
+  text-decoration: underline;
+}
+
+.selection-limit {
+  color: #888;
+  font-size: 0.65rem;
+}
+
+.deselect-btn {
+  padding: 3px 8px;
+  background: #ff3333;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  margin-left: auto;
+  transition: all 0.2s;
+}
+
+.deselect-btn:hover:not(:disabled) {
+  background: #ff5555;
+}
+
+.deselect-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+}
+
+.delete-btn {
+  padding: 3px 8px;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  transition: all 0.2s;
+}
+
+.delete-btn:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.delete-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+}
+
+.flag-btn {
+  padding: 3px 8px;
+  background: #f97316;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  transition: all 0.2s;
+}
+
+.flag-btn:hover:not(:disabled) {
+  background: #ea580c;
+}
+
+.flag-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+}
+
+.render-btn {
+  padding: 4px 12px;
+  background: #f59e0b;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.render-btn:hover:not(:disabled) {
+  background: #d97706;
+}
+
+.render-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+.render-btn.loading {
+  background: #666;
+  cursor: wait;
+}
+
+.render-btn .spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.generate-btn {
+  padding: 4px 12px;
+  background: #00d9ff;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.generate-btn:hover:not(:disabled) {
+  background: #00b8d4;
+}
+
+.generate-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+/* Generate Rectangle button */
+.generate-rect-btn {
+  padding: 4px 12px;
+  background: #8b5cf6;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+
+.generate-rect-btn:hover:not(:disabled) {
+  background: #7c3aed;
+}
+
+.generate-rect-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+.generate-rect-btn.loading {
+  background: #666;
+  cursor: wait;
+}
+
+.generate-rect-btn .spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+/* Clear Queue button */
+.clear-queue-btn {
+  padding: 4px 10px;
+  background: #6b7280;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  margin-left: 8px;
+}
+
+.clear-queue-btn:hover {
+  background: #ef4444;
+}
+
+.clear-queue-btn:active {
+  background: #dc2626;
+}
+
+.hard-refresh-btn {
+  padding: 4px 10px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  margin-left: 8px;
+}
+
+.hard-refresh-btn:hover {
+  background: #2563eb;
+}
+
+.hard-refresh-btn:active {
+  background: #1d4ed8;
+}
+
+/* Toast notification system */
+.toast-container {
+  position: fixed;
+  bottom: 15px;
+  right: 15px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  max-width: 320px;
+}
+
+.toast {
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  animation: slideIn 0.3s ease-out;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.toast.success {
+  background: linear-gradient(135deg, #065f46 0%, #047857 100%);
+  border: 1px solid #10b981;
+  color: #d1fae5;
+}
+
+.toast.error {
+  background: linear-gradient(135deg, #7f1d1d 0%, #991b1b 100%);
+  border: 1px solid #ef4444;
+  color: #fee2e2;
+}
+
+.toast.info {
+  background: linear-gradient(135deg, #1e3a5f 0%, #1e40af 100%);
+  border: 1px solid #3b82f6;
+  color: #dbeafe;
+}
+
+.toast.loading {
+  background: linear-gradient(135deg, #374151 0%, #4b5563 100%);
+  border: 1px solid #6b7280;
+  color: #e5e7eb;
+}
+
+.toast-icon {
+  flex-shrink: 0;
+  font-size: 1rem;
+}
+
+.toast-content {
+  flex: 1;
+}
+
+.toast-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.toast-message {
+  opacity: 0.9;
+  font-size: 0.7rem;
+}
+
+.toast-close {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+  font-size: 1rem;
+  padding: 0;
+  line-height: 1;
+}
+
+.toast-close:hover {
+  opacity: 1;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOut {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+.toast.removing {
+  animation: slideOut 0.3s ease-in forwards;
+}
+
+/* Loading spinner for generate button */
+.generate-btn.loading {
+  background: #666;
+  color: #fff;
+  cursor: wait;
+}
+
+.generate-btn .spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Water fix tool styles */
+.water-fix-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: #60a5fa;
+  margin-top: 8px;
+}
+
+.water-fix-label {
+  color: #93c5fd;
+  font-weight: 500;
+}
+
+.color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3), inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+  background: #333;
+}
+
+.color-swatch.has-color {
+  cursor: pointer;
+}
+
+.color-hex {
+  font-family: "SF Mono", "Monaco", "Inconsolata", monospace;
+  font-size: 0.75rem;
+  color: #93c5fd;
+  min-width: 180px;
+}
+
+.water-fix-quadrant {
+  color: #60a5fa;
+  font-size: 0.7rem;
+}
+
+.apply-water-fix-btn {
+  padding: 4px 12px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: bold;
+  transition: all 0.2s;
+  margin-left: auto;
+}
+
+.apply-water-fix-btn:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.apply-water-fix-btn:disabled {
+  background: #444;
+  color: #666;
+  cursor: not-allowed;
+  font-weight: normal;
+}
+
+.apply-water-fix-btn.loading {
+  background: #666;
+  cursor: wait;
+}
+
+.cancel-water-fix-btn {
+  padding: 4px 8px;
+  background: #4b5563;
+  color: #d1d5db;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  transition: all 0.2s;
+}
+
+.cancel-water-fix-btn:hover {
+  background: #6b7280;
+}
+
+/* Fix water tool active state */
+.tile.fix-water-selectable {
+  cursor: crosshair;
+}
+
+.tile.fix-water-selectable:hover {
+  outline: 2px solid #3b82f6;
+  outline-offset: -2px;
+}
+
+.tile.water-fix-selected {
+  outline: 3px solid #3b82f6;
+  outline-offset: -3px;
+  z-index: 10;
+}
+
+/* Water fill tool styles */
+.water-fill-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: rgba(74, 99, 114, 0.15);
+  border: 1px solid rgba(74, 99, 114, 0.4);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: #7ba3b8;
+  margin-top: 8px;
+}
+
+.water-fill-label {
+  color: #93c5fd;
+  font-weight: 500;
+}
+
+.water-color-preview {
+  background: #4a6372 !important;
+}
+
+.water-fill-instruction {
+  color: #7ba3b8;
+}
+
+.tile.water-fill-selectable {
+  cursor: pointer;
+}
+
+.tile.water-fill-selectable:hover {
+  outline: 2px solid #4a6372;
+  outline-offset: -2px;
+}
+
+/* Model selector styles */
+.model-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.model-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #888;
+  font-size: 0.75rem;
+}
+
+.model-select {
+  padding: 4px 8px;
+  border: 1px solid #333;
+  border-radius: 3px;
+  background: #16213e;
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  min-width: 140px;
+}
+
+.model-select:hover {
+  border-color: #00d9ff;
+}
+
+.model-select:focus {
+  outline: none;
+  border-color: #00d9ff;
+  box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.2);
+}
+
+.model-select option {
+  background: #16213e;
+  color: #fff;
+  padding: 4px;
+}
+
+/* Generate with Prompt button */
+.generate-prompt-btn {
+  background: linear-gradient(135deg, #9b59b6, #8e44ad);
+  color: #fff;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.generate-prompt-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #a569c0, #9b59b6);
+  transform: translateY(-1px);
+}
+
+.generate-prompt-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Prompt Dialog */
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dialog-content {
+  background: #1a1a2e;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 24px;
+  min-width: 400px;
+  max-width: 500px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.dialog-content h3 {
+  margin: 0 0 12px 0;
+  color: #fff;
+  font-size: 18px;
+}
+
+.dialog-description {
+  color: #aaa;
+  font-size: 14px;
+  margin: 0 0 16px 0;
+}
+
+.prompt-input {
+  width: 100%;
+  background: #0f0f1a;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 14px;
+  padding: 12px;
+  resize: vertical;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.prompt-input:focus {
+  outline: none;
+  border-color: #9b59b6;
+  box-shadow: 0 0 0 2px rgba(155, 89, 182, 0.2);
+}
+
+.prompt-input::placeholder {
+  color: #666;
+}
+
+.dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.dialog-cancel-btn {
+  background: #333;
+  color: #fff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+
+.dialog-cancel-btn:hover {
+  background: #444;
+}
+
+.dialog-submit-btn {
+  background: linear-gradient(135deg, #9b59b6, #8e44ad);
+  color: #fff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.dialog-submit-btn:hover {
+  background: linear-gradient(135deg, #a569c0, #9b59b6);
+}
+
+/* Queue Overlays - show pending generations as grouped rectangles */
+.queue-overlay {
+  position: absolute;
+  border: 3px dashed #c084fc;
+  border-radius: 4px;
+  pointer-events: auto;
+  z-index: 20;
+  animation: pulse-queue-overlay 1.5s ease-in-out infinite;
+  box-sizing: border-box;
+}
+
+/* Processing overlay - solid border, different color */
+.queue-overlay.processing {
+  border-style: solid;
+  border-color: #a855f7;
+  animation: pulse-processing-overlay 1s ease-in-out infinite;
+}
+
+@keyframes pulse-queue-overlay {
+  0%,
+  100% {
+    border-color: #c084fc;
+    box-shadow: 0 0 12px rgba(192, 132, 252, 0.3);
+  }
+  50% {
+    border-color: #8b5cf6;
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.5);
+  }
+}
+
+@keyframes pulse-processing-overlay {
+  0%,
+  100% {
+    border-color: #a855f7;
+    box-shadow: 0 0 16px rgba(168, 85, 247, 0.4);
+  }
+  50% {
+    border-color: #c084fc;
+    box-shadow: 0 0 24px rgba(192, 132, 252, 0.7);
+  }
+}
+
+.queue-overlay:hover {
+  border-color: #a855f7;
+  box-shadow: 0 0 16px rgba(168, 85, 247, 0.6);
+}
+
+/* Queue position badge */
+.queue-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  min-width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #8b5cf6, #a855f7);
+  color: white;
+  font-size: 12px;
+  font-weight: bold;
+  font-family: "SF Mono", "Monaco", monospace;
+  border-radius: 6px;
+  padding: 0 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 1;
+}
+
+/* Processing badge - with spinner */
+.queue-badge.processing {
+  background: linear-gradient(135deg, #10b981, #059669);
+  min-width: 28px;
+  height: 28px;
+}
+
+/* Spinner animation for processing badge */
+.processing-spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Model label below badge */
+.queue-model-label {
+  position: absolute;
+  top: 34px;
+  left: 6px;
+  font-size: 9px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(139, 92, 246, 0.8);
+  padding: 2px 6px;
+  border-radius: 3px;
+  max-width: calc(100% - 40px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Cancel button - visible on hover */
+.queue-cancel-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(220, 38, 38, 0.9);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.queue-overlay:hover .queue-cancel-btn {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.queue-cancel-btn:hover {
+  background: #dc2626;
+  transform: scale(1.1);
+}
+
+.queue-cancel-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Make grid position relative for overlay positioning */
+.grid {
+  position: relative;
+}
+
+```
+
+Done! The action buttons in the second row are now right-aligned.
 

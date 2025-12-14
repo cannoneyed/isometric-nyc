@@ -402,6 +402,64 @@ input[type="range"]::-moz-range-thumb {
   background: var(--color-text-muted);
 }
 
+/* Toggle switch */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  cursor: pointer;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  transition: var(--transition-fast);
+}
+
+.toggle-slider::before {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  left: 2px;
+  bottom: 2px;
+  background: var(--color-text-muted);
+  border-radius: 50%;
+  transition: var(--transition-fast);
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: rgba(255, 107, 53, 0.2);
+  border-color: var(--color-accent-primary);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(16px);
+  background: var(--color-accent-primary);
+  box-shadow: 0 0 8px rgba(255, 107, 53, 0.5);
+}
+
+.toggle-switch input:focus-visible + .toggle-slider {
+  outline: 2px solid var(--color-accent-primary);
+  outline-offset: 2px;
+}
+
+/* Scanline overlay canvas */
+.scanline-overlay {
+  image-rendering: pixelated;
+  mix-blend-mode: multiply;
+}
+
 /* Focus states */
 :focus-visible {
   outline: 2px solid var(--color-accent-primary);
