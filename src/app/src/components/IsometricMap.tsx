@@ -5,6 +5,8 @@ import { TileLayer } from "@deck.gl/geo-layers";
 import { BitmapLayer } from "@deck.gl/layers";
 import type { ViewState } from "../App";
 import { ScanlineOverlay } from "./ScanlineOverlay";
+import { WaterShaderOverlay } from "./WaterShaderOverlay";
+import type { ShaderParams } from "../shaders/water";
 
 interface TileConfig {
   gridWidth: number;
@@ -20,6 +22,12 @@ interface ScanlineSettings {
   opacity: number;
 }
 
+interface WaterShaderSettings {
+  enabled: boolean;
+  showMask: boolean;
+  params: ShaderParams;
+}
+
 interface IsometricMapProps {
   tileConfig: TileConfig;
   viewState: ViewState;
@@ -27,6 +35,7 @@ interface IsometricMapProps {
   lightDirection: [number, number, number];
   onTileHover: (tile: { x: number; y: number } | null) => void;
   scanlines?: ScanlineSettings;
+  waterShader?: WaterShaderSettings;
 }
 
 export function IsometricMap({
@@ -35,6 +44,7 @@ export function IsometricMap({
   onViewStateChange,
   onTileHover,
   scanlines = { enabled: true, count: 480, opacity: 0.15 },
+  waterShader,
 }: IsometricMapProps) {
   // Calculate the total extent of the tile grid
   const extent = useMemo(() => {
@@ -233,6 +243,15 @@ export function IsometricMap({
         }}
         getCursor={() => "grab"}
       />
+      {waterShader && (
+        <WaterShaderOverlay
+          enabled={waterShader.enabled}
+          viewState={viewState}
+          tileConfig={tileConfig}
+          shaderParams={waterShader.params}
+          showMask={waterShader.showMask}
+        />
+      )}
       <ScanlineOverlay
         enabled={scanlines.enabled}
         scanlineCount={scanlines.count}
