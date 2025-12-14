@@ -33,8 +33,25 @@ export interface ViewState {
 
 const VIEW_STATE_STORAGE_KEY = "isometric-nyc-view-state";
 
+// Check for reset query parameter
+function checkForReset(): boolean {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("reset") === "1") {
+    localStorage.removeItem(VIEW_STATE_STORAGE_KEY);
+    // Clean URL without reload
+    window.history.replaceState({}, "", window.location.pathname);
+    return true;
+  }
+  return false;
+}
+
 // Load saved view state from localStorage
-function loadSavedViewState(): ViewState | null {
+function loadSavedViewState(tileConfig?: TileConfig): ViewState | null {
+  // Check for reset first
+  if (checkForReset()) {
+    return null;
+  }
+
   try {
     const saved = localStorage.getItem(VIEW_STATE_STORAGE_KEY);
     if (saved) {
@@ -51,6 +68,26 @@ function loadSavedViewState(): ViewState | null {
           parsed.target[1],
           parsed.target[2] ?? 0,
         ];
+
+        // Validate position is within reasonable bounds if we have config
+        if (tileConfig) {
+          const maxX = tileConfig.gridWidth * tileConfig.tileSize;
+          const maxY = tileConfig.gridHeight * tileConfig.tileSize;
+          if (
+            target[0] < 0 ||
+            target[0] > maxX ||
+            target[1] < 0 ||
+            target[1] > maxY
+          ) {
+            console.warn(
+              "Saved view position out of bounds, resetting:",
+              target
+            );
+            localStorage.removeItem(VIEW_STATE_STORAGE_KEY);
+            return null;
+          }
+        }
+
         return { target, zoom: parsed.zoom };
       }
     }
@@ -113,8 +150,8 @@ function App() {
   // Try to restore from localStorage, otherwise center on the content area
   useEffect(() => {
     if (tileConfig && !viewState) {
-      // Try to load saved view state first
-      const savedViewState = loadSavedViewState();
+      // Try to load saved view state first (pass tileConfig for bounds validation)
+      const savedViewState = loadSavedViewState(tileConfig);
       if (savedViewState) {
         console.log(
           `View init: restoring saved position (${savedViewState.target[0]}, ${savedViewState.target[1]}), zoom=${savedViewState.zoom}`
