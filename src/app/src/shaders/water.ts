@@ -48,7 +48,7 @@ export const fragmentShaderSource = `
       return;
     }
     
-    // If mask is very dark (land), output transparent - let deck.gl tiles show through
+    // If mask is very dark (land), output transparent - let base tiles show through
     if (maskValue < 0.02) {
       gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
       return;

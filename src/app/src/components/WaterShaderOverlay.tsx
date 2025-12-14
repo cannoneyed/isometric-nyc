@@ -12,6 +12,7 @@ interface TileConfig {
   gridWidth: number;
   gridHeight: number;
   tileSize: number;
+  maxZoomLevel: number;
 }
 
 interface WaterShaderOverlayProps {
@@ -130,9 +131,6 @@ export function WaterShaderOverlay({
         const texture = createTexture(context.gl, img);
         if (texture) {
           cache.set(url, texture);
-          console.log(
-            `WaterShaderOverlay: Loaded ${isImage ? "image" : "mask"}: ${url}`
-          );
           setTextureLoadCount((c) => c + 1);
         }
       }
@@ -140,10 +138,6 @@ export function WaterShaderOverlay({
     img.onerror = () => {
       pendingLoads.delete(url);
       failedLoads.add(url);
-      // Don't log errors for missing masks - they're expected
-      if (isImage) {
-        console.warn(`WaterShaderOverlay: Failed to load image: ${url}`);
-      }
     };
     img.src = url;
   };
@@ -178,17 +172,36 @@ export function WaterShaderOverlay({
       const scale = Math.pow(2, zoom);
       const viewportWidth = window.innerWidth;
       const viewportHeight = window.innerHeight;
+      const totalHeight = gridHeight * tileSize;
 
-      // Calculate visible tile range
-      const worldLeft = target[0] - viewportWidth / (2 * scale);
-      const worldRight = target[0] + viewportWidth / (2 * scale);
-      const worldBottom = target[1] - viewportHeight / (2 * scale);
-      const worldTop = target[1] + viewportHeight / (2 * scale);
+      // Water shader always uses level 0 (base tiles) since masks only exist at that level
+      // At very zoomed out views, we skip water effects entirely for performance
+      const skipWaterEffects = zoom < -3; // Skip when very zoomed out
 
+      if (skipWaterEffects) {
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        animationFrameRef.current = requestAnimationFrame(render);
+        return;
+      }
+
+      // Convert viewState from Y-up (bottom=0) to Y-down (top=0) for OSD compatibility
+      // Our viewState.target[1] is in Y-up coordinates
+      const viewCenterX = target[0];
+      const viewCenterY_down = totalHeight - target[1]; // Convert to Y-down
+
+      // Calculate visible world bounds in Y-down coordinates
+      const worldLeft = viewCenterX - viewportWidth / (2 * scale);
+      const worldRight = viewCenterX + viewportWidth / (2 * scale);
+      const worldTop = viewCenterY_down - viewportHeight / (2 * scale);
+      const worldBottom = viewCenterY_down + viewportHeight / (2 * scale);
+
+      // Calculate visible tile range (always using base level 0 tiles)
       const startX = Math.max(0, Math.floor(worldLeft / tileSize));
       const endX = Math.min(gridWidth - 1, Math.ceil(worldRight / tileSize));
-      const startY = Math.max(0, Math.floor(worldBottom / tileSize));
-      const endY = Math.min(gridHeight - 1, Math.ceil(worldTop / tileSize));
+      const startY = Math.max(0, Math.floor(worldTop / tileSize));
+      const endY = Math.min(gridHeight - 1, Math.ceil(worldBottom / tileSize));
 
       // Clear the canvas
       gl.viewport(0, 0, canvas.width, canvas.height);
@@ -197,14 +210,12 @@ export function WaterShaderOverlay({
 
       gl.useProgram(program);
 
-      // Render each visible tile
-      for (let x = startX; x <= endX; x++) {
-        for (let y = startY; y <= endY; y++) {
-          // Flip Y for file paths (deck.gl y=0 is bottom, file y=0 is top)
-          const flippedY = gridHeight - 1 - y;
-
-          const imageUrl = `/tiles/0/${x}_${flippedY}.png`;
-          const maskUrl = `/water_masks/0/${x}_${flippedY}.png`;
+      // Render each visible tile (always using level 0)
+      for (let tileX = startX; tileX <= endX; tileX++) {
+        for (let tileY = startY; tileY <= endY; tileY++) {
+          // Always use level 0 tiles for both images and masks
+          const imageUrl = `/tiles/0/${tileX}_${tileY}.png`;
+          const maskUrl = `/water_masks/0/${tileX}_${tileY}.png`;
 
           // Get textures from cache
           const imageTexture = imageCache.get(imageUrl);
@@ -223,14 +234,21 @@ export function WaterShaderOverlay({
           if (!imageTexture || !maskTexture) continue;
 
           // Calculate screen position for this tile
-          const worldX = x * tileSize;
-          const worldY = y * tileSize;
+          const tileWorldX = tileX * tileSize;
+          const tileWorldY = tileY * tileSize; // Y-down coordinates
 
-          // Convert world coords to WebGL viewport coords
-          // Both deck.gl and gl.viewport use Y-up coordinate system
-          const screenX = (worldX - target[0]) * scale + viewportWidth / 2;
-          const screenY = (worldY - target[1]) * scale + viewportHeight / 2;
+          // Convert to screen coordinates
+          // Screen X: (worldX - viewCenterX) * scale + viewportWidth / 2
+          // Screen Y: (worldY - viewCenterY_down) * scale + viewportHeight / 2
+          // Note: WebGL canvas Y=0 is at bottom, so we need to flip for gl.viewport
+          const screenX =
+            (tileWorldX - viewCenterX) * scale + viewportWidth / 2;
+          const screenY_fromTop =
+            (tileWorldY - viewCenterY_down) * scale + viewportHeight / 2;
           const screenSize = tileSize * scale;
+
+          // Convert to WebGL coordinates (Y=0 at bottom)
+          const screenY = viewportHeight - screenY_fromTop - screenSize;
 
           // Skip if completely off-screen
           if (

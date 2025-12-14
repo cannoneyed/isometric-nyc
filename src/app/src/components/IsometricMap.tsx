@@ -229,6 +229,7 @@ export function IsometricMap({
     gridWidth,
     gridHeight,
     tileSize,
+    maxZoomLevel,
     totalWidth,
     totalHeight,
     worldToOsd,
