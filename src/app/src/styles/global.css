@@ -107,6 +107,7 @@ body {
   height: var(--header-height);
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--space-md);
   padding: 0 var(--space-lg);
   background: linear-gradient(
@@ -118,6 +119,41 @@ body {
   backdrop-filter: blur(var(--blur-amount));
   z-index: 100;
   pointer-events: none;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  pointer-events: auto;
+}
+
+.icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.icon-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--color-accent-primary);
+}
+
+.icon-button:active {
+  transform: scale(0.95);
+}
+
+.icon-button svg {
+  width: 16px;
+  height: 16px;
 }
 
 .header h1 {

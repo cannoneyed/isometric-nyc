@@ -164,7 +164,7 @@ map_data/**/*.zip
 exports/
 
 # Web app tiles
-src/app/public/tiles/
+src/app/public/**/*.png
 
 # Infill template images
 **/infill_*.png
