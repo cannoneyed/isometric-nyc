@@ -157,6 +157,7 @@ body {
   margin-bottom: var(--space-md);
   padding-bottom: var(--space-sm);
   border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
 }
 
 .panel-title {
@@ -172,6 +173,36 @@ body {
   bottom: var(--space-lg);
   left: var(--space-lg);
   width: var(--panel-width);
+  max-height: calc(100vh - var(--space-lg) * 2 - var(--header-height));
+  display: flex;
+  flex-direction: column;
+  transition: var(--transition-normal);
+}
+
+.control-panel.collapsed {
+  width: auto;
+  min-width: 120px;
+}
+
+.control-panel.collapsed .panel-header {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.collapse-icon {
+  font-size: 8px;
+  color: var(--color-text-muted);
+  transition: var(--transition-fast);
+}
+
+.panel-header:hover .collapse-icon {
+  color: var(--color-accent-primary);
+}
+
+.panel-content {
+  overflow-y: auto;
+  flex: 1;
 }
 
 .control-group {

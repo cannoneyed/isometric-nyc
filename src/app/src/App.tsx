@@ -273,10 +273,6 @@ function App() {
       </header>
 
       <ControlPanel
-        zoom={viewState.zoom}
-        lightDirection={lightDirection}
-        onLightDirectionChange={setLightDirection}
-        visibleTiles={visibleTiles}
         scanlines={scanlines}
         onScanlinesChange={setScanlines}
         waterShader={waterShader}
