@@ -11,7 +11,7 @@ body {
   color: #eee;
   min-height: 100vh;
   padding: 15px;
-  padding-top: 95px; /* Space for fixed toolbar */
+  padding-top: 130px; /* Space for fixed toolbar with three rows */
 }
 
 .toolbar {
@@ -33,9 +33,81 @@ body {
   flex-wrap: wrap;
 }
 
+.toolbar-row-nav {
+  padding-bottom: 6px;
+}
+
+.toolbar-row-tools {
+  padding-top: 6px;
+  border-top: 1px solid #333;
+  gap: 10px;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 20px;
+  background: #444;
+  margin: 0 4px;
+}
+
+.actions-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.utility-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toolbar-row-status {
+  padding-top: 6px;
+  border-top: 1px solid #333;
+  font-size: 0.7rem;
+  color: #888;
+  min-height: 18px;
+}
+
+.toolbar-row-status.generating {
+  color: #a855f7;
+}
+
+/* Action button base styles */
+.action-btn {
+  padding: 4px 8px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.action-btn:disabled {
+  background: #333 !important;
+  color: #555 !important;
+  cursor: not-allowed;
+}
+
+/* Utility button base styles */
+.utility-btn {
+  padding: 4px 8px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.65rem;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
 .toolbar-info {
   color: #666;
   font-size: 0.75rem;
+  margin-left: auto;
 }
 
 .toolbar-info span + span {
@@ -45,6 +117,10 @@ body {
 .toolbar-info .selected-quadrants {
   color: #00d9ff;
   font-weight: bold;
+}
+
+.toolbar-info .generation-dir-info {
+  display: none; /* Hide the long path on the nav row */
 }
 
 .controls {
@@ -181,12 +257,16 @@ body {
 .tools-group {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  border-left: none;
+  margin-left: 0;
+  padding-left: 0;
 }
 
 .tools-label {
   color: #666;
   font-size: 0.7rem;
+  margin-right: 4px;
 }
 
 .tool-btn {
@@ -322,52 +402,7 @@ body.generating .tile.queued.selectable {
   cursor: not-allowed;
 }
 
-/* Selection status bar */
-.selection-status {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 6px 10px;
-  background: rgba(255, 51, 51, 0.1);
-  border: 1px solid rgba(255, 51, 51, 0.3);
-  border-radius: 4px;
-  font-size: 0.7rem;
-  color: #ff6666;
-  margin-top: 8px;
-}
-
-.status-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.status-row.actions-row {
-  padding-top: 4px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  justify-content: flex-end;
-}
-
-.selection-status.empty {
-  background: transparent;
-  border-color: #333;
-  color: #666;
-}
-
-.selection-status.empty .actions-row {
-  border-top-color: rgba(255, 255, 255, 0.05);
-}
-
-.selection-status.generating {
-  background: rgba(168, 85, 247, 0.1);
-  border-color: rgba(168, 85, 247, 0.4);
-  color: #a855f7;
-}
-
-.selection-status.generating .actions-row {
-  border-top-color: rgba(168, 85, 247, 0.2);
-}
+/* Selection status styles moved to .toolbar-status */
 
 /* Clickable coordinate links in status bar */
 .coord-link {
@@ -390,98 +425,45 @@ body.generating .tile.queued.selectable {
 }
 
 .deselect-btn {
-  padding: 3px 8px;
-  background: #ff3333;
+  background: #6b7280;
   color: white;
-  border: none;
-  border-radius: 3px;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 0.65rem;
-  margin-left: auto;
-  transition: all 0.2s;
 }
 
 .deselect-btn:hover:not(:disabled) {
-  background: #ff5555;
-}
-
-.deselect-btn:disabled {
-  background: #444;
-  color: #666;
-  cursor: not-allowed;
+  background: #4b5563;
 }
 
 .delete-btn {
-  padding: 3px 8px;
   background: #dc2626;
   color: white;
-  border: none;
-  border-radius: 3px;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 0.65rem;
-  transition: all 0.2s;
 }
 
 .delete-btn:hover:not(:disabled) {
   background: #b91c1c;
 }
 
-.delete-btn:disabled {
-  background: #444;
-  color: #666;
-  cursor: not-allowed;
-}
-
 .flag-btn {
-  padding: 3px 8px;
   background: #f97316;
   color: white;
-  border: none;
-  border-radius: 3px;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 0.65rem;
-  transition: all 0.2s;
 }
 
 .flag-btn:hover:not(:disabled) {
   background: #ea580c;
 }
 
-.flag-btn:disabled {
-  background: #444;
-  color: #666;
-  cursor: not-allowed;
-}
-
 .render-btn {
-  padding: 4px 12px;
   background: #f59e0b;
   color: #1a1a2e;
-  border: none;
-  border-radius: 3px;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 0.7rem;
   font-weight: bold;
-  transition: all 0.2s;
 }
 
 .render-btn:hover:not(:disabled) {
   background: #d97706;
 }
 
-.render-btn:disabled {
-  background: #444;
-  color: #666;
-  cursor: not-allowed;
-  font-weight: normal;
-}
-
 .render-btn.loading {
   background: #666;
+  color: #fff;
   cursor: wait;
 }
 
@@ -498,52 +480,24 @@ body.generating .tile.queued.selectable {
 }
 
 .generate-btn {
-  padding: 4px 12px;
   background: #00d9ff;
   color: #1a1a2e;
-  border: none;
-  border-radius: 3px;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 0.7rem;
   font-weight: bold;
-  transition: all 0.2s;
 }
 
 .generate-btn:hover:not(:disabled) {
   background: #00b8d4;
 }
 
-.generate-btn:disabled {
-  background: #444;
-  color: #666;
-  cursor: not-allowed;
-  font-weight: normal;
-}
-
 /* Generate Rectangle button */
 .generate-rect-btn {
-  padding: 4px 12px;
   background: #8b5cf6;
   color: white;
-  border: none;
-  border-radius: 3px;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 0.7rem;
   font-weight: bold;
-  transition: all 0.2s;
 }
 
 .generate-rect-btn:hover:not(:disabled) {
   background: #7c3aed;
-}
-
-.generate-rect-btn:disabled {
-  background: #444;
-  color: #666;
-  cursor: not-allowed;
-  font-weight: normal;
 }
 
 .generate-rect-btn.loading {
@@ -565,17 +519,8 @@ body.generating .tile.queued.selectable {
 
 /* Clear Queue button */
 .clear-queue-btn {
-  padding: 4px 10px;
   background: #6b7280;
   color: white;
-  border: none;
-  border-radius: 3px;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 0.65rem;
-  font-weight: 500;
-  transition: all 0.2s;
-  margin-left: 8px;
 }
 
 .clear-queue-btn:hover {
@@ -587,17 +532,8 @@ body.generating .tile.queued.selectable {
 }
 
 .hard-refresh-btn {
-  padding: 4px 10px;
   background: #3b82f6;
   color: white;
-  border: none;
-  border-radius: 3px;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 0.65rem;
-  font-weight: 500;
-  transition: all 0.2s;
-  margin-left: 8px;
 }
 
 .hard-refresh-btn:hover {
@@ -927,25 +863,12 @@ body.generating .tile.queued.selectable {
 
 /* Generate with Prompt button */
 .generate-prompt-btn {
-  background: linear-gradient(135deg, #9b59b6, #8e44ad);
+  background: #9b59b6;
   color: #fff;
-  border: none;
-  padding: 6px 12px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 500;
-  transition: all 0.2s ease;
 }
 
 .generate-prompt-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #a569c0, #9b59b6);
-  transform: translateY(-1px);
-}
-
-.generate-prompt-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  background: #8e44ad;
 }
 
 /* Prompt Dialog */
@@ -1191,4 +1114,58 @@ body.generating .tile.queued.selectable {
 /* Make grid position relative for overlay positioning */
 .grid {
   position: relative;
+}
+
+/* Water tile indicator styles */
+.tile.water {
+  position: relative;
+}
+
+.water-indicator {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  font-size: 14px;
+  z-index: 20;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 3px;
+  padding: 1px 3px;
+}
+
+/* Water select tool styles */
+.water-select-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: #60a5fa;
+  margin-top: 8px;
+}
+
+.water-select-label {
+  color: #93c5fd;
+  font-weight: 500;
+}
+
+.water-select-instruction {
+  color: #60a5fa;
+}
+
+.tile.water-select-selectable {
+  cursor: pointer;
+}
+
+.tile.water-select-selectable:hover {
+  outline: 2px solid #3b82f6;
+  outline-offset: -2px;
+}
+
+.tile.water-select-selectable.water:hover {
+  outline-color: #f97316;
 }

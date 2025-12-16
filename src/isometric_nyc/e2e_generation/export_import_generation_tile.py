@@ -1,27 +1,30 @@
 """
-Export or import a 2x2 generation tile to/from the generation directory's exports folder.
+Export or import a rectangular region of generation tiles to/from the exports folder.
 
-If the export file (<generation_dir>/exports/export_X_Y.png) does NOT exist:
-  - Exports the tile from the database to <generation_dir>/exports/export_X_Y.png
+If the export file (<generation_dir>/exports/export_tl_X_Y_br_X_Y.png) does NOT exist:
+  - Exports the region from the database to the export file
 
 If the export file DOES exist:
-  - Imports the four quadrants from the file back into the database
+  - Imports the quadrants from the file back into the database
 
 Usage:
-  uv run python src/isometric_nyc/e2e_generation/export_import_generation_tile.py <generation_dir> -x X -y Y
+  uv run python src/isometric_nyc/e2e_generation/export_import_generation_tile.py <generation_dir> --tl X,Y --br X,Y
 
 Examples:
-  # Export/import tile starting at quadrant (0, 0)
-  uv run python src/isometric_nyc/e2e_generation/export_import_generation_tile.py generations/v01 -x 0 -y 0
+  # Export/import rectangular region from (0,0) to (3,3) (4x4 quadrants)
+  uv run python src/isometric_nyc/e2e_generation/export_import_generation_tile.py generations/v01 --tl 0,0 --br 3,3
+
+  # Export/import a single 2x2 tile
+  uv run python src/isometric_nyc/e2e_generation/export_import_generation_tile.py generations/v01 --tl 0,0 --br 1,1
 
   # With --render flag to export/import render pixels instead of generation pixels
-  uv run python src/isometric_nyc/e2e_generation/export_import_generation_tile.py generations/v01 -x 2 -y 2 --render
+  uv run python src/isometric_nyc/e2e_generation/export_import_generation_tile.py generations/v01 --tl 2,2 --br 5,5 --render
 
   # Force export even if file exists
-  uv run python src/isometric_nyc/e2e_generation/export_import_generation_tile.py generations/v01 -x 0 -y 0 --force-export
+  uv run python src/isometric_nyc/e2e_generation/export_import_generation_tile.py generations/v01 --tl 0,0 --br 3,3 --force-export
 
   # Force import even if file doesn't exist
-  uv run python src/isometric_nyc/e2e_generation/export_import_generation_tile.py generations/v01 -x 0 -y 0 --force-import
+  uv run python src/isometric_nyc/e2e_generation/export_import_generation_tile.py generations/v01 --tl 0,0 --br 3,3 --force-import
 """
 
 import argparse
@@ -76,16 +79,16 @@ def image_to_png_bytes(img: Image.Image) -> bytes:
 
 def stitch_quadrants_to_tile(
   quadrants: dict[tuple[int, int], Image.Image],
+  width_count: int,
+  height_count: int,
 ) -> Image.Image:
   """
-  Stitch 4 quadrant images into a single tile image.
+  Stitch quadrant images into a single tile image.
 
   Args:
-      quadrants: Dict mapping (dx, dy) offset to the quadrant image:
-          (0, 0) = top-left
-          (1, 0) = top-right
-          (0, 1) = bottom-left
-          (1, 1) = bottom-right
+      quadrants: Dict mapping (dx, dy) offset to the quadrant image.
+      width_count: Number of quadrants horizontally.
+      height_count: Number of quadrants vertically.
 
   Returns:
       Combined tile image.
@@ -93,44 +96,45 @@ def stitch_quadrants_to_tile(
   sample_quad = next(iter(quadrants.values()))
   quad_w, quad_h = sample_quad.size
 
-  tile = Image.new("RGBA", (quad_w * 2, quad_h * 2))
+  tile = Image.new("RGBA", (quad_w * width_count, quad_h * height_count))
 
-  placements = {
-    (0, 0): (0, 0),
-    (1, 0): (quad_w, 0),
-    (0, 1): (0, quad_h),
-    (1, 1): (quad_w, quad_h),
-  }
-
-  for offset, pos in placements.items():
-    if offset in quadrants:
-      tile.paste(quadrants[offset], pos)
+  for (dx, dy), quad_img in quadrants.items():
+    pos = (dx * quad_w, dy * quad_h)
+    tile.paste(quad_img, pos)
 
   return tile
 
 
 def split_into_quadrants(
   image: Image.Image,
+  width_count: int,
+  height_count: int,
 ) -> dict[tuple[int, int], Image.Image]:
   """
-  Split an image into 4 quadrant images.
+  Split an image into a grid of quadrant images.
 
-  Returns a dict mapping (dx, dy) offset to the quadrant image:
-      (0, 0) = top-left
-      (1, 0) = top-right
-      (0, 1) = bottom-left
-      (1, 1) = bottom-right
+  Args:
+      image: The source image to split.
+      width_count: Number of quadrants horizontally.
+      height_count: Number of quadrants vertically.
+
+  Returns:
+      Dict mapping (dx, dy) offset to the quadrant image.
   """
   width, height = image.size
-  half_w = width // 2
-  half_h = height // 2
+  quad_w = width // width_count
+  quad_h = height // height_count
 
-  return {
-    (0, 0): image.crop((0, 0, half_w, half_h)),
-    (1, 0): image.crop((half_w, 0, width, half_h)),
-    (0, 1): image.crop((0, half_h, half_w, height)),
-    (1, 1): image.crop((half_w, half_h, width, height)),
-  }
+  quadrants = {}
+  for dy in range(height_count):
+    for dx in range(width_count):
+      left = dx * quad_w
+      top = dy * quad_h
+      right = left + quad_w
+      bottom = top + quad_h
+      quadrants[(dx, dy)] = image.crop((left, top, right, bottom))
+
+  return quadrants
 
 
 def get_quadrant_info(conn: sqlite3.Connection, x: int, y: int) -> dict | None:
@@ -177,47 +181,54 @@ def save_quadrant_data(
 
 def export_tile(
   db_path: Path,
-  x: int,
-  y: int,
+  tl: tuple[int, int],
+  br: tuple[int, int],
   output_path: Path,
   use_render: bool = False,
 ) -> bool:
   """
-  Export a 2x2 tile from the database to a PNG file.
+  Export a rectangular region of quadrants from the database to a PNG file.
 
   Args:
       db_path: Path to the quadrants.db file.
-      x: X coordinate of the top-left quadrant.
-      y: Y coordinate of the top-left quadrant.
+      tl: (x, y) coordinates of the top-left quadrant.
+      br: (x, y) coordinates of the bottom-right quadrant (inclusive).
       output_path: Path to save the output PNG.
       use_render: If True, export render pixels; otherwise export generation pixels.
 
   Returns:
       True if successful, False otherwise.
   """
-  quadrant_positions = [(0, 0), (1, 0), (0, 1), (1, 1)]
+  tl_x, tl_y = tl
+  br_x, br_y = br
+  width_count = br_x - tl_x + 1
+  height_count = br_y - tl_y + 1
   data_type = "render" if use_render else "generation"
 
-  print(f"📤 Exporting {data_type} tile at ({x}, {y})...")
+  print(
+    f"📤 Exporting {data_type} region from ({tl_x},{tl_y}) to ({br_x},{br_y}) "
+    f"({width_count}x{height_count} quadrants)..."
+  )
 
   quadrants: dict[tuple[int, int], Image.Image] = {}
   missing_quadrants = []
 
-  for dx, dy in quadrant_positions:
-    qx, qy = x + dx, y + dy
-    data = get_quadrant_data(db_path, qx, qy, use_render=use_render)
+  for dy in range(height_count):
+    for dx in range(width_count):
+      qx, qy = tl_x + dx, tl_y + dy
+      data = get_quadrant_data(db_path, qx, qy, use_render=use_render)
 
-    if data is None:
-      missing_quadrants.append((qx, qy))
-    else:
-      quadrants[(dx, dy)] = png_bytes_to_image(data)
-      print(f"   ✓ Quadrant ({qx}, {qy})")
+      if data is None:
+        missing_quadrants.append((qx, qy))
+      else:
+        quadrants[(dx, dy)] = png_bytes_to_image(data)
+        print(f"   ✓ Quadrant ({qx}, {qy})")
 
   if missing_quadrants:
     print(f"❌ Error: Missing {data_type} for quadrants: {missing_quadrants}")
     return False
 
-  tile_image = stitch_quadrants_to_tile(quadrants)
+  tile_image = stitch_quadrants_to_tile(quadrants, width_count, height_count)
   tile_image.save(output_path, "PNG")
 
   print(f"✅ Exported to: {output_path}")
@@ -228,19 +239,19 @@ def export_tile(
 
 def import_tile(
   db_path: Path,
-  x: int,
-  y: int,
+  tl: tuple[int, int],
+  br: tuple[int, int],
   input_path: Path,
   use_render: bool = False,
   overwrite: bool = False,
 ) -> bool:
   """
-  Import a tile PNG into the database as 4 quadrants.
+  Import a tile PNG into the database as quadrants.
 
   Args:
       db_path: Path to the quadrants.db file.
-      x: X coordinate of the top-left quadrant.
-      y: Y coordinate of the top-left quadrant.
+      tl: (x, y) coordinates of the top-left quadrant.
+      br: (x, y) coordinates of the bottom-right quadrant (inclusive).
       input_path: Path to the input PNG file.
       use_render: If True, import as render pixels; otherwise as generation pixels.
       overwrite: If True, overwrite existing data.
@@ -248,17 +259,22 @@ def import_tile(
   Returns:
       True if successful, False otherwise.
   """
+  tl_x, tl_y = tl
+  br_x, br_y = br
+  width_count = br_x - tl_x + 1
+  height_count = br_y - tl_y + 1
+  total_quadrants = width_count * height_count
   data_type = "render" if use_render else "generation"
 
-  print(f"📥 Importing {data_type} tile at ({x}, {y}) from {input_path.name}...")
+  print(
+    f"📥 Importing {data_type} region from ({tl_x},{tl_y}) to ({br_x},{br_y}) "
+    f"({width_count}x{height_count} quadrants) from {input_path.name}..."
+  )
 
   image = Image.open(input_path)
   print(f"   Image size: {image.size[0]}x{image.size[1]}")
 
-  if image.size[0] != image.size[1]:
-    print("   ⚠️  Warning: Image is not square")
-
-  quadrant_images = split_into_quadrants(image)
+  quadrant_images = split_into_quadrants(image, width_count, height_count)
   quad_w, quad_h = quadrant_images[(0, 0)].size
   print(f"   Quadrant size: {quad_w}x{quad_h}")
 
@@ -267,7 +283,7 @@ def import_tile(
   try:
     success_count = 0
     for (dx, dy), quad_img in quadrant_images.items():
-      qx, qy = x + dx, y + dy
+      qx, qy = tl_x + dx, tl_y + dy
 
       info = get_quadrant_info(conn, qx, qy)
       if not info:
@@ -292,16 +308,29 @@ def import_tile(
       else:
         print(f"   ❌ Failed to save quadrant ({qx}, {qy})")
 
-    print(f"\n✅ Imported {success_count}/4 quadrants")
+    print(f"\n✅ Imported {success_count}/{total_quadrants} quadrants")
     return success_count > 0
 
   finally:
     conn.close()
 
 
+def parse_coord(value: str) -> tuple[int, int]:
+  """Parse a coordinate string like '0,0' into a tuple (x, y)."""
+  try:
+    parts = value.split(",")
+    if len(parts) != 2:
+      raise ValueError
+    return (int(parts[0]), int(parts[1]))
+  except ValueError:
+    raise argparse.ArgumentTypeError(
+      f"Invalid coordinate format: '{value}'. Expected format: X,Y (e.g., '0,0')"
+    )
+
+
 def main() -> int:
   parser = argparse.ArgumentParser(
-    description="Export or import a 2x2 generation tile to/from the exports directory."
+    description="Export or import a rectangular region of generation tiles to/from the exports directory."
   )
   parser.add_argument(
     "generation_dir",
@@ -309,16 +338,16 @@ def main() -> int:
     help="Path to the generation directory containing quadrants.db",
   )
   parser.add_argument(
-    "-x",
-    type=int,
+    "--tl",
+    type=parse_coord,
     required=True,
-    help="X coordinate of the top-left quadrant of the tile",
+    help="Top-left coordinate of the region (format: X,Y, e.g., '0,0')",
   )
   parser.add_argument(
-    "-y",
-    type=int,
+    "--br",
+    type=parse_coord,
     required=True,
-    help="Y coordinate of the top-left quadrant of the tile",
+    help="Bottom-right coordinate of the region, inclusive (format: X,Y, e.g., '3,3')",
   )
   parser.add_argument(
     "--render",
@@ -349,6 +378,16 @@ def main() -> int:
 
   args = parser.parse_args()
 
+  tl_x, tl_y = args.tl
+  br_x, br_y = args.br
+
+  # Validate coordinates
+  if br_x < tl_x or br_y < tl_y:
+    print(
+      f"❌ Error: Bottom-right ({br_x},{br_y}) must be >= top-left ({tl_x},{tl_y})"
+    )
+    return 1
+
   generation_dir = args.generation_dir.resolve()
   exports_dir = (args.exports_dir or generation_dir / "exports").resolve()
 
@@ -363,10 +402,13 @@ def main() -> int:
 
   exports_dir.mkdir(parents=True, exist_ok=True)
 
-  export_filename = f"export_{args.x}_{args.y}.png"
+  export_filename = f"export_tl_{tl_x}_{tl_y}_br_{br_x}_{br_y}.png"
   export_path = exports_dir / export_filename
 
-  print(f"🎯 Tile: ({args.x}, {args.y})")
+  width_count = br_x - tl_x + 1
+  height_count = br_y - tl_y + 1
+
+  print(f"🎯 Region: ({tl_x},{tl_y}) to ({br_x},{br_y}) ({width_count}x{height_count} quadrants)")
   print(f"   Generation dir: {generation_dir}")
   print(f"   Export path: {export_path}")
   print()
@@ -377,8 +419,8 @@ def main() -> int:
       return 1
     success = import_tile(
       db_path,
-      args.x,
-      args.y,
+      args.tl,
+      args.br,
       export_path,
       use_render=args.render,
       overwrite=args.overwrite,
@@ -386,8 +428,8 @@ def main() -> int:
   elif args.force_export or not export_path.exists():
     success = export_tile(
       db_path,
-      args.x,
-      args.y,
+      args.tl,
+      args.br,
       export_path,
       use_render=args.render,
     )
@@ -395,8 +437,8 @@ def main() -> int:
     print(f"📁 Export file exists: {export_path}")
     success = import_tile(
       db_path,
-      args.x,
-      args.y,
+      args.tl,
+      args.br,
       export_path,
       use_render=args.render,
       overwrite=args.overwrite,

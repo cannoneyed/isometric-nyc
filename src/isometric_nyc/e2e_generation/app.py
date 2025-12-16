@@ -162,6 +162,18 @@ def ensure_flagged_column_exists(conn: sqlite3.Connection) -> None:
     print("📝 Added 'flagged' column to quadrants table")
 
 
+def ensure_is_water_column_exists(conn: sqlite3.Connection) -> None:
+  """Ensure the is_water column exists in the quadrants table (migration)."""
+  cursor = conn.cursor()
+  # Check if column exists
+  cursor.execute("PRAGMA table_info(quadrants)")
+  columns = [row[1] for row in cursor.fetchall()]
+  if "is_water" not in columns:
+    cursor.execute("ALTER TABLE quadrants ADD COLUMN is_water INTEGER DEFAULT 0")
+    conn.commit()
+    print("📝 Added 'is_water' column to quadrants table")
+
+
 def get_quadrant_generation(x: int, y: int) -> bytes | None:
   """Get the generation bytes for a quadrant."""
   conn = get_db_connection()
@@ -200,17 +212,18 @@ def get_quadrant_data(x: int, y: int, use_render: bool = False) -> bytes | None:
 
 
 def get_quadrant_info(x: int, y: int, use_render: bool = False) -> dict:
-  """Get info about a quadrant including whether it has data and is flagged."""
+  """Get info about a quadrant including whether it has data, is flagged, and is water."""
   conn = get_db_connection()
   try:
-    # Ensure flagged column exists
+    # Ensure columns exist
     ensure_flagged_column_exists(conn)
+    ensure_is_water_column_exists(conn)
 
     cursor = conn.cursor()
     column = "render" if use_render else "generation"
     cursor.execute(
       f"""
-      SELECT {column} IS NOT NULL, COALESCE(flagged, 0)
+      SELECT {column} IS NOT NULL, COALESCE(flagged, 0), COALESCE(is_water, 0)
       FROM quadrants
       WHERE quadrant_x = ? AND quadrant_y = ?
       """,
@@ -218,8 +231,12 @@ def get_quadrant_info(x: int, y: int, use_render: bool = False) -> dict:
     )
     row = cursor.fetchone()
     if row:
-      return {"has_data": bool(row[0]), "flagged": bool(row[1])}
-    return {"has_data": False, "flagged": False}
+      return {
+        "has_data": bool(row[0]),
+        "flagged": bool(row[1]),
+        "is_water": bool(row[2]),
+      }
+    return {"has_data": False, "flagged": False, "is_water": False}
   finally:
     conn.close()
 
@@ -242,15 +259,17 @@ def index():
   nx = max(1, min(nx, 20))
   ny = max(1, min(ny, 20))
 
-  # Check which tiles have data and flagged status
+  # Check which tiles have data, flagged status, and water status
   tiles = {}
   flagged_tiles = {}
+  water_tiles = {}
   for dx in range(nx):
     for dy in range(ny):
       qx, qy = x + dx, y + dy
       info = get_quadrant_info(qx, qy, use_render=show_render)
       tiles[(dx, dy)] = info["has_data"]
       flagged_tiles[(dx, dy)] = info["flagged"]
+      water_tiles[(dx, dy)] = info["is_water"]
 
   # Get model configuration for the frontend
   models_config = []
@@ -271,6 +290,7 @@ def index():
     show_render=show_render,
     tiles=tiles,
     flagged_tiles=flagged_tiles,
+    water_tiles=water_tiles,
     generation_dir=str(GENERATION_DIR),
     models_config=json.dumps(models_config),
     default_model_id=default_model_id,
@@ -568,19 +588,46 @@ def process_queue_item_from_db(item_id: int) -> dict:
     config = get_generation_config(conn)
 
     if item_type == QueueItemType.GENERATE:
-      result = run_generation(
-        conn, config, selected_quadrants, model_id, context_quadrants, prompt
-      )
-      if result["success"]:
-        print(f"✅ Generation complete: {result['message']}")
-        generation_state["status"] = "complete"
-        generation_state["message"] = result["message"]
-        mark_item_complete(conn, item_id, result["message"])
-      else:
-        print(f"❌ Generation failed: {result['error']}")
-        generation_state["status"] = "error"
-        generation_state["error"] = result["error"]
-        mark_item_error(conn, item_id, result["error"])
+      # Retry logic for generation - retry up to 3 times
+      max_generation_retries = 3
+      generation_retry_delay = 5.0  # seconds between generation retries
+
+      for gen_attempt in range(1, max_generation_retries + 1):
+        result = run_generation(
+          conn, config, selected_quadrants, model_id, context_quadrants, prompt
+        )
+
+        if result["success"]:
+          print(f"✅ Generation complete: {result['message']}")
+          generation_state["status"] = "complete"
+          generation_state["message"] = result["message"]
+          mark_item_complete(conn, item_id, result["message"])
+          return result
+
+        # Generation failed
+        if gen_attempt < max_generation_retries:
+          print(
+            f"⚠️  Generation failed (attempt {gen_attempt}/{max_generation_retries}): "
+            f"{result['error']}"
+          )
+          print(f"⏳ Waiting {generation_retry_delay}s before retrying generation...")
+          update_generation_state(
+            "retrying",
+            f"Generation failed, retrying (attempt {gen_attempt + 1}/{max_generation_retries})...",
+          )
+          time.sleep(generation_retry_delay)
+        else:
+          # All retries exhausted
+          print(
+            f"❌ Generation failed after {max_generation_retries} attempts: "
+            f"{result['error']}"
+          )
+          generation_state["status"] = "error"
+          generation_state["error"] = result["error"]
+          mark_item_error(conn, item_id, result["error"])
+          return result
+
+      # Should not reach here, but just in case
       return result
 
     else:  # render
@@ -1057,6 +1104,51 @@ def api_delete():
     conn.close()
 
 
+@app.route("/api/delete-render", methods=["POST"])
+def api_delete_render():
+  """API endpoint to delete render data for selected quadrants."""
+  data = request.get_json()
+  if not data or "quadrants" not in data:
+    return jsonify({"success": False, "error": "No quadrants specified"})
+
+  quadrants = data["quadrants"]
+  if not quadrants:
+    return jsonify({"success": False, "error": "Empty quadrants list"})
+
+  # Connect to database (quadrants.db, not tiles.db)
+  db_path = Path(GENERATION_DIR) / "quadrants.db"
+  conn = sqlite3.connect(db_path)
+
+  try:
+    deleted_count = 0
+    for qx, qy in quadrants:
+      # Clear the render column (set to NULL) but keep the row
+      cursor = conn.execute(
+        """
+        UPDATE quadrants
+        SET render = NULL
+        WHERE quadrant_x = ? AND quadrant_y = ?
+        """,
+        (qx, qy),
+      )
+      if cursor.rowcount > 0:
+        deleted_count += 1
+
+    conn.commit()
+
+    return jsonify(
+      {
+        "success": True,
+        "message": f"Deleted render data for {deleted_count} quadrant{'s' if deleted_count != 1 else ''}",
+        "deleted": deleted_count,
+      }
+    )
+  except Exception as e:
+    return jsonify({"success": False, "error": str(e)})
+  finally:
+    conn.close()
+
+
 @app.route("/api/flag", methods=["POST"])
 def api_flag():
   """API endpoint to flag/unflag selected quadrants."""
@@ -1099,6 +1191,65 @@ def api_flag():
         "message": f"{action} {flagged_count} quadrant{'s' if flagged_count != 1 else ''}",
         "count": flagged_count,
         "flagged": bool(flag_value),
+      }
+    )
+  except Exception as e:
+    return jsonify({"success": False, "error": str(e)})
+  finally:
+    conn.close()
+
+
+@app.route("/api/water", methods=["POST"])
+def api_water():
+  """API endpoint to mark/unmark selected quadrants as water tiles."""
+  data = request.get_json()
+  if not data or "quadrants" not in data:
+    return jsonify({"success": False, "error": "No quadrants specified"})
+
+  quadrants = data["quadrants"]
+  if not quadrants:
+    return jsonify({"success": False, "error": "Empty quadrants list"})
+
+  # Get water value (default to True/1 for marking as water, False/0 for unmarking)
+  water_value = 1 if data.get("is_water", True) else 0
+
+  conn = get_db_connection()
+
+  try:
+    # Ensure the is_water column exists
+    ensure_is_water_column_exists(conn)
+
+    water_count = 0
+    for qx, qy in quadrants:
+      # First ensure the quadrant exists in the database
+      cursor = conn.execute(
+        "SELECT 1 FROM quadrants WHERE quadrant_x = ? AND quadrant_y = ?",
+        (qx, qy),
+      )
+      if cursor.fetchone() is None:
+        # Quadrant doesn't exist, skip it
+        continue
+
+      cursor = conn.execute(
+        """
+        UPDATE quadrants
+        SET is_water = ?
+        WHERE quadrant_x = ? AND quadrant_y = ?
+        """,
+        (water_value, qx, qy),
+      )
+      if cursor.rowcount > 0:
+        water_count += 1
+
+    conn.commit()
+
+    action = "Marked as water" if water_value else "Unmarked as water"
+    return jsonify(
+      {
+        "success": True,
+        "message": f"{action}: {water_count} quadrant{'s' if water_count != 1 else ''}",
+        "count": water_count,
+        "is_water": bool(water_value),
       }
     )
   except Exception as e:

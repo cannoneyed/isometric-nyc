@@ -478,10 +478,15 @@ document.addEventListener("keydown", (e) => {
     case "F":
       toggleWaterFillTool();
       break;
+    case "t":
+    case "T":
+      toggleWaterSelectTool();
+      break;
     case "Escape":
       if (selectToolActive) toggleSelectTool();
       if (fixWaterToolActive) cancelWaterFix();
       if (waterFillToolActive) cancelWaterFill();
+      if (waterSelectToolActive) cancelWaterSelect();
       break;
   }
 });
@@ -498,6 +503,9 @@ function toggleSelectTool() {
   }
   if (waterFillToolActive) {
     cancelWaterFill();
+  }
+  if (waterSelectToolActive) {
+    cancelWaterSelect();
   }
 
   selectToolActive = !selectToolActive;
@@ -528,11 +536,13 @@ function toggleFixWaterTool() {
   if (waterFillToolActive) {
     cancelWaterFill();
   }
+  if (waterSelectToolActive) {
+    cancelWaterSelect();
+  }
 
   fixWaterToolActive = !fixWaterToolActive;
   const btn = document.getElementById("fixWaterTool");
   const tiles = document.querySelectorAll(".tile");
-  const selectionStatus = document.getElementById("selectionStatus");
   const waterFixStatus = document.getElementById("waterFixStatus");
 
   if (fixWaterToolActive) {
@@ -543,8 +553,7 @@ function toggleFixWaterTool() {
         tile.classList.add("fix-water-selectable");
       }
     });
-    // Show water fix status bar, hide selection status
-    selectionStatus.style.display = "none";
+    // Show water fix status bar
     waterFixStatus.style.display = "flex";
     // Reset state
     resetWaterFixState();
@@ -555,8 +564,7 @@ function toggleFixWaterTool() {
       tile.classList.remove("fix-water-selectable");
       tile.classList.remove("water-fix-selected");
     });
-    // Hide water fix status bar, show selection status
-    selectionStatus.style.display = "flex";
+    // Hide water fix status bar
     waterFixStatus.style.display = "none";
     saveSelectedTool("");
   }
@@ -781,11 +789,13 @@ function toggleWaterFillTool() {
   if (fixWaterToolActive) {
     cancelWaterFix();
   }
+  if (waterSelectToolActive) {
+    cancelWaterSelect();
+  }
 
   waterFillToolActive = !waterFillToolActive;
   const btn = document.getElementById("waterFillTool");
   const tiles = document.querySelectorAll(".tile");
-  const selectionStatus = document.getElementById("selectionStatus");
   const waterFillStatus = document.getElementById("waterFillStatus");
 
   if (waterFillToolActive) {
@@ -793,8 +803,7 @@ function toggleWaterFillTool() {
     tiles.forEach((tile) => {
       tile.classList.add("water-fill-selectable");
     });
-    // Show water fill status bar, hide selection status
-    selectionStatus.style.display = "none";
+    // Show water fill status bar
     waterFillStatus.style.display = "flex";
     saveSelectedTool("waterfill");
   } else {
@@ -802,8 +811,7 @@ function toggleWaterFillTool() {
     tiles.forEach((tile) => {
       tile.classList.remove("water-fill-selectable");
     });
-    // Hide water fill status bar, show selection status
-    selectionStatus.style.display = "flex";
+    // Hide water fill status bar
     waterFillStatus.style.display = "none";
     saveSelectedTool("");
   }
@@ -812,6 +820,113 @@ function toggleWaterFillTool() {
 function cancelWaterFill() {
   if (waterFillToolActive) {
     toggleWaterFillTool();
+  }
+}
+
+// Water Select tool - marks quadrants as water tiles
+let waterSelectToolActive = false;
+
+function toggleWaterSelectTool() {
+  // Deactivate other tools
+  if (selectToolActive) {
+    toggleSelectTool();
+  }
+  if (fixWaterToolActive) {
+    cancelWaterFix();
+  }
+  if (waterFillToolActive) {
+    cancelWaterFill();
+  }
+
+  waterSelectToolActive = !waterSelectToolActive;
+  const btn = document.getElementById("waterSelectTool");
+  const tiles = document.querySelectorAll(".tile");
+  const waterSelectStatus = document.getElementById("waterSelectStatus");
+
+  if (waterSelectToolActive) {
+    btn.classList.add("active");
+    tiles.forEach((tile) => {
+      tile.classList.add("water-select-selectable");
+    });
+    // Show water select status bar
+    waterSelectStatus.style.display = "flex";
+    saveSelectedTool("waterselect");
+  } else {
+    btn.classList.remove("active");
+    tiles.forEach((tile) => {
+      tile.classList.remove("water-select-selectable");
+    });
+    // Hide water select status bar
+    waterSelectStatus.style.display = "none";
+    saveSelectedTool("");
+  }
+}
+
+function cancelWaterSelect() {
+  if (waterSelectToolActive) {
+    toggleWaterSelectTool();
+  }
+}
+
+async function handleWaterSelectClick(tileEl) {
+  if (!waterSelectToolActive) return;
+
+  const coords = tileEl.dataset.coords.split(",").map(Number);
+  const [qx, qy] = coords;
+
+  // Check current water status
+  const isCurrentlyWater = tileEl.dataset.water === "true";
+  const newWaterStatus = !isCurrentlyWater;
+
+  const instruction = document.getElementById("waterSelectInstruction");
+  instruction.textContent = `Updating (${qx}, ${qy})...`;
+
+  try {
+    const response = await fetch("/api/water", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        quadrants: [[qx, qy]],
+        is_water: newWaterStatus,
+      }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      // Update the tile's visual state
+      if (newWaterStatus) {
+        tileEl.classList.add("water");
+        tileEl.dataset.water = "true";
+        // Add water indicator if it doesn't exist
+        if (!tileEl.querySelector(".water-indicator")) {
+          const indicator = document.createElement("span");
+          indicator.className = "water-indicator";
+          indicator.title = "Water tile";
+          indicator.textContent = "💧";
+          tileEl.appendChild(indicator);
+        }
+        showToast("success", "Marked as water", `Quadrant (${qx}, ${qy})`);
+      } else {
+        tileEl.classList.remove("water");
+        tileEl.dataset.water = "false";
+        // Remove water indicator
+        const indicator = tileEl.querySelector(".water-indicator");
+        if (indicator) {
+          indicator.remove();
+        }
+        showToast("info", "Unmarked as water", `Quadrant (${qx}, ${qy})`);
+      }
+
+      instruction.textContent = "Click quadrants to toggle water status";
+    } else {
+      showToast("error", "Failed to update", result.error || "Unknown error");
+      instruction.textContent = "Click quadrants to toggle water status";
+    }
+  } catch (error) {
+    console.error("Water select error:", error);
+    showToast("error", "Request failed", error.message);
+    instruction.textContent = "Click quadrants to toggle water status";
   }
 }
 
@@ -872,7 +987,6 @@ async function handleWaterFillClick(tileEl) {
 function updateSelectionStatus(serverStatus = null) {
   const count = selectedQuadrants.size;
   const countEl = document.getElementById("selectionCount");
-  const limitEl = document.querySelector(".selection-limit");
   const statusEl = document.getElementById("selectionStatus");
   const deselectBtn = document.getElementById("deselectAllBtn");
   const deleteBtn = document.getElementById("deleteBtn");
@@ -995,45 +1109,53 @@ function updateSelectionStatus(serverStatus = null) {
   }
 
   // Build status display - some parts may be HTML objects, others plain strings
-  if (statusParts.length > 0) {
-    const statusHtml = statusParts
-      .map((part) => (typeof part === "object" && part.html ? part.html : part))
-      .join(" • ");
-    countEl.innerHTML = statusHtml;
+  if (countEl) {
+    if (statusParts.length > 0) {
+      const statusHtml = statusParts
+        .map((part) =>
+          typeof part === "object" && part.html ? part.html : part
+        )
+        .join(" • ");
+      countEl.innerHTML = statusHtml;
 
-    // Add click handlers for coordinate links
-    countEl.querySelectorAll(".coord-link").forEach((link) => {
-      link.addEventListener("click", (e) => {
-        e.preventDefault();
-        const x = parseInt(link.dataset.x, 10);
-        const y = parseInt(link.dataset.y, 10);
-        navigateToCoord(x, y);
+      // Add click handlers for coordinate links
+      countEl.querySelectorAll(".coord-link").forEach((link) => {
+        link.addEventListener("click", (e) => {
+          e.preventDefault();
+          const x = parseInt(link.dataset.x, 10);
+          const y = parseInt(link.dataset.y, 10);
+          navigateToCoord(x, y);
+        });
       });
-    });
-  } else {
-    countEl.textContent = `${count} selected`;
+    } else if (count > 0) {
+      countEl.textContent = `${count} selected`;
+    } else {
+      countEl.textContent = "";
+    }
   }
 
-  // Update status bar styling
+  // Update status bar styling and visibility
   const isProcessing =
     serverStatus &&
     (serverStatus.is_generating || serverStatus.queue_length > 0);
-  if (isProcessing) {
-    if (limitEl) limitEl.style.display = "none";
-    statusEl.classList.remove("empty");
-    statusEl.classList.add("generating");
-  } else {
-    if (limitEl) limitEl.style.display = "";
-    statusEl.classList.toggle("empty", count === 0);
-    statusEl.classList.remove("generating");
+  if (statusEl) {
+    if (isProcessing) {
+      statusEl.classList.add("generating");
+      statusEl.style.display = "";
+    } else {
+      statusEl.classList.remove("generating");
+      // Hide the status row if there's no content
+      const hasContent = countEl && countEl.textContent.trim() !== "";
+      statusEl.style.display = hasContent ? "" : "none";
+    }
   }
 
   // Enable buttons for selection (can add to queue even during processing)
-  deselectBtn.disabled = count === 0;
-  deleteBtn.disabled = count === 0;
+  if (deselectBtn) deselectBtn.disabled = count === 0;
+  if (deleteBtn) deleteBtn.disabled = count === 0;
   if (flagBtn) flagBtn.disabled = count === 0;
-  renderBtn.disabled = count === 0;
-  generateBtn.disabled = count === 0;
+  if (renderBtn) renderBtn.disabled = count === 0;
+  if (generateBtn) generateBtn.disabled = count === 0;
   // Generate with prompt button
   const generateWithPromptBtn = document.getElementById(
     "generateWithPromptBtn"
@@ -1042,7 +1164,7 @@ function updateSelectionStatus(serverStatus = null) {
     generateWithPromptBtn.disabled = count === 0;
   }
   // Generate Rectangle requires exactly 2 selected
-  generateRectBtn.disabled = count !== 2;
+  if (generateRectBtn) generateRectBtn.disabled = count !== 2;
 }
 
 // Toast notification system
@@ -1096,14 +1218,19 @@ async function deleteSelected() {
     return [x, y];
   });
 
+  // Check if we're in render view mode
+  const isRenderMode = document.getElementById("showRender")?.checked || false;
+  const dataType = isRenderMode ? "render" : "generation";
+  const apiEndpoint = isRenderMode ? "/api/delete-render" : "/api/delete";
+
   // Confirm deletion
   const coordsStr = coords.map(([x, y]) => `(${x},${y})`).join(", ");
-  if (!confirm(`Delete generation data for ${coordsStr}?`)) {
+  if (!confirm(`Delete ${dataType} data for ${coordsStr}?`)) {
     return;
   }
 
   try {
-    const response = await fetch("/api/delete", {
+    const response = await fetch(apiEndpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ quadrants: coords }),
@@ -1593,14 +1720,12 @@ function deselectAll() {
 function toggleTileSelection(tileEl, qx, qy) {
   if (!selectToolActive) return;
 
-  // Check if this tile is currently being generated or in the queue
+  // Check if this tile is currently being generated (locked = actively processing)
+  // Note: queued tiles CAN be selected (e.g., to cancel or manage them)
   const key = `${qx},${qy}`;
-  if (
-    tileEl.classList.contains("locked") ||
-    tileEl.classList.contains("queued")
-  ) {
+  if (tileEl.classList.contains("locked")) {
     console.log(
-      `Cannot select quadrant (${qx}, ${qy}) - currently generating or in queue`
+      `Cannot select quadrant (${qx}, ${qy}) - currently being processed`
     );
     return;
   }
@@ -1645,6 +1770,14 @@ document.querySelectorAll(".tile").forEach((tile) => {
       e.preventDefault();
       e.stopPropagation();
       handleWaterFillClick(tile);
+      return;
+    }
+
+    // Handle water select tool clicks
+    if (waterSelectToolActive) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleWaterSelectClick(tile);
       return;
     }
 
@@ -1862,6 +1995,11 @@ function restoreSavedTool() {
         toggleWaterFillTool();
       }
       break;
+    case "waterselect":
+      if (document.getElementById("waterSelectTool")) {
+        toggleWaterSelectTool();
+      }
+      break;
     default:
       // Unknown tool, clear saved state
       saveSelectedTool("");
@@ -1880,11 +2018,9 @@ function restoreSavedQuadrants() {
     // Check if this quadrant tile exists on the current page
     const tile = document.querySelector(`.tile[data-coords="${key}"]`);
     if (tile) {
-      // Don't restore if tile is locked or queued
-      if (
-        !tile.classList.contains("locked") &&
-        !tile.classList.contains("queued")
-      ) {
+      // Don't restore if tile is locked (actively processing)
+      // Queued tiles CAN be selected
+      if (!tile.classList.contains("locked")) {
         selectedQuadrants.add(key);
         tile.classList.add("selected");
         restoredCount++;

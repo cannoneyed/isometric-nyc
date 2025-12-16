@@ -690,16 +690,66 @@ def call_oxen_api(image_url: str, api_key: str) -> str:
     raise ValueError(f"Unexpected API response format: {result}")
 
 
-def download_image_to_pil(url: str):
-  """Download an image from a URL and return as PIL Image."""
+def download_image_to_pil(
+  url: str,
+  max_retries: int = 3,
+  retry_delay: float = 10.0,
+):
+  """
+  Download an image from a URL and return as PIL Image.
+
+  Includes retry logic for transient errors (e.g., 403 Forbidden when
+  the image is not yet available).
+
+  Args:
+      url: URL of the image to download
+      max_retries: Maximum number of retry attempts (default: 3)
+      retry_delay: Seconds to wait between retries (default: 10.0)
+
+  Returns:
+      PIL Image object
+
+  Raises:
+      requests.HTTPError: If all retry attempts fail
+  """
+  import time
   from io import BytesIO
 
   import requests
   from PIL import Image
 
-  response = requests.get(url, timeout=120)
-  response.raise_for_status()
-  return Image.open(BytesIO(response.content))
+  last_error = None
+
+  for attempt in range(1, max_retries + 1):
+    try:
+      response = requests.get(url, timeout=120)
+      response.raise_for_status()
+      return Image.open(BytesIO(response.content))
+    except requests.exceptions.HTTPError as e:
+      last_error = e
+      if attempt < max_retries:
+        print(
+          f"   ⚠️  Download failed (attempt {attempt}/{max_retries}): {e}"
+        )
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+    except requests.exceptions.RequestException as e:
+      last_error = e
+      if attempt < max_retries:
+        print(
+          f"   ⚠️  Download error (attempt {attempt}/{max_retries}): {e}"
+        )
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+
+  # If we get here, all retries failed
+  if last_error:
+    raise last_error
+  raise RuntimeError("Download failed with no error captured")
 
 
 # =============================================================================

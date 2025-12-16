@@ -28,7 +28,7 @@
 
     <!-- Fixed toolbar -->
     <div class="toolbar">
-      <div class="toolbar-row">
+      <div class="toolbar-row toolbar-row-nav">
         <div class="controls">
           <label>X: <input type="number" id="x" value="{{ x }}" /></label>
           <label>Y: <input type="number" id="y" value="{{ y }}" /></label>
@@ -95,107 +95,125 @@
               </select>
             </label>
           </div>
-          <div class="toggle-group tools-group">
-            <span class="tools-label">Tools:</span>
-            <button
-              id="selectTool"
-              class="tool-btn"
-              onclick="toggleSelectTool()"
-              title="Select quadrants (S)"
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"></path>
-                <path d="M13 13l6 6"></path>
-              </svg>
-              Select
-            </button>
-            <button
-              id="fixWaterTool"
-              class="tool-btn"
-              onclick="toggleFixWaterTool()"
-              title="Fix water color (W)"
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
-              </svg>
-              Fix Water
-            </button>
-            <button
-              id="waterFillTool"
-              class="tool-btn"
-              onclick="toggleWaterFillTool()"
-              title="Fill quadrant with water (F)"
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <rect x="3" y="3" width="18" height="18" rx="2"></rect>
-                <path d="M12 8v8"></path>
-                <path d="M8 12h8"></path>
-              </svg>
-              Water Fill
-            </button>
-          </div>
         </div>
         <div class="toolbar-info">
           <span>({{ x }}, {{ y }}) → ({{ x + nx - 1 }}, {{ y + ny - 1 }})</span>
           <span id="selectedQuadrantsDisplay" class="selected-quadrants"></span>
-          <span>{{ generation_dir }}</span>
+          <span class="generation-dir-info">{{ generation_dir }}</span>
         </div>
       </div>
-      <div class="selection-status" id="selectionStatus">
-        <div class="status-row">
-          <span id="selectionCount">0 quadrants selected</span>
-          <span class="selection-limit">(max 4)</span>
+      <div class="toolbar-row toolbar-row-tools">
+        <div class="tools-group">
+          <span class="tools-label">Tools:</span>
+          <button
+            id="selectTool"
+            class="tool-btn"
+            onclick="toggleSelectTool()"
+            title="Select quadrants (S)"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"></path>
+              <path d="M13 13l6 6"></path>
+            </svg>
+            Select
+          </button>
+          <button
+            id="fixWaterTool"
+            class="tool-btn"
+            onclick="toggleFixWaterTool()"
+            title="Fix water color (W)"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+            </svg>
+            Fix Water
+          </button>
+          <button
+            id="waterFillTool"
+            class="tool-btn"
+            onclick="toggleWaterFillTool()"
+            title="Fill quadrant with water (F)"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+              <path d="M12 8v8"></path>
+              <path d="M8 12h8"></path>
+            </svg>
+            Water Fill
+          </button>
+          <button
+            id="waterSelectTool"
+            class="tool-btn"
+            onclick="toggleWaterSelectTool()"
+            title="Mark quadrants as water tiles (T)"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+              <path d="M12 12v4"></path>
+              <circle cx="12" cy="18" r="1"></circle>
+            </svg>
+            Water Select
+          </button>
+        </div>
+        <div class="toolbar-divider"></div>
+        <div class="actions-group">
           <button
             id="deselectAllBtn"
-            class="deselect-btn"
+            class="action-btn deselect-btn"
             onclick="deselectAll()"
             disabled
           >
-            Deselect All
+            Deselect
           </button>
           <button
             id="deleteBtn"
-            class="delete-btn"
+            class="action-btn delete-btn"
             onclick="deleteSelected()"
             disabled
+            title="Delete data (generation or render based on current view)"
           >
             Delete
           </button>
           <button
             id="flagBtn"
-            class="flag-btn"
+            class="action-btn flag-btn"
             onclick="flagSelected()"
             disabled
             title="Flag selected quadrants for review"
           >
             🚩 Flag
           </button>
-        </div>
-        <div class="status-row actions-row">
           <button
             id="renderBtn"
-            class="render-btn"
+            class="action-btn render-btn"
             onclick="renderSelected()"
             disabled
           >
@@ -203,7 +221,7 @@
           </button>
           <button
             id="generateBtn"
-            class="generate-btn"
+            class="action-btn generate-btn"
             onclick="generateSelected()"
             disabled
           >
@@ -211,7 +229,7 @@
           </button>
           <button
             id="generateWithPromptBtn"
-            class="generate-prompt-btn"
+            class="action-btn generate-prompt-btn"
             onclick="showPromptDialog()"
             disabled
             title="Generate with additional prompt text"
@@ -220,16 +238,19 @@
           </button>
           <button
             id="generateRectBtn"
-            class="generate-rect-btn"
+            class="action-btn generate-rect-btn"
             onclick="generateRectangle()"
             disabled
             title="Select exactly 2 quadrants to define rectangle corners"
           >
-            Generate Rectangle
+            Gen Rect
           </button>
+        </div>
+        <div class="toolbar-divider"></div>
+        <div class="utility-group">
           <button
             id="clearQueueBtn"
-            class="clear-queue-btn"
+            class="utility-btn clear-queue-btn"
             onclick="clearQueue()"
             title="Clear all pending items from the generation queue"
           >
@@ -237,13 +258,16 @@
           </button>
           <button
             id="hardRefreshBtn"
-            class="hard-refresh-btn"
+            class="utility-btn hard-refresh-btn"
             onclick="hardRefresh()"
             title="Clear image cache and reload page"
           >
             ↻ Refresh
           </button>
         </div>
+      </div>
+      <div class="toolbar-row toolbar-row-status" id="selectionStatus">
+        <span id="selectionCount"></span>
       </div>
       <div class="water-fix-status" id="waterFixStatus" style="display: none">
         <span class="water-fix-label">Target Color:</span>
@@ -282,6 +306,23 @@
           Cancel
         </button>
       </div>
+      <div
+        class="water-select-status"
+        id="waterSelectStatus"
+        style="display: none"
+      >
+        <span class="water-select-label">💧 Water Select:</span>
+        <span class="water-select-instruction" id="waterSelectInstruction"
+          >Click quadrants to toggle water status</span
+        >
+        <button
+          id="cancelWaterSelectBtn"
+          class="cancel-water-fix-btn"
+          onclick="cancelWaterSelect()"
+        >
+          Cancel
+        </button>
+      </div>
     </div>
 
     <div
@@ -291,11 +332,13 @@
       <div class="grid">
         {% for dy in range(ny) %} {% for dx in range(nx) %} {% set qx = x + dx
         %} {% set qy = y + dy %} {% set has_gen = tiles.get((dx, dy), False) %}
-        {% set is_flagged = flagged_tiles.get((dx, dy), False) %}
+        {% set is_flagged = flagged_tiles.get((dx, dy), False) %} {% set
+        is_water = water_tiles.get((dx, dy), False) %}
         <div
-          class="tile {% if not has_gen %}placeholder{% endif %}{% if is_flagged %} flagged{% endif %}"
+          class="tile {% if not has_gen %}placeholder{% endif %}{% if is_flagged %} flagged{% endif %}{% if is_water %} water{% endif %}"
           data-coords="{{ qx }},{{ qy }}"
           data-flagged="{{ 'true' if is_flagged else 'false' }}"
+          data-water="{{ 'true' if is_water else 'false' }}"
         >
           <span class="coords">({{ qx }}, {{ qy }})</span>
           {% if has_gen %}
@@ -303,6 +346,8 @@
             src="/tile/{{ qx }}/{{ qy }}?render={{ '1' if show_render else '0' }}"
             alt="Tile {{ qx }},{{ qy }}"
           />
+          {% endif %} {% if is_water %}
+          <span class="water-indicator" title="Water tile">💧</span>
           {% endif %}
         </div>
         {% endfor %} {% endfor %}
