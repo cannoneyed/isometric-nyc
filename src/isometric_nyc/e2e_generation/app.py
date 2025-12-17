@@ -51,6 +51,7 @@ from isometric_nyc.e2e_generation.queue_db import (
   cancel_queue_item_by_id,
   clear_completed_items,
   clear_pending_queue,
+  get_all_processing_items,
   get_next_pending_item_for_available_model,
   get_pending_queue,
   get_queue_position_for_model,
@@ -1604,6 +1605,32 @@ def load_generated_quadrants(conn: sqlite3.Connection) -> set[Point]:
   return {Point(row[0], row[1]) for row in cursor.fetchall()}
 
 
+def load_queued_quadrants(conn: sqlite3.Connection) -> set[Point]:
+  """
+  Load all quadrants from pending and processing queue items.
+
+  These quadrants are scheduled for generation and should be considered
+  when planning new rectangles to avoid seam issues.
+  """
+  queued: set[Point] = set()
+
+  # Get pending items
+  pending_items = get_pending_queue(conn)
+  for item in pending_items:
+    if item.item_type == QueueItemType.GENERATE:
+      for qx, qy in item.quadrants:
+        queued.add(Point(qx, qy))
+
+  # Get processing items
+  processing_items = get_all_processing_items(conn)
+  for item in processing_items:
+    if item.item_type == QueueItemType.GENERATE:
+      for qx, qy in item.quadrants:
+        queued.add(Point(qx, qy))
+
+  return queued
+
+
 @app.route("/api/generate-rectangle", methods=["POST"])
 def api_generate_rectangle():
   """
@@ -1683,14 +1710,18 @@ def api_generate_rectangle():
     print(f"   Model: {model_id}")
   print(f"{'=' * 60}")
 
-  # Load existing generated quadrants
+  # Load existing generated quadrants and pending/processing quadrants
   conn = get_db_connection()
   try:
     generated = load_generated_quadrants(conn)
+    queued = load_queued_quadrants(conn)
+
+    if queued:
+      print(f"   Considering {len(queued)} queued/processing quadrant(s) for seam avoidance")
 
     # Create the rectangle plan
     bounds = RectBounds(tl, br)
-    plan = create_rectangle_plan(bounds, generated)
+    plan = create_rectangle_plan(bounds, generated, queued)
 
     # Validate the plan
     is_valid, errors = validate_plan(plan)

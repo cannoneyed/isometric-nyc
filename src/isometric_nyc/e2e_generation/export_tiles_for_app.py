@@ -5,6 +5,11 @@ Exports a rectangular region of quadrants to the web app's public/tiles/ directo
 normalizing coordinates so the top-left of the region becomes (0, 0).
 Generates multiple zoom levels for efficient tile loading.
 
+Postprocessing:
+  By default, tiles are exported with pixelation and color quantization applied.
+  A unified color palette is built by sampling ~100 quadrants from the database
+  before export, ensuring consistent colors across all tiles.
+
 Zoom levels:
   - Level 0: Base tiles (512x512 each)
   - Level 1: 2x2 base tiles combined into 1 (covers 1024x1024 world units)
@@ -30,11 +35,18 @@ Examples:
 
   # Specify custom output directory
   uv run python src/isometric_nyc/e2e_generation/export_tiles_for_app.py generations/v01 --tl 0,0 --br 9,9 --output-dir ./my-tiles
+
+  # Export without postprocessing (raw tiles)
+  uv run python src/isometric_nyc/e2e_generation/export_tiles_for_app.py generations/v01 --no-postprocess
+
+  # Customize postprocessing parameters
+  uv run python src/isometric_nyc/e2e_generation/export_tiles_for_app.py generations/v01 --scale 4 --colors 64
 """
 
 import argparse
 import io
 import json
+import random
 import sqlite3
 import sys
 from datetime import datetime, timezone
@@ -45,6 +57,12 @@ from PIL import Image
 # Constants
 TILE_SIZE = 512
 MAX_ZOOM_LEVEL = 4  # 16x16 tile combining
+
+# Postprocessing defaults
+DEFAULT_PIXEL_SCALE = 2
+DEFAULT_NUM_COLORS = 32
+DEFAULT_SAMPLE_QUADRANTS = 100
+DEFAULT_PIXELS_PER_QUADRANT = 1000
 
 
 def next_power_of_2(n: int) -> int:
@@ -182,6 +200,202 @@ def count_generated_quadrants(
     conn.close()
 
 
+# =============================================================================
+# Postprocessing functions (palette building and color quantization)
+# =============================================================================
+
+
+def sample_colors_from_database(
+  db_path: Path,
+  tl: tuple[int, int],
+  br: tuple[int, int],
+  use_render: bool = False,
+  sample_size: int = DEFAULT_SAMPLE_QUADRANTS,
+  pixels_per_quadrant: int = DEFAULT_PIXELS_PER_QUADRANT,
+) -> list[tuple[int, int, int]]:
+  """
+  Sample colors from quadrants in the database to build a representative color set.
+
+  Args:
+      db_path: Path to the quadrants.db file.
+      tl: Top-left coordinate of the export region.
+      br: Bottom-right coordinate of the export region.
+      use_render: If True, sample from render images; otherwise from generations.
+      sample_size: Number of quadrants to sample from.
+      pixels_per_quadrant: Number of random pixels to sample from each quadrant.
+
+  Returns:
+      List of RGB tuples representing sampled colors.
+  """
+  conn = sqlite3.connect(db_path)
+  try:
+    cursor = conn.cursor()
+    column = "render" if use_render else "generation"
+
+    # Get all quadrant coordinates with data in the range
+    cursor.execute(
+      f"""
+            SELECT quadrant_x, quadrant_y FROM quadrants
+            WHERE quadrant_x >= ? AND quadrant_x <= ?
+              AND quadrant_y >= ? AND quadrant_y <= ?
+              AND {column} IS NOT NULL
+            """,
+      (tl[0], br[0], tl[1], br[1]),
+    )
+    all_coords = cursor.fetchall()
+
+    if not all_coords:
+      return []
+
+    # Sample a subset of quadrants if we have more than sample_size
+    if len(all_coords) > sample_size:
+      sampled_coords = random.sample(all_coords, sample_size)
+    else:
+      sampled_coords = all_coords
+
+    all_colors: list[tuple[int, int, int]] = []
+
+    for x, y in sampled_coords:
+      # Get the image data for this quadrant
+      cursor.execute(
+        f"SELECT {column} FROM quadrants WHERE quadrant_x = ? AND quadrant_y = ?",
+        (x, y),
+      )
+      row = cursor.fetchone()
+      if not row or not row[0]:
+        continue
+
+      try:
+        # Load image from bytes
+        img = Image.open(io.BytesIO(row[0])).convert("RGB")
+        pixels = list(img.getdata())
+
+        # Sample random pixels from this quadrant
+        if len(pixels) > pixels_per_quadrant:
+          sampled_pixels = random.sample(pixels, pixels_per_quadrant)
+        else:
+          sampled_pixels = pixels
+
+        all_colors.extend(sampled_pixels)
+      except Exception as e:
+        print(f"Warning: Could not read quadrant ({x},{y}): {e}")
+
+    return all_colors
+  finally:
+    conn.close()
+
+
+def build_unified_palette(
+  colors: list[tuple[int, int, int]],
+  num_colors: int = DEFAULT_NUM_COLORS,
+) -> Image.Image:
+  """
+  Build a unified palette image from sampled colors.
+
+  Creates a small image with the quantized palette that can be used
+  as a reference for applying to other images.
+
+  Args:
+      colors: List of RGB tuples.
+      num_colors: Target number of colors in the palette.
+
+  Returns:
+      A palette image that can be used with Image.quantize().
+  """
+  if not colors:
+    # Return a simple grayscale palette if no colors provided
+    gray_colors = [(i * 8, i * 8, i * 8) for i in range(num_colors)]
+    composite = Image.new("RGB", (num_colors, 1), (0, 0, 0))
+    pixels = composite.load()
+    for i, color in enumerate(gray_colors):
+      pixels[i, 0] = color
+    return composite.quantize(colors=num_colors, method=1, dither=0)
+
+  # Create a composite image from all sampled colors
+  # We'll make a square-ish image
+  num_pixels = len(colors)
+  side = int(num_pixels**0.5) + 1
+
+  # Create image and populate with colors
+  composite = Image.new("RGB", (side, side), (0, 0, 0))
+  pixels = composite.load()
+
+  for i, color in enumerate(colors):
+    x = i % side
+    y = i // side
+    if y < side:
+      pixels[x, y] = color
+
+  # Quantize this composite image to get our unified palette
+  palette_img = composite.quantize(colors=num_colors, method=1, dither=0)
+
+  return palette_img
+
+
+def postprocess_image(
+  img: Image.Image,
+  palette_img: Image.Image,
+  pixel_scale: int = DEFAULT_PIXEL_SCALE,
+  dither: bool = True,
+) -> Image.Image:
+  """
+  Apply pixelation and color quantization to an image.
+
+  Args:
+      img: Source image (will be converted to RGB).
+      palette_img: Palette image to use for quantization.
+      pixel_scale: Pixelation scale factor (1 = no pixelation).
+      dither: Whether to apply dithering.
+
+  Returns:
+      Processed image in RGB mode.
+  """
+  img = img.convert("RGB")
+  original_width, original_height = img.size
+
+  # Skip pixelation if scale is 1
+  if pixel_scale > 1:
+    # Calculate small dimensions
+    small_width = original_width // pixel_scale
+    small_height = original_height // pixel_scale
+
+    # Downscale with nearest neighbor
+    img_small = img.resize((small_width, small_height), resample=Image.NEAREST)
+  else:
+    img_small = img
+
+  # Quantize using the shared palette
+  img_quantized = img_small.quantize(
+    palette=palette_img,
+    dither=1 if dither else 0,
+  )
+
+  # Convert back to RGB
+  img_quantized = img_quantized.convert("RGB")
+
+  # Upscale back to original size if we downscaled
+  if pixel_scale > 1:
+    final_image = img_quantized.resize(
+      (original_width, original_height), resample=Image.NEAREST
+    )
+  else:
+    final_image = img_quantized
+
+  return final_image
+
+
+def save_palette(palette_img: Image.Image, output_path: Path) -> None:
+  """Save the palette image to disk."""
+  output_path.parent.mkdir(parents=True, exist_ok=True)
+  palette_img.save(output_path)
+  print(f"📎 Saved palette to {output_path}")
+
+
+# =============================================================================
+# Export functions
+# =============================================================================
+
+
 def export_tiles(
   db_path: Path,
   tl: tuple[int, int],
@@ -191,6 +405,9 @@ def export_tiles(
   padded_height: int,
   use_render: bool = False,
   skip_existing: bool = True,
+  palette_img: Image.Image | None = None,
+  pixel_scale: int = DEFAULT_PIXEL_SCALE,
+  dither: bool = True,
 ) -> tuple[int, int, int, int]:
   """
   Export quadrants from the database to the output directory with padding.
@@ -207,6 +424,9 @@ def export_tiles(
       padded_height: Padded grid height (power-of-2 aligned).
       use_render: If True, export render images; otherwise export generations.
       skip_existing: If True, skip tiles that already exist.
+      palette_img: Palette image for postprocessing (None to skip postprocessing).
+      pixel_scale: Pixelation scale factor for postprocessing.
+      dither: Whether to apply dithering during postprocessing.
 
   Returns:
       Tuple of (exported_count, skipped_count, missing_count, padding_count)
@@ -214,6 +434,7 @@ def export_tiles(
   output_dir.mkdir(parents=True, exist_ok=True)
 
   data_type = "render" if use_render else "generation"
+  postprocess_mode = "with postprocessing" if palette_img else "raw"
   exported = 0
   skipped = 0
   missing = 0
@@ -224,15 +445,21 @@ def export_tiles(
   orig_height = br[1] - tl[1] + 1
   total = padded_width * padded_height
 
-  print(f"📦 Exporting {orig_width}×{orig_height} tiles ({data_type})")
+  print(
+    f"📦 Exporting {orig_width}×{orig_height} tiles ({data_type}, {postprocess_mode})"
+  )
   print(f"   Padded to: {padded_width}×{padded_height} = {total} tiles")
   print(f"   Source range: ({tl[0]},{tl[1]}) to ({br[0]},{br[1]})")
   print(f"   Output range: (0,0) to ({padded_width - 1},{padded_height - 1})")
   print(f"   Output dir: {output_dir}")
+  if palette_img:
+    print(f"   Postprocessing: scale={pixel_scale}, dither={dither}")
   print()
 
-  # Create black tile for padding
-  black_tile = Image.new("RGBA", (TILE_SIZE, TILE_SIZE), (0, 0, 0, 255))
+  # Create black tile for padding (postprocessed if using postprocessing)
+  black_tile = Image.new("RGB", (TILE_SIZE, TILE_SIZE), (0, 0, 0))
+  if palette_img:
+    black_tile = postprocess_image(black_tile, palette_img, pixel_scale, dither)
   black_tile_bytes = io.BytesIO()
   black_tile.save(black_tile_bytes, format="PNG")
   black_tile_data = black_tile_bytes.getvalue()
@@ -273,8 +500,22 @@ def export_tiles(
         row_missing += 1
         continue
 
-      # Save to output file
-      output_path.write_bytes(data)
+      # Apply postprocessing if palette is provided
+      if palette_img:
+        try:
+          img = Image.open(io.BytesIO(data))
+          processed = postprocess_image(img, palette_img, pixel_scale, dither)
+          # Save processed image
+          output_bytes = io.BytesIO()
+          processed.save(output_bytes, format="PNG")
+          output_path.write_bytes(output_bytes.getvalue())
+        except Exception as e:
+          print(f"Warning: Failed to postprocess ({src_x},{src_y}): {e}")
+          output_path.write_bytes(data)
+      else:
+        # Save raw data
+        output_path.write_bytes(data)
+
       exported += 1
       row_exported += 1
 
@@ -454,6 +695,12 @@ Examples:
 
   # Export with custom output directory
   %(prog)s generations/v01 --tl 0,0 --br 9,9 --output-dir ./custom/tiles/0
+
+  # Export without postprocessing (raw tiles)
+  %(prog)s generations/v01 --no-postprocess
+
+  # Customize postprocessing
+  %(prog)s generations/v01 --scale 4 --colors 64 --no-dither
         """,
   )
   parser.add_argument(
@@ -497,6 +744,51 @@ Examples:
     "--dry-run",
     action="store_true",
     help="Show what would be exported without actually exporting",
+  )
+
+  # Postprocessing arguments
+  postprocess_group = parser.add_argument_group("postprocessing options")
+  postprocess_group.add_argument(
+    "--no-postprocess",
+    action="store_true",
+    help="Disable postprocessing (export raw tiles)",
+  )
+  postprocess_group.add_argument(
+    "-s",
+    "--scale",
+    type=int,
+    default=DEFAULT_PIXEL_SCALE,
+    help=f"Pixel scale factor. Higher = blockier (default: {DEFAULT_PIXEL_SCALE})",
+  )
+  postprocess_group.add_argument(
+    "-c",
+    "--colors",
+    type=int,
+    default=DEFAULT_NUM_COLORS,
+    help=f"Number of colors in the palette (default: {DEFAULT_NUM_COLORS})",
+  )
+  postprocess_group.add_argument(
+    "--no-dither",
+    action="store_true",
+    help="Disable dithering for a cleaner look",
+  )
+  postprocess_group.add_argument(
+    "--sample-quadrants",
+    type=int,
+    default=DEFAULT_SAMPLE_QUADRANTS,
+    help=f"Number of quadrants to sample for palette building (default: {DEFAULT_SAMPLE_QUADRANTS})",
+  )
+  postprocess_group.add_argument(
+    "--palette",
+    type=Path,
+    default=None,
+    help="Path to existing palette image to use (skips palette building)",
+  )
+  postprocess_group.add_argument(
+    "--save-palette",
+    type=Path,
+    default=None,
+    help="Path to save the generated palette image",
   )
 
   args = parser.parse_args()
@@ -575,15 +867,49 @@ Examples:
   )
   print()
 
+  # Build or load palette for postprocessing
+  palette_img: Image.Image | None = None
+  if not args.no_postprocess:
+    if args.palette:
+      # Load existing palette
+      print(f"🎨 Loading palette from {args.palette}...")
+      palette_img = Image.open(args.palette)
+    else:
+      # Build palette from database
+      print(
+        f"🎨 Building unified palette from {args.sample_quadrants} sampled quadrants..."
+      )
+      colors = sample_colors_from_database(
+        db_path,
+        tl,
+        br,
+        use_render=args.render,
+        sample_size=args.sample_quadrants,
+        pixels_per_quadrant=DEFAULT_PIXELS_PER_QUADRANT,
+      )
+      print(f"   Sampled {len(colors)} colors from quadrants")
+      print(f"   Quantizing to {args.colors} colors...")
+      palette_img = build_unified_palette(colors, num_colors=args.colors)
+
+      # Save palette if requested
+      if args.save_palette:
+        save_palette(palette_img, args.save_palette)
+
+    print(
+      f"   Postprocessing: scale={args.scale}, colors={args.colors}, dither={not args.no_dither}"
+    )
+    print()
+
   if args.dry_run:
     print("🔍 Dry run - no files will be written")
     print(
       f"   Would export: {padded_width}×{padded_height} = {padded_width * padded_height} tiles"
     )
     print(f"   To: {output_dir}")
+    print(f"   Postprocessing: {'enabled' if palette_img else 'disabled'}")
     return 0
 
-  # Export tiles with padding
+  # Export tiles with padding and postprocessing
   exported, skipped, missing, padding = export_tiles(
     db_path,
     tl,
@@ -593,6 +919,9 @@ Examples:
     padded_height,
     use_render=args.render,
     skip_existing=not args.overwrite,
+    palette_img=palette_img,
+    pixel_scale=args.scale,
+    dither=not args.no_dither,
   )
 
   # Generate zoom levels 1-4 (combining tiles)
@@ -631,6 +960,7 @@ Examples:
     f"   Grid size: {orig_width}×{orig_height} (padded to {padded_width}×{padded_height})"
   )
   print(f"   Zoom levels: 0-{MAX_ZOOM_LEVEL}")
+  print(f"   Postprocessing: {'enabled' if palette_img else 'disabled'}")
 
   return 0
 

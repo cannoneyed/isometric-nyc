@@ -383,9 +383,7 @@ def main() -> int:
 
   # Validate coordinates
   if br_x < tl_x or br_y < tl_y:
-    print(
-      f"❌ Error: Bottom-right ({br_x},{br_y}) must be >= top-left ({tl_x},{tl_y})"
-    )
+    print(f"❌ Error: Bottom-right ({br_x},{br_y}) must be >= top-left ({tl_x},{tl_y})")
     return 1
 
   generation_dir = args.generation_dir.resolve()
@@ -408,7 +406,9 @@ def main() -> int:
   width_count = br_x - tl_x + 1
   height_count = br_y - tl_y + 1
 
-  print(f"🎯 Region: ({tl_x},{tl_y}) to ({br_x},{br_y}) ({width_count}x{height_count} quadrants)")
+  print(
+    f"🎯 Region: ({tl_x},{tl_y}) to ({br_x},{br_y}) ({width_count}x{height_count} quadrants)"
+  )
   print(f"   Generation dir: {generation_dir}")
   print(f"   Export path: {export_path}")
   print()

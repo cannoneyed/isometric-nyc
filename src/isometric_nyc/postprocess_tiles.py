@@ -1,8 +1,13 @@
 """
 Postprocess all tiles with pixelation and unified color quantization.
 
-This script applies the pixelation effect from pixelate.py to all tiles
-in the tileset, using a shared color palette across ALL tiles for consistency.
+DEPRECATED: This functionality is now integrated into export_tiles_for_app.py.
+The export script samples colors directly from the database and applies
+postprocessing as tiles are exported. Use:
+
+    uv run python -m isometric_nyc.e2e_generation.export_tiles_for_app <generation_dir>
+
+This script is kept for re-processing existing tiles on disk.
 
 Usage:
     # Build palette and process all tiles:

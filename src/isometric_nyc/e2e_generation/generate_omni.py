@@ -263,9 +263,7 @@ def download_image_to_pil(
     except requests.exceptions.HTTPError as e:
       last_error = e
       if attempt < max_retries:
-        print(
-          f"   ⚠️  Download failed (attempt {attempt}/{max_retries}): {e}"
-        )
+        print(f"   ⚠️  Download failed (attempt {attempt}/{max_retries}): {e}")
         print(f"   ⏳ Waiting {retry_delay}s before retrying...")
         time.sleep(retry_delay)
       else:
@@ -273,9 +271,7 @@ def download_image_to_pil(
     except requests.exceptions.RequestException as e:
       last_error = e
       if attempt < max_retries:
-        print(
-          f"   ⚠️  Download error (attempt {attempt}/{max_retries}): {e}"
-        )
+        print(f"   ⚠️  Download error (attempt {attempt}/{max_retries}): {e}")
         print(f"   ⏳ Waiting {retry_delay}s before retrying...")
         time.sleep(retry_delay)
       else:
