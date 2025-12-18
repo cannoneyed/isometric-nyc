@@ -1165,6 +1165,9 @@ function updateSelectionStatus(serverStatus = null) {
   }
   // Generate Rectangle requires exactly 2 selected
   if (generateRectBtn) generateRectBtn.disabled = count !== 2;
+  // Export Cmd requires exactly 2 selected
+  const exportCmdBtn = document.getElementById("exportCmdBtn");
+  if (exportCmdBtn) exportCmdBtn.disabled = count !== 2;
 }
 
 // Toast notification system
@@ -1704,6 +1707,49 @@ async function generateRectangle() {
     // Reset button
     btn.classList.remove("loading");
     btn.innerHTML = "Generate Rectangle";
+  }
+}
+
+async function copyExportCommand() {
+  if (selectedQuadrants.size !== 2) {
+    showToast(
+      "error",
+      "Invalid selection",
+      "Please select exactly 2 quadrants to define the export bounds."
+    );
+    return;
+  }
+
+  // Get the two selected coordinates
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return { x, y };
+  });
+
+  // Calculate rectangle bounds (top-left and bottom-right)
+  const minX = Math.min(coords[0].x, coords[1].x);
+  const maxX = Math.max(coords[0].x, coords[1].x);
+  const minY = Math.min(coords[0].y, coords[1].y);
+  const maxY = Math.max(coords[0].y, coords[1].y);
+
+  // Build the export command
+  const command = `uv run python src/isometric_nyc/e2e_generation/export_import_generation_tile.py generations/v01 --tl='${minX},${minY}' --br='${maxX},${maxY}' --overwrite`;
+
+  try {
+    await navigator.clipboard.writeText(command);
+    showToast(
+      "success",
+      "Command copied!",
+      `Export command for (${minX},${minY}) to (${maxX},${maxY}) copied to clipboard`
+    );
+    console.log("Copied export command:", command);
+  } catch (error) {
+    console.error("Failed to copy to clipboard:", error);
+    showToast(
+      "error",
+      "Copy failed",
+      "Could not copy to clipboard. Check browser permissions."
+    );
   }
 }
 

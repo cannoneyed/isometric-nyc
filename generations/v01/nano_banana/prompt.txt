@@ -1,0 +1,28 @@
+**Task:** Fill in the outlined section (marked with red border) in Image A with isometric pixel art in the style of the reference images.
+
+**Input Images:**
+- Image A (template with red border indicating infill area)
+- Image B (style reference 1)
+- Image C (style reference 2)
+- Image D (style reference 3)
+
+**Instructions:**
+
+1. Look at the red border in Image A - this marks the area to be filled with generated pixels.
+2. Study the style of Image B, Image C, Image D carefully - these show the exact visual style to match.
+3. Fill the bordered area with pixel art that:
+   - Matches the isometric pixel art style of the reference images exactly
+   - Seamlessly blends with any surrounding context in Image A
+   - Follows the structure/shapes hinted at by the render pixels inside the border
+   - Removes the red border completely in the output
+
+**Critical Style Rules (SimCity 3000 Aesthetic):**
+1. **Clean Pixel Art:** The output must be clean, detailed but low-resolution, as if on a VGA monitor.
+2. **No Whitebox/Untextured:** Every building must be fully textured with brick, concrete, glass, etc.
+3. **Straight Isometric Lines:** Use 2:1 pixel slope for isometric projection.
+4. **Consistent Lighting:** Match the lighting direction of the reference images.
+
+**Output:**
+- Generate the **complete** image with the bordered area filled in - ensure you preserve the context of the surrounding area.
+- The output should be 1024x1024 pixels
+- Remove all traces of the red border
