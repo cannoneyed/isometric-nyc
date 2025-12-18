@@ -164,11 +164,5 @@ map_data/**/*.zip
 exports/
 
 # Web app tiles
-src/app/public/**/*.png
+**/*.png
 **/*.pmtiles
-
-# Infill template images
-**/infill_*.png
-
-# Temporary generated images
-generations/**/*.png
