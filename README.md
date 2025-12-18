@@ -115,9 +115,22 @@ src/water_shader_demo/public/
 
 ---
 
-### Adding Tiles
+### Tile Formats
 
-Place your tile images in the `src/app/public/tiles/` directory:
+The web app supports two tile formats:
+
+#### PMTiles (Recommended)
+
+A single `.pmtiles` file containing all tiles and zoom levels:
+
+```
+src/app/public/
+└── tiles.pmtiles        # Single archive with all tiles
+```
+
+#### Legacy Directory Structure
+
+Individual PNG files organized by zoom level:
 
 ```
 src/app/public/tiles/
@@ -128,15 +141,22 @@ src/app/public/tiles/
 │   └── ...
 ├── 1/                    # Zoom level 1 = 2× zoomed out
 ├── 2/                    # Zoom level 2 = 4× zoomed out
-└── info.json
+├── 3/                    # Zoom level 3 = 8× zoomed out
+├── 4/                    # Zoom level 4 = 16× zoomed out
+└── manifest.json         # Grid dimensions and metadata
 ```
 
 **Tile naming:** `{zoom_level}/{x}_{y}.png`
 
-**Zoom convention:** | Level | Resolution | Grid Size (20×20 base) |
-|-------|------------|------------------------| | 0 | Native (512×512 per tile)
-| 20×20 tiles | | 1 | 2× zoomed out | 10×10 tiles | | 2 | 4× zoomed out | 5×5
-tiles |
+**Zoom levels:**
+
+| Level | Scale   | Description                 |
+| ----- | ------- | --------------------------- |
+| 0     | 1:1     | Native resolution (512×512) |
+| 1     | 2× out  | 2×2 tiles combined          |
+| 2     | 4× out  | 4×4 tiles combined          |
+| 3     | 8× out  | 8×8 tiles combined          |
+| 4     | 16× out | 16×16 tiles combined        |
 
 ---
 
@@ -167,14 +187,58 @@ uv run isometric-nyc "350 5th Ave, New York, NY"
 uv run python src/isometric_nyc/e2e_generation/app.py
 
 # Export tiles to the web app
-**uv run python src/isometric_nyc/e2e_generation/export_tiles_for_app.py \
-  generations/v01 --tl 0,0 --br 19,19**
+uv run python src/isometric_nyc/e2e_generation/export_tiles_for_app.py \
+  generations/v01 --tl 0,0 --br 19,19
 ```
 
 ### Exporting Tiles for the Web App
 
+There are two export formats available:
+
+#### PMTiles Format (Recommended)
+
+[PMTiles](https://github.com/protomaps/PMTiles) is a single-file archive format
+for map tiles, optimized for cloud storage and CDN delivery. The web app
+automatically detects and uses PMTiles when available.
+
+```bash
+# Export all tiles to a single .pmtiles file
+uv run python src/isometric_nyc/e2e_generation/export_pmtiles.py generations/v01
+
+# Export a specific region
+uv run python src/isometric_nyc/e2e_generation/export_pmtiles.py \
+  generations/v01 --tl 0,0 --br 49,49
+
+# Custom output path
+uv run python src/isometric_nyc/e2e_generation/export_pmtiles.py \
+  generations/v01 -o ./my-tiles.pmtiles
+
+# Export without postprocessing (raw tiles)
+uv run python src/isometric_nyc/e2e_generation/export_pmtiles.py \
+  generations/v01 --no-postprocess
+
+# Customize postprocessing
+uv run python src/isometric_nyc/e2e_generation/export_pmtiles.py \
+  generations/v01 --scale 4 --colors 64 --no-dither
+
+# Dry run to see what would be exported
+uv run python src/isometric_nyc/e2e_generation/export_pmtiles.py \
+  generations/v01 --dry-run
+```
+
+**Benefits of PMTiles:**
+
+- **Single file**: All tiles and zoom levels in one `.pmtiles` file
+- **Efficient serving**: Optimized for HTTP range requests from static storage
+- **Smaller footprint**: Deduplicates identical tiles (e.g., black padding tiles)
+- **Metadata included**: Grid dimensions, tile size, etc. embedded in the archive
+
+The output file is placed at `src/app/public/tiles.pmtiles` by default.
+
+#### Legacy Directory Format
+
 The `export_tiles_for_app.py` script exports quadrants from the SQLite database
-to the web app's tile directory:
+to individual PNG files in a directory structure:
 
 ```bash
 # Export a 20x20 region, normalizing coordinates so (0,0) is top-left
@@ -201,6 +265,15 @@ uv run python src/isometric_nyc/e2e_generation/export_tiles_for_app.py \
 **Coordinate normalization:** The `--tl` coordinate becomes `0_0.png` in the
 output. For example, exporting `--tl 10,15 --br 20,25` produces tiles `0_0.png`
 through `10_10.png`.
+
+#### Web App Tile Loading
+
+The web app automatically detects which format is available:
+
+1. First tries to load `/tiles.pmtiles`
+2. Falls back to `/tiles/manifest.json` + directory structure if PMTiles not found
+
+This allows seamless migration to PMTiles while maintaining backward compatibility.
 
 ### Debug Map
 

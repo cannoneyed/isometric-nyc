@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import OpenSeadragon from "openseadragon";
+import { PMTiles } from "pmtiles";
 import type { ViewState } from "../App";
 import { ScanlineOverlay } from "./ScanlineOverlay";
 import { WaterShaderOverlay } from "./WaterShaderOverlay";
@@ -11,8 +12,10 @@ interface TileConfig {
   originalWidth: number;
   originalHeight: number;
   tileSize: number;
-  tileUrlPattern: string;
   maxZoomLevel: number;
+  pmtilesUrl?: string; // URL to PMTiles file (optional, falls back to tile directory)
+  pmtilesZoomMap?: Record<number, number>; // Maps our level -> PMTiles z
+  tileUrlPattern?: string; // Legacy: URL pattern for individual tiles
 }
 
 interface ScanlineSettings {
@@ -47,10 +50,18 @@ export function IsometricMap({
 }: IsometricMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<OpenSeadragon.Viewer | null>(null);
+  const pmtilesRef = useRef<PMTiles | null>(null);
   const isUpdatingFromOSD = useRef(false);
   const isUpdatingFromProps = useRef(false);
 
-  const { gridWidth, gridHeight, tileSize, maxZoomLevel } = tileConfig;
+  const {
+    gridWidth,
+    gridHeight,
+    tileSize,
+    maxZoomLevel,
+    pmtilesUrl,
+    pmtilesZoomMap,
+  } = tileConfig;
 
   // Total image dimensions in pixels
   const totalWidth = gridWidth * tileSize;
@@ -103,12 +114,85 @@ export function IsometricMap({
     [totalWidth, totalHeight]
   );
 
+  // Initialize PMTiles source if URL is provided
+  useEffect(() => {
+    if (pmtilesUrl && !pmtilesRef.current) {
+      pmtilesRef.current = new PMTiles(pmtilesUrl);
+    }
+    return () => {
+      pmtilesRef.current = null;
+    };
+  }, [pmtilesUrl]);
+
   // Initialize OpenSeadragon
   useEffect(() => {
     if (!containerRef.current || viewerRef.current) return;
 
     // Calculate initial OSD viewport from our view state
     const { centerX, centerY, zoom: initialZoom } = worldToOsd(viewState);
+
+    // Create tile source configuration
+    // OSD pyramid: level 0 = least detail (few tiles), maxLevel = most detail (many tiles)
+    // Our export: level 0 = most detail (128×128), level 4 = least detail (8×8)
+    // PMTiles z: matches our level (0 = most detail when stored, but we flip it)
+    // So we invert: ourLevel = maxZoomLevel - osdLevel
+    const tileSourceConfig: OpenSeadragon.TileSourceOptions = {
+      width: totalWidth,
+      height: totalHeight,
+      tileSize: tileSize,
+      tileOverlap: 0,
+      minLevel: 0,
+      maxLevel: maxZoomLevel,
+    };
+
+    // If using PMTiles, we need a custom tile loading approach
+    if (pmtilesUrl) {
+      // For PMTiles, we use getTileUrl to generate a virtual URL
+      // and downloadTileStart/downloadTileAbort to handle actual loading
+      Object.assign(tileSourceConfig, {
+        getTileUrl: (level: number, x: number, y: number) => {
+          // Return a virtual URL that encodes the tile coordinates
+          // This will be parsed by our custom tile loading
+          const ourLevel = maxZoomLevel - level;
+
+          // Get the PMTiles zoom level from the map, or calculate it
+          let pmtilesZ: number;
+          if (pmtilesZoomMap && pmtilesZoomMap[ourLevel] !== undefined) {
+            pmtilesZ = pmtilesZoomMap[ourLevel];
+          } else {
+            // Fallback: calculate based on grid size
+            const scale = Math.pow(2, ourLevel);
+            const maxDim = Math.max(
+              Math.ceil(gridWidth / scale),
+              Math.ceil(gridHeight / scale)
+            );
+            pmtilesZ = maxDim <= 1 ? 0 : Math.ceil(Math.log2(maxDim));
+          }
+
+          return `pmtiles://${pmtilesZ}/${x}/${y}`;
+        },
+      });
+    } else {
+      // Legacy file-based tiles
+      Object.assign(tileSourceConfig, {
+        getTileUrl: (level: number, x: number, y: number) => {
+          // Invert level mapping: OSD level 0 -> our level maxZoomLevel
+          const ourLevel = maxZoomLevel - level;
+
+          // Calculate grid dimensions at this level
+          const scale = Math.pow(2, ourLevel);
+          const levelGridWidth = Math.ceil(gridWidth / scale);
+          const levelGridHeight = Math.ceil(gridHeight / scale);
+
+          // Bounds check for this level
+          if (x < 0 || x >= levelGridWidth || y < 0 || y >= levelGridHeight) {
+            return "";
+          }
+
+          return `/tiles/${ourLevel}/${x}_${y}.png`;
+        },
+      });
+    }
 
     const viewer = OpenSeadragon({
       element: containerRef.current,
@@ -136,49 +220,109 @@ export function IsometricMap({
       },
       // Disable image smoothing for pixel art
       imageSmoothingEnabled: false,
-      // Custom tile source with multi-level pyramid support
-      // OSD pyramid: level 0 = least detail (few tiles), maxLevel = most detail (many tiles)
-      // Our export: level 0 = most detail (128×128), level 4 = least detail (8×8)
-      // So we invert: ourLevel = maxZoomLevel - osdLevel
-      tileSources: {
-        width: totalWidth,
-        height: totalHeight,
-        tileSize: tileSize,
-        tileOverlap: 0,
-        minLevel: 0,
-        maxLevel: maxZoomLevel,
-        getTileUrl: (level: number, x: number, y: number) => {
-          // Invert level mapping: OSD level 0 -> our level maxZoomLevel
-          const ourLevel = maxZoomLevel - level;
-
-          // Calculate grid dimensions at this level
-          // At our level 0: 128×128, level 1: 64×64, level 2: 32×32, etc.
-          const scale = Math.pow(2, ourLevel);
-          const levelGridWidth = Math.ceil(gridWidth / scale);
-          const levelGridHeight = Math.ceil(gridHeight / scale);
-
-          // Bounds check for this level
-          if (x < 0 || x >= levelGridWidth || y < 0 || y >= levelGridHeight) {
-            return "";
-          }
-
-          return `/tiles/${ourLevel}/${x}_${y}.png`;
-        },
-      },
+      tileSources: tileSourceConfig,
     });
 
-    // Set initial viewport position
-    viewer.addHandler("open", () => {
-      // Disable interpolation for crisp pixels
-      const tiledImage = viewer.world.getItemAt(0);
-      if (tiledImage) {
-        tiledImage.setCompositeOperation("source-over");
-      }
+    // If using PMTiles, set up custom tile downloading
+    if (pmtilesUrl && pmtilesRef.current) {
+      const pmtiles = pmtilesRef.current;
 
-      // Set initial position
-      viewer.viewport.zoomTo(initialZoom, undefined, true);
-      viewer.viewport.panTo(new OpenSeadragon.Point(centerX, centerY), true);
-    });
+      // Override the tile downloading for PMTiles
+      viewer.addHandler("open", () => {
+        const tiledImage = viewer.world.getItemAt(0);
+        if (tiledImage) {
+          tiledImage.setCompositeOperation("source-over");
+
+          // Get the tile source and override its download method
+          const source = tiledImage.source as OpenSeadragon.TileSource;
+
+          // Store original methods
+          const originalDownloadTileStart = (
+            source as unknown as Record<string, unknown>
+          ).downloadTileStart;
+
+          // Override downloadTileStart to use PMTiles
+          (source as unknown as Record<string, unknown>).downloadTileStart = (
+            context: {
+              src: string;
+              finish: (
+                data: HTMLImageElement | null,
+                request: null,
+                errorMsg?: string
+              ) => void;
+            }
+          ) => {
+            const url = context.src;
+
+            // Check if this is a PMTiles URL
+            if (url.startsWith("pmtiles://")) {
+              const parts = url.replace("pmtiles://", "").split("/");
+              const z = parseInt(parts[0], 10);
+              const x = parseInt(parts[1], 10);
+              const y = parseInt(parts[2], 10);
+
+              // Fetch tile from PMTiles
+              pmtiles
+                .getZxy(z, x, y)
+                .then((response) => {
+                  if (response && response.data) {
+                    // Convert ArrayBuffer to Blob URL
+                    const blob = new Blob([response.data], {
+                      type: "image/png",
+                    });
+                    const blobUrl = URL.createObjectURL(blob);
+
+                    // Create an image element
+                    const img = new Image();
+                    img.onload = () => {
+                      URL.revokeObjectURL(blobUrl);
+                      context.finish(img, null);
+                    };
+                    img.onerror = () => {
+                      URL.revokeObjectURL(blobUrl);
+                      context.finish(null, null, "Failed to load tile image");
+                    };
+                    img.src = blobUrl;
+                  } else {
+                    // Tile not found, return null (transparent)
+                    context.finish(null, null);
+                  }
+                })
+                .catch((err) => {
+                  console.error("PMTiles fetch error:", err);
+                  context.finish(null, null, String(err));
+                });
+            } else if (typeof originalDownloadTileStart === "function") {
+              // Fall back to original method for non-PMTiles URLs
+              originalDownloadTileStart.call(source, context);
+            }
+          };
+        }
+      });
+    }
+
+    // Set initial viewport position (only for non-PMTiles mode,
+    // PMTiles mode sets this in its own "open" handler above)
+    if (!pmtilesUrl) {
+      viewer.addHandler("open", () => {
+        // Disable interpolation for crisp pixels
+        const tiledImage = viewer.world.getItemAt(0);
+        if (tiledImage) {
+          tiledImage.setCompositeOperation("source-over");
+        }
+
+        // Set initial position
+        viewer.viewport.zoomTo(initialZoom, undefined, true);
+        viewer.viewport.panTo(new OpenSeadragon.Point(centerX, centerY), true);
+      });
+    } else {
+      // For PMTiles, add another handler for initial position
+      // (the tile downloading setup handler already runs first)
+      viewer.addHandler("open", () => {
+        viewer.viewport.zoomTo(initialZoom, undefined, true);
+        viewer.viewport.panTo(new OpenSeadragon.Point(centerX, centerY), true);
+      });
+    }
 
     // Track viewport changes
     viewer.addHandler("viewport-change", () => {
@@ -195,7 +339,8 @@ export function IsometricMap({
       onTileHover(null);
     });
 
-    const handleMouseMove = (event: OpenSeadragon.ViewerEvent) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handleMouseMove = (event: any) => {
       if (!event.position) return;
       const pos = event.position as OpenSeadragon.Point;
 
@@ -215,8 +360,9 @@ export function IsometricMap({
 
     viewer.addHandler("canvas-drag", handleMouseMove);
     viewer.addHandler("canvas-scroll", handleMouseMove);
-    viewer.innerTracker.moveHandler = (event) => {
-      handleMouseMove(event as unknown as OpenSeadragon.ViewerEvent);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (viewer as any).innerTracker.moveHandler = (event: any) => {
+      handleMouseMove(event);
     };
 
     viewerRef.current = viewer;
@@ -236,6 +382,8 @@ export function IsometricMap({
     osdToWorld,
     onViewStateChange,
     onTileHover,
+    pmtilesUrl,
+    pmtilesZoomMap,
   ]);
 
   // Sync external view state changes to OSD

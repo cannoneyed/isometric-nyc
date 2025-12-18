@@ -604,6 +604,7 @@ dependencies = [
     { name = "opencv-python" },
     { name = "pillow" },
     { name = "playwright" },
+    { name = "pmtiles" },
     { name = "psycopg2-binary" },
     { name = "pydantic" },
     { name = "pyproj" },
@@ -634,6 +635,7 @@ requires-dist = [
     { name = "opencv-python", specifier = ">=4.11.0.86" },
     { name = "pillow", specifier = ">=12.0.0" },
     { name = "playwright", specifier = ">=1.49.0" },
+    { name = "pmtiles", specifier = ">=3.5.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.11" },
     { name = "pydantic", specifier = ">=2.12.4" },
     { name = "pyproj", specifier = ">=3.7.2" },
@@ -1228,6 +1230,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f9/e2/3e91f31a7d2b083fe6ef3fa267035b518369d9511ffab804f839851d2779/pluggy-1.6.0.tar.gz", hash = "sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3", size = 69412 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl", hash = "sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746", size = 20538 },
+]
+
+[[package]]
+name = "pmtiles"
+version = "3.5.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/7a/40/9dff48795dfe30153bca38034b0ecf65279341e3944ae9a7e9f116c8312a/pmtiles-3.5.0.tar.gz", hash = "sha256:2b849ede4e006aa0ba9d508a4d77400dd5117d5da74346e057dc9e28bad8e9f0", size = 13824 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5a/2b/cb915166d84fc0ea7bab46c664aafb2d95e79bc0c53bac8ab36b9d65ca8c/pmtiles-3.5.0-py3-none-any.whl", hash = "sha256:4c6110120a88896177a1c91b3b7ccce519414b4eb35d13fc0fd20527bd30b7b7", size = 16026 },
 ]
 
 [[package]]

@@ -165,6 +165,7 @@ exports/
 
 # Web app tiles
 src/app/public/**/*.png
+**/*.pmtiles
 
 # Infill template images
 **/infill_*.png

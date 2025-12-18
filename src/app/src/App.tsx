@@ -1,4 +1,5 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { PMTiles } from "pmtiles";
 import { IsometricMap } from "./components/IsometricMap";
 import { ControlPanel } from "./components/ControlPanel";
 import { TileInfo } from "./components/TileInfo";
@@ -10,10 +11,13 @@ interface TileConfig {
   originalWidth: number;
   originalHeight: number;
   tileSize: number;
-  tileUrlPattern: string;
   maxZoomLevel: number;
+  pmtilesUrl?: string; // URL to PMTiles file
+  pmtilesZoomMap?: Record<number, number>; // Maps our level -> PMTiles z
+  tileUrlPattern?: string; // Legacy: URL pattern for individual tiles
 }
 
+// Legacy manifest format (for backward compatibility)
 interface TileManifest {
   gridWidth: number;
   gridHeight: number;
@@ -24,6 +28,17 @@ interface TileManifest {
   maxZoomLevel: number;
   generated: string;
   urlPattern: string;
+}
+
+// PMTiles metadata format
+interface PMTilesMetadata {
+  gridWidth: number;
+  gridHeight: number;
+  originalWidth: number;
+  originalHeight: number;
+  tileSize: number;
+  maxZoom: number;
+  pmtilesZoomMap?: Record<string, number>; // Maps our level -> PMTiles z (keys are strings in JSON)
 }
 
 export interface ViewState {
@@ -118,29 +133,75 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Load tile manifest on mount
+  // Load tile configuration on mount
+  // Tries PMTiles first, falls back to legacy manifest.json
   useEffect(() => {
-    fetch("/tiles/manifest.json")
-      .then((res) => {
-        if (!res.ok) throw new Error(`Failed to load manifest: ${res.status}`);
-        return res.json() as Promise<TileManifest>;
+    const pmtilesUrl = "/tiles.pmtiles";
+
+    // Try PMTiles first
+    const pmtiles = new PMTiles(pmtilesUrl);
+    pmtiles
+      .getHeader()
+      .then(() => {
+        // PMTiles file exists, get metadata
+        return pmtiles.getMetadata();
       })
-      .then((manifest) => {
+      .then((metadata) => {
+        const meta = metadata as PMTilesMetadata;
+        console.log("Loaded PMTiles metadata:", meta);
+
+        // Convert zoom map keys from strings to numbers
+        const zoomMap: Record<number, number> | undefined = meta.pmtilesZoomMap
+          ? Object.fromEntries(
+              Object.entries(meta.pmtilesZoomMap).map(([k, v]) => [
+                parseInt(k, 10),
+                v,
+              ])
+            )
+          : undefined;
+
         setTileConfig({
-          gridWidth: manifest.gridWidth,
-          gridHeight: manifest.gridHeight,
-          originalWidth: manifest.originalWidth ?? manifest.gridWidth,
-          originalHeight: manifest.originalHeight ?? manifest.gridHeight,
-          tileSize: manifest.tileSize,
-          tileUrlPattern: `/tiles/{z}/{x}_{y}.png`,
-          maxZoomLevel: manifest.maxZoomLevel ?? 0,
+          gridWidth: meta.gridWidth,
+          gridHeight: meta.gridHeight,
+          originalWidth: meta.originalWidth ?? meta.gridWidth,
+          originalHeight: meta.originalHeight ?? meta.gridHeight,
+          tileSize: meta.tileSize ?? 512,
+          maxZoomLevel: meta.maxZoom ?? 4,
+          pmtilesUrl: pmtilesUrl,
+          pmtilesZoomMap: zoomMap,
         });
         setLoading(false);
       })
-      .catch((err) => {
-        console.error("Failed to load tile manifest:", err);
-        setError(err.message);
-        setLoading(false);
+      .catch((pmtilesErr) => {
+        console.log(
+          "PMTiles not available, falling back to legacy manifest:",
+          pmtilesErr
+        );
+
+        // Fall back to legacy manifest.json
+        fetch("/tiles/manifest.json")
+          .then((res) => {
+            if (!res.ok)
+              throw new Error(`Failed to load manifest: ${res.status}`);
+            return res.json() as Promise<TileManifest>;
+          })
+          .then((manifest) => {
+            setTileConfig({
+              gridWidth: manifest.gridWidth,
+              gridHeight: manifest.gridHeight,
+              originalWidth: manifest.originalWidth ?? manifest.gridWidth,
+              originalHeight: manifest.originalHeight ?? manifest.gridHeight,
+              tileSize: manifest.tileSize,
+              tileUrlPattern: `/tiles/{z}/{x}_{y}.png`,
+              maxZoomLevel: manifest.maxZoomLevel ?? 0,
+            });
+            setLoading(false);
+          })
+          .catch((err) => {
+            console.error("Failed to load tile manifest:", err);
+            setError(err.message);
+            setLoading(false);
+          });
       });
   }, []);
 
@@ -181,7 +242,9 @@ function App() {
     }
   }, [tileConfig, viewState]);
 
-  const [lightDirection, setLightDirection] = useState<
+  // Light direction for future use (currently unused)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_lightDirection, _setLightDirection] = useState<
     [number, number, number]
   >([0.5, 0.5, 1.0]);
   const [hoveredTile, setHoveredTile] = useState<{
@@ -191,7 +254,7 @@ function App() {
   const [scanlines, setScanlines] = useState({
     enabled: true,
     count: 600,
-    opacity: 0.1,
+    opacity: 0.05,
   });
 
   const [waterShader, setWaterShader] = useState({
@@ -214,17 +277,6 @@ function App() {
     },
     []
   );
-
-  // Compute visible tile count for stats
-  const visibleTiles = useMemo(() => {
-    if (!viewState || !tileConfig) return 0;
-    const scale = Math.pow(2, viewState.zoom);
-    const viewportWidth = window.innerWidth / scale;
-    const viewportHeight = window.innerHeight / scale;
-    const tilesX = Math.ceil(viewportWidth / tileConfig.tileSize) + 1;
-    const tilesY = Math.ceil(viewportHeight / tileConfig.tileSize) + 1;
-    return tilesX * tilesY;
-  }, [viewState, tileConfig]);
 
   // Loading state
   if (loading) {
@@ -261,7 +313,7 @@ function App() {
         tileConfig={tileConfig}
         viewState={viewState}
         onViewStateChange={handleViewStateChange}
-        lightDirection={lightDirection}
+        lightDirection={_lightDirection}
         onTileHover={handleTileHover}
         scanlines={scanlines}
         waterShader={waterShader}

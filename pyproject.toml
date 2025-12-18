@@ -16,6 +16,7 @@ dependencies = [
     "opencv-python>=4.11.0.86",
     "pillow>=12.0.0",
     "playwright>=1.49.0",
+    "pmtiles>=3.5.0",
     "psycopg2-binary>=2.9.11",
     "pydantic>=2.12.4",
     "pyproj>=3.7.2",
@@ -42,6 +43,7 @@ check-tiles = "isometric_nyc.e2e_generation.check_tiles:main"
 render-tile = "isometric_nyc.e2e_generation.render_tile:main"
 seed-tiles = "isometric_nyc.e2e_generation.seed_tiles:main"
 whitebox = "isometric_nyc.whitebox:main"
+export-pmtiles = "isometric_nyc.e2e_generation.export_pmtiles:main"
 
 [tool.ruff]
 line-length = 88
