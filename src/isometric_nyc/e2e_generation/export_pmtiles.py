@@ -4,6 +4,10 @@ Export quadrants from the generation database to a PMTiles archive.
 Creates a single .pmtiles file containing all tiles at multiple zoom levels,
 suitable for efficient serving from static storage or CDN.
 
+Image formats:
+  - PNG (default): Lossless, larger files
+  - WebP (--webp): Lossy, typically 25-35% smaller files
+
 Postprocessing:
   By default, tiles are exported with pixelation and color quantization applied.
   A unified color palette is built by sampling ~100 quadrants from the database
@@ -23,6 +27,9 @@ Examples:
   # Export ALL quadrants to PMTiles (auto-detect bounds)
   uv run python src/isometric_nyc/e2e_generation/export_pmtiles.py generations/v01
 
+  # Export with WebP format (smaller files)
+  uv run python src/isometric_nyc/e2e_generation/export_pmtiles.py generations/v01 --webp
+
   # Export with custom output file
   uv run python src/isometric_nyc/e2e_generation/export_pmtiles.py generations/v01 --output tiles.pmtiles
 
@@ -32,7 +39,6 @@ Examples:
 
 import argparse
 import io
-import json
 import random
 import sqlite3
 import sys
@@ -41,6 +47,11 @@ from pathlib import Path
 
 from PIL import Image
 from pmtiles.tile import Compression, TileType, zxy_to_tileid
+
+# Image format options
+FORMAT_PNG = "png"
+FORMAT_WEBP = "webp"
+DEFAULT_WEBP_QUALITY = 85  # Good balance of quality and size
 from pmtiles.writer import write as pmtiles_write
 
 # Constants
@@ -48,8 +59,9 @@ TILE_SIZE = 512
 MAX_ZOOM_LEVEL = 4  # 16x16 tile combining
 
 # Postprocessing defaults
-DEFAULT_PIXEL_SCALE = 2
-DEFAULT_NUM_COLORS = 32
+DEFAULT_PIXEL_SCALE = 1
+DEFAULT_NUM_COLORS = 256
+DEFAULT_DITHER = False
 DEFAULT_SAMPLE_QUADRANTS = 100
 DEFAULT_PIXELS_PER_QUADRANT = 1000
 
@@ -286,10 +298,18 @@ def postprocess_image(
 # =============================================================================
 
 
-def image_to_png_bytes(img: Image.Image) -> bytes:
-  """Convert a PIL Image to PNG bytes."""
+def image_to_bytes(
+  img: Image.Image,
+  format: str = FORMAT_PNG,
+  webp_quality: int = DEFAULT_WEBP_QUALITY,
+) -> bytes:
+  """Convert a PIL Image to PNG or WebP bytes."""
   buffer = io.BytesIO()
-  img.save(buffer, format="PNG", optimize=True)
+  if format == FORMAT_WEBP:
+    # WebP with lossy compression - much smaller than PNG
+    img.save(buffer, format="WEBP", quality=webp_quality, method=4)
+  else:
+    img.save(buffer, format="PNG", optimize=True)
   return buffer.getvalue()
 
 
@@ -297,12 +317,14 @@ def create_black_tile(
   palette_img: Image.Image | None = None,
   pixel_scale: int = DEFAULT_PIXEL_SCALE,
   dither: bool = True,
+  image_format: str = FORMAT_PNG,
+  webp_quality: int = DEFAULT_WEBP_QUALITY,
 ) -> bytes:
   """Create a black tile (postprocessed if palette provided)."""
   black_tile = Image.new("RGB", (TILE_SIZE, TILE_SIZE), (0, 0, 0))
   if palette_img:
     black_tile = postprocess_image(black_tile, palette_img, pixel_scale, dither)
-  return image_to_png_bytes(black_tile)
+  return image_to_bytes(black_tile, image_format, webp_quality)
 
 
 def load_and_process_tile(
@@ -314,6 +336,8 @@ def load_and_process_tile(
   pixel_scale: int,
   dither: bool,
   black_tile_bytes: bytes,
+  image_format: str = FORMAT_PNG,
+  webp_quality: int = DEFAULT_WEBP_QUALITY,
 ) -> bytes:
   """Load a tile from the database and optionally postprocess it."""
   data = get_quadrant_data(db_path, src_x, src_y, use_render=use_render)
@@ -325,12 +349,22 @@ def load_and_process_tile(
     try:
       img = Image.open(io.BytesIO(data))
       processed = postprocess_image(img, palette_img, pixel_scale, dither)
-      return image_to_png_bytes(processed)
+      return image_to_bytes(processed, image_format, webp_quality)
     except Exception as e:
       print(f"Warning: Failed to postprocess ({src_x},{src_y}): {e}")
-      return data
+      # Re-encode in target format even without postprocessing
+      try:
+        img = Image.open(io.BytesIO(data))
+        return image_to_bytes(img, image_format, webp_quality)
+      except Exception:
+        return data
   else:
-    return data
+    # Re-encode in target format
+    try:
+      img = Image.open(io.BytesIO(data))
+      return image_to_bytes(img, image_format, webp_quality)
+    except Exception:
+      return data
 
 
 def combine_tiles_for_zoom(
@@ -339,19 +373,23 @@ def combine_tiles_for_zoom(
   padded_height: int,
   zoom_level: int,
   black_tile_bytes: bytes,
+  image_format: str = FORMAT_PNG,
+  webp_quality: int = DEFAULT_WEBP_QUALITY,
 ) -> dict[tuple[int, int], bytes]:
   """
   Combine tiles from zoom level 0 to create tiles for a higher zoom level.
 
   Args:
-      base_tiles: Dict mapping (x, y) to PNG bytes for the current level.
+      base_tiles: Dict mapping (x, y) to image bytes for the current level.
       padded_width: Grid width at level 0.
       padded_height: Grid height at level 0.
       zoom_level: Target zoom level (1-4).
       black_tile_bytes: Bytes for a black tile.
+      image_format: Output format (png or webp).
+      webp_quality: Quality for WebP compression.
 
   Returns:
-      Dict mapping (x, y) to PNG bytes for the new zoom level.
+      Dict mapping (x, y) to image bytes for the new zoom level.
   """
   scale = 2**zoom_level
   new_width = padded_width // scale
@@ -389,7 +427,9 @@ def combine_tiles_for_zoom(
           except Exception as e:
             print(f"Warning: Failed to combine tile ({base_x},{base_y}): {e}")
 
-      result[(zx, zy)] = image_to_png_bytes(combined.convert("RGB"))
+      result[(zx, zy)] = image_to_bytes(
+        combined.convert("RGB"), image_format, webp_quality
+      )
 
   return result
 
@@ -408,6 +448,8 @@ def export_to_pmtiles(
   pixel_scale: int = DEFAULT_PIXEL_SCALE,
   dither: bool = True,
   max_zoom: int = MAX_ZOOM_LEVEL,
+  image_format: str = FORMAT_PNG,
+  webp_quality: int = DEFAULT_WEBP_QUALITY,
 ) -> dict[str, int]:
   """
   Export all tiles to a PMTiles archive.
@@ -423,10 +465,12 @@ def export_to_pmtiles(
   }
 
   # Create black tile for padding/missing
-  black_tile_bytes = create_black_tile(palette_img, pixel_scale, dither)
+  black_tile_bytes = create_black_tile(
+    palette_img, pixel_scale, dither, image_format, webp_quality
+  )
 
   # First, load all base (level 0) tiles into memory
-  print(f"\n📦 Loading base tiles (level 0)...")
+  print("\n📦 Loading base tiles (level 0)...")
   base_tiles: dict[tuple[int, int], bytes] = {}
 
   for dst_y in range(padded_height):
@@ -450,6 +494,8 @@ def export_to_pmtiles(
         pixel_scale,
         dither,
         black_tile_bytes,
+        image_format,
+        webp_quality,
       )
 
       if tile_data == black_tile_bytes:
@@ -469,7 +515,13 @@ def export_to_pmtiles(
   for level in range(1, max_zoom + 1):
     print(f"\n🔍 Generating zoom level {level}...")
     zoom_tiles[level] = combine_tiles_for_zoom(
-      base_tiles, padded_width, padded_height, level, black_tile_bytes
+      base_tiles,
+      padded_width,
+      padded_height,
+      level,
+      black_tile_bytes,
+      image_format,
+      webp_quality,
     )
     print(f"   Generated {len(zoom_tiles[level])} tiles")
 
@@ -541,9 +593,10 @@ def export_to_pmtiles(
       print(f"   [{progress:5.1f}%] Level {our_level} complete")
 
     # Create header and metadata
+    tile_type = TileType.WEBP if image_format == FORMAT_WEBP else TileType.PNG
     header = {
-      "tile_type": TileType.PNG,
-      "tile_compression": Compression.NONE,  # PNGs are already compressed
+      "tile_type": tile_type,
+      "tile_compression": Compression.NONE,  # Images are already compressed
       "center_zoom": (pmtiles_min_z + pmtiles_max_z) // 2,
       "center_lon": 0,
       "center_lat": 0,
@@ -554,7 +607,7 @@ def export_to_pmtiles(
       "description": "Pixel art isometric view of New York City",
       "version": "1.0.0",
       "type": "raster",
-      "format": "png",
+      "format": image_format,
       "tileSize": TILE_SIZE,
       "gridWidth": padded_width,
       "gridHeight": padded_height,
@@ -653,9 +706,9 @@ Examples:
     help=f"Number of colors in the palette (default: {DEFAULT_NUM_COLORS})",
   )
   postprocess_group.add_argument(
-    "--no-dither",
+    "--dither",
     action="store_true",
-    help="Disable dithering for a cleaner look",
+    help="Enable dithering (disabled by default for cleaner pixel art)",
   )
   postprocess_group.add_argument(
     "--sample-quadrants",
@@ -668,6 +721,20 @@ Examples:
     type=Path,
     default=None,
     help="Path to existing palette image to use (skips palette building)",
+  )
+
+  # Image format arguments
+  format_group = parser.add_argument_group("image format options")
+  format_group.add_argument(
+    "--webp",
+    action="store_true",
+    help="Use WebP format instead of PNG (typically 25-35%% smaller files)",
+  )
+  format_group.add_argument(
+    "--webp-quality",
+    type=int,
+    default=DEFAULT_WEBP_QUALITY,
+    help=f"WebP quality (0-100, default: {DEFAULT_WEBP_QUALITY}). Lower = smaller but more artifacts",
   )
 
   args = parser.parse_args()
@@ -740,7 +807,9 @@ Examples:
 
   print("📐 Grid dimensions:")
   print(f"   Original: {orig_width}×{orig_height}")
-  print(f"   Padded:   {padded_width}×{padded_height} (multiple of {2**MAX_ZOOM_LEVEL})")
+  print(
+    f"   Padded:   {padded_width}×{padded_height} (multiple of {2**MAX_ZOOM_LEVEL})"
+  )
   print()
 
   # Build or load palette for postprocessing
@@ -750,7 +819,9 @@ Examples:
       print(f"🎨 Loading palette from {args.palette}...")
       palette_img = Image.open(args.palette)
     else:
-      print(f"🎨 Building unified palette from {args.sample_quadrants} sampled quadrants...")
+      print(
+        f"🎨 Building unified palette from {args.sample_quadrants} sampled quadrants..."
+      )
       colors = sample_colors_from_database(
         db_path,
         tl,
@@ -764,15 +835,23 @@ Examples:
       palette_img = build_unified_palette(colors, num_colors=args.colors)
 
     print(
-      f"   Postprocessing: scale={args.scale}, colors={args.colors}, dither={not args.no_dither}"
+      f"   Postprocessing: scale={args.scale}, colors={args.colors}, dither={args.dither}"
     )
     print()
+
+  # Determine image format
+  image_format = FORMAT_WEBP if args.webp else FORMAT_PNG
+  print(f"🖼️  Image format: {image_format.upper()}")
+  if args.webp:
+    print(f"   WebP quality: {args.webp_quality}")
+  print()
 
   if args.dry_run:
     print("🔍 Dry run - no files will be written")
     print(f"   Would export: {padded_width}×{padded_height} base tiles")
     print(f"   Plus {MAX_ZOOM_LEVEL} zoom levels")
     print(f"   To: {output_path}")
+    print(f"   Format: {image_format.upper()}")
     print(f"   Postprocessing: {'enabled' if palette_img else 'disabled'}")
     return 0
 
@@ -789,8 +868,10 @@ Examples:
     use_render=args.render,
     palette_img=palette_img,
     pixel_scale=args.scale,
-    dither=not args.no_dither,
+    dither=args.dither,
     max_zoom=MAX_ZOOM_LEVEL,
+    image_format=image_format,
+    webp_quality=args.webp_quality,
   )
 
   # Print summary
@@ -798,11 +879,21 @@ Examples:
   print("=" * 50)
   print("✅ PMTiles export complete!")
   print(f"   Output: {output_path}")
-  print(f"   File size: {output_path.stat().st_size / 1024 / 1024:.2f} MB")
+  file_size_mb = output_path.stat().st_size / 1024 / 1024
+  file_size_gb = file_size_mb / 1024
+  if file_size_gb >= 1:
+    print(f"   File size: {file_size_gb:.2f} GB")
+  else:
+    print(f"   File size: {file_size_mb:.2f} MB")
+  print(f"   Format: {image_format.upper()}")
   print(f"   Total tiles: {stats['total_tiles']}")
-  print(f"   Base tiles: {stats['exported']} exported, {stats['missing']} missing, {stats['padding']} padding")
+  print(
+    f"   Base tiles: {stats['exported']} exported, {stats['missing']} missing, {stats['padding']} padding"
+  )
   print(f"   Zoom levels: {stats['zoom_levels']} (0-{MAX_ZOOM_LEVEL})")
-  print(f"   Grid size: {orig_width}×{orig_height} (padded to {padded_width}×{padded_height})")
+  print(
+    f"   Grid size: {orig_width}×{orig_height} (padded to {padded_width}×{padded_height})"
+  )
   print(f"   Postprocessing: {'enabled' if palette_img else 'disabled'}")
 
   return 0
@@ -810,4 +901,3 @@ Examples:
 
 if __name__ == "__main__":
   sys.exit(main())
-

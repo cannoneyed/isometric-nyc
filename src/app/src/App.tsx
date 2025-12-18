@@ -48,6 +48,9 @@ export interface ViewState {
 
 const VIEW_STATE_STORAGE_KEY = "isometric-nyc-view-state";
 
+// Check if we're in development mode (show debug UI)
+const isDev = import.meta.env.DEV;
+
 // Check for reset query parameter
 function checkForReset(): boolean {
   const params = new URLSearchParams(window.location.search);
@@ -136,7 +139,7 @@ function App() {
   // Load tile configuration on mount
   // Tries PMTiles first, falls back to legacy manifest.json
   useEffect(() => {
-    const pmtilesUrl = "/tiles.pmtiles";
+    const pmtilesUrl = `${__TILES_BASE_URL__}/tiles.pmtiles`;
 
     // Try PMTiles first
     const pmtiles = new PMTiles(pmtilesUrl);
@@ -179,7 +182,7 @@ function App() {
         );
 
         // Fall back to legacy manifest.json
-        fetch("/tiles/manifest.json")
+        fetch(`${__TILES_BASE_URL__}/tiles/manifest.json`)
           .then((res) => {
             if (!res.ok)
               throw new Error(`Failed to load manifest: ${res.status}`);
@@ -192,7 +195,7 @@ function App() {
               originalWidth: manifest.originalWidth ?? manifest.gridWidth,
               originalHeight: manifest.originalHeight ?? manifest.gridHeight,
               tileSize: manifest.tileSize,
-              tileUrlPattern: `/tiles/{z}/{x}_{y}.png`,
+              tileUrlPattern: `${__TILES_BASE_URL__}/tiles/{z}/{x}_{y}.png`,
               maxZoomLevel: manifest.maxZoomLevel ?? 0,
             });
             setLoading(false);
@@ -258,7 +261,8 @@ function App() {
   });
 
   const [waterShader, setWaterShader] = useState({
-    enabled: true,
+    // Disable water shader in production - it requires individual tile files
+    enabled: isDev,
     showMask: false,
     params: defaultShaderParams,
   });
@@ -348,14 +352,16 @@ function App() {
         </div>
       </header>
 
-      <ControlPanel
-        scanlines={scanlines}
-        onScanlinesChange={setScanlines}
-        waterShader={waterShader}
-        onWaterShaderChange={setWaterShader}
-      />
+      {isDev && (
+        <ControlPanel
+          scanlines={scanlines}
+          onScanlinesChange={setScanlines}
+          waterShader={waterShader}
+          onWaterShaderChange={setWaterShader}
+        />
+      )}
 
-      <TileInfo hoveredTile={hoveredTile} viewState={viewState} />
+      {isDev && <TileInfo hoveredTile={hoveredTile} viewState={viewState} />}
     </div>
   );
 }

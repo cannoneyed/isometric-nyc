@@ -214,7 +214,7 @@ export function WaterShaderOverlay({
       for (let tileX = startX; tileX <= endX; tileX++) {
         for (let tileY = startY; tileY <= endY; tileY++) {
           // Always use level 0 tiles for both images and masks
-          const imageUrl = `/tiles/0/${tileX}_${tileY}.png`;
+          const imageUrl = `${__TILES_BASE_URL__}/tiles/0/${tileX}_${tileY}.png`;
           const maskUrl = `/water_masks/0/${tileX}_${tileY}.png`;
 
           // Get textures from cache

@@ -189,7 +189,7 @@ export function IsometricMap({
             return "";
           }
 
-          return `/tiles/${ourLevel}/${x}_${y}.png`;
+          return `${__TILES_BASE_URL__}/tiles/${ourLevel}/${x}_${y}.png`;
         },
       });
     }

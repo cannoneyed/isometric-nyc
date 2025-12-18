@@ -166,3 +166,6 @@ exports/
 # Web app tiles
 **/*.png
 **/*.pmtiles
+
+# Cloudflare R2
+.wrangler/

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "bunx --bun vite",
-    "build": "bun run tsc && bunx --bun vite build",
+    "build": "bunx tsc && bunx --bun vite build",
     "preview": "bunx --bun vite preview",
     "generate-tiles": "bun run scripts/generate-placeholder-tiles.ts"
   },
