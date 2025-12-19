@@ -1169,3 +1169,47 @@ body.generating .tile.queued.selectable {
 .tile.water-select-selectable.water:hover {
   outline-color: #f97316;
 }
+
+.tile.water-select-selectable.explicit-not-water:hover {
+  outline-color: #dc2626;
+}
+
+/* Explicit not water indicator */
+.explicit-not-water-indicator {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  font-size: 14px;
+  z-index: 20;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+  background: rgba(220, 38, 38, 0.7);
+  border-radius: 3px;
+  padding: 1px 3px;
+}
+
+/* Explicit not water tile styling */
+.tile.explicit-not-water {
+  position: relative;
+}
+
+.tile.explicit-not-water::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px dashed #dc2626;
+  pointer-events: none;
+  z-index: 5;
+  opacity: 0.6;
+}
+
+/* Water highlight mode - show water tiles with blue bounding box */
+.grid-container.show-water-highlight .tile.water::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 3px solid #3b82f6;
+  pointer-events: none;
+  z-index: 15;
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.3);
+}

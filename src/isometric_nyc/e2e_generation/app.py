@@ -213,7 +213,14 @@ def get_quadrant_data(x: int, y: int, use_render: bool = False) -> bytes | None:
 
 
 def get_quadrant_info(x: int, y: int, use_render: bool = False) -> dict:
-  """Get info about a quadrant including whether it has data, is flagged, and is water."""
+  """
+  Get info about a quadrant including whether it has data, is flagged, and water status.
+
+  Water status values:
+    -1: Explicitly NOT water (protected from auto-detection)
+     0: Not water (auto-detected, can be changed)
+     1: Water tile
+  """
   conn = get_db_connection()
   try:
     # Ensure columns exist
@@ -232,12 +239,21 @@ def get_quadrant_info(x: int, y: int, use_render: bool = False) -> dict:
     )
     row = cursor.fetchone()
     if row:
+      water_status = row[2]
       return {
         "has_data": bool(row[0]),
         "flagged": bool(row[1]),
-        "is_water": bool(row[2]),
+        "is_water": water_status == 1,  # True if water
+        "is_explicit_not_water": water_status == -1,  # True if explicitly not water
+        "water_status": water_status,  # Raw value: -1, 0, or 1
       }
-    return {"has_data": False, "flagged": False, "is_water": False}
+    return {
+      "has_data": False,
+      "flagged": False,
+      "is_water": False,
+      "is_explicit_not_water": False,
+      "water_status": 0,
+    }
   finally:
     conn.close()
 
@@ -264,6 +280,7 @@ def index():
   tiles = {}
   flagged_tiles = {}
   water_tiles = {}
+  explicit_not_water_tiles = {}
   for dx in range(nx):
     for dy in range(ny):
       qx, qy = x + dx, y + dy
@@ -271,6 +288,7 @@ def index():
       tiles[(dx, dy)] = info["has_data"]
       flagged_tiles[(dx, dy)] = info["flagged"]
       water_tiles[(dx, dy)] = info["is_water"]
+      explicit_not_water_tiles[(dx, dy)] = info["is_explicit_not_water"]
 
   # Get model configuration for the frontend
   models_config = []
@@ -292,6 +310,7 @@ def index():
     tiles=tiles,
     flagged_tiles=flagged_tiles,
     water_tiles=water_tiles,
+    explicit_not_water_tiles=explicit_not_water_tiles,
     generation_dir=str(GENERATION_DIR),
     models_config=json.dumps(models_config),
     default_model_id=default_model_id,
@@ -1202,7 +1221,21 @@ def api_flag():
 
 @app.route("/api/water", methods=["POST"])
 def api_water():
-  """API endpoint to mark/unmark selected quadrants as water tiles."""
+  """
+  API endpoint to mark/unmark selected quadrants as water tiles.
+
+  Water status values:
+    -1: Explicitly NOT water (protected from auto-detection)
+     0: Not water (auto-detected, can be changed by script)
+     1: Water tile
+
+  Request body:
+    {
+      "quadrants": [[x, y], ...],
+      "is_water": true/false,  // true=water(1), false=not water(0)
+      "explicit_not_water": true  // Optional: if true, sets to -1 (protected)
+    }
+  """
   data = request.get_json()
   if not data or "quadrants" not in data:
     return jsonify({"success": False, "error": "No quadrants specified"})
@@ -1211,8 +1244,19 @@ def api_water():
   if not quadrants:
     return jsonify({"success": False, "error": "Empty quadrants list"})
 
-  # Get water value (default to True/1 for marking as water, False/0 for unmarking)
-  water_value = 1 if data.get("is_water", True) else 0
+  # Determine water value:
+  # - explicit_not_water=true → -1 (protected from auto-detection)
+  # - is_water=true → 1 (water)
+  # - is_water=false → 0 (not water, can be auto-changed)
+  if data.get("explicit_not_water", False):
+    water_value = -1
+    action = "Marked as explicitly NOT water (protected)"
+  elif data.get("is_water", True):
+    water_value = 1
+    action = "Marked as water"
+  else:
+    water_value = 0
+    action = "Unmarked as water"
 
   conn = get_db_connection()
 
@@ -1244,13 +1288,14 @@ def api_water():
 
     conn.commit()
 
-    action = "Marked as water" if water_value else "Unmarked as water"
     return jsonify(
       {
         "success": True,
         "message": f"{action}: {water_count} quadrant{'s' if water_count != 1 else ''}",
         "count": water_count,
-        "is_water": bool(water_value),
+        "water_status": water_value,
+        "is_water": water_value == 1,
+        "is_explicit_not_water": water_value == -1,
       }
     )
   except Exception as e:

@@ -429,6 +429,35 @@ function toggleRender() {
   window.location.href = `?x=${x}&y=${y}&nx=${nx}&ny=${ny}&size=${sizePx}&lines=${showLines}&coords=${showCoords}&render=${showRender}`;
 }
 
+function toggleWaterHighlight() {
+  const container = document.getElementById("gridContainer");
+  const showWater = document.getElementById("showWater").checked;
+  container.classList.toggle("show-water-highlight", showWater);
+
+  // Save preference to localStorage
+  try {
+    localStorage.setItem("viewer_show_water_highlight", showWater ? "1" : "0");
+  } catch (e) {
+    console.warn("Could not save water highlight preference:", e);
+  }
+}
+
+// Initialize water highlight state from localStorage
+function initWaterHighlight() {
+  try {
+    const saved = localStorage.getItem("viewer_show_water_highlight");
+    if (saved === "1") {
+      const checkbox = document.getElementById("showWater");
+      if (checkbox) {
+        checkbox.checked = true;
+        toggleWaterHighlight();
+      }
+    }
+  } catch (e) {
+    // Ignore localStorage errors
+  }
+}
+
 // Keyboard navigation
 document.addEventListener("keydown", (e) => {
   if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
@@ -874,9 +903,26 @@ async function handleWaterSelectClick(tileEl) {
   const coords = tileEl.dataset.coords.split(",").map(Number);
   const [qx, qy] = coords;
 
-  // Check current water status
+  // Three-state cycle: unset (0) → water (1) → explicit not water (-1) → unset (0)
   const isCurrentlyWater = tileEl.dataset.water === "true";
-  const newWaterStatus = !isCurrentlyWater;
+  const isExplicitNotWater = tileEl.dataset.explicitNotWater === "true";
+
+  let requestBody;
+  let expectedState;
+
+  if (isExplicitNotWater) {
+    // Currently explicit not water → go to unset (0)
+    requestBody = { quadrants: [[qx, qy]], is_water: false };
+    expectedState = "unset";
+  } else if (isCurrentlyWater) {
+    // Currently water → go to explicit not water (-1)
+    requestBody = { quadrants: [[qx, qy]], explicit_not_water: true };
+    expectedState = "explicit_not_water";
+  } else {
+    // Currently unset → go to water (1)
+    requestBody = { quadrants: [[qx, qy]], is_water: true };
+    expectedState = "water";
+  }
 
   const instruction = document.getElementById("waterSelectInstruction");
   instruction.textContent = `Updating (${qx}, ${qy})...`;
@@ -885,49 +931,74 @@ async function handleWaterSelectClick(tileEl) {
     const response = await fetch("/api/water", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        quadrants: [[qx, qy]],
-        is_water: newWaterStatus,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     const result = await response.json();
 
     if (result.success) {
-      // Update the tile's visual state
-      if (newWaterStatus) {
-        tileEl.classList.add("water");
-        tileEl.dataset.water = "true";
-        // Add water indicator if it doesn't exist
-        if (!tileEl.querySelector(".water-indicator")) {
-          const indicator = document.createElement("span");
-          indicator.className = "water-indicator";
-          indicator.title = "Water tile";
-          indicator.textContent = "💧";
-          tileEl.appendChild(indicator);
-        }
-        showToast("success", "Marked as water", `Quadrant (${qx}, ${qy})`);
-      } else {
-        tileEl.classList.remove("water");
-        tileEl.dataset.water = "false";
-        // Remove water indicator
-        const indicator = tileEl.querySelector(".water-indicator");
-        if (indicator) {
-          indicator.remove();
-        }
-        showToast("info", "Unmarked as water", `Quadrant (${qx}, ${qy})`);
-      }
+      // Update the tile's visual state based on the new status
+      updateTileWaterState(tileEl, result.water_status);
 
-      instruction.textContent = "Click quadrants to toggle water status";
+      const messages = {
+        water: "Marked as water 💧",
+        explicit_not_water: "Protected from auto-detection 🛡️",
+        unset: "Reset to auto-detect",
+      };
+      showToast(
+        expectedState === "water" ? "success" : "info",
+        messages[expectedState],
+        `Quadrant (${qx}, ${qy})`
+      );
+
+      instruction.textContent =
+        "Click to cycle: unset → water → protected → unset";
     } else {
       showToast("error", "Failed to update", result.error || "Unknown error");
-      instruction.textContent = "Click quadrants to toggle water status";
+      instruction.textContent =
+        "Click to cycle: unset → water → protected → unset";
     }
   } catch (error) {
     console.error("Water select error:", error);
     showToast("error", "Request failed", error.message);
-    instruction.textContent = "Click quadrants to toggle water status";
+    instruction.textContent =
+      "Click to cycle: unset → water → protected → unset";
   }
+}
+
+// Update a tile's visual state based on water_status value
+function updateTileWaterState(tileEl, waterStatus) {
+  // Remove all water-related classes and indicators
+  tileEl.classList.remove("water", "explicit-not-water");
+  tileEl.dataset.water = "false";
+  tileEl.dataset.explicitNotWater = "false";
+
+  const waterIndicator = tileEl.querySelector(".water-indicator");
+  if (waterIndicator) waterIndicator.remove();
+
+  const notWaterIndicator = tileEl.querySelector(".explicit-not-water-indicator");
+  if (notWaterIndicator) notWaterIndicator.remove();
+
+  if (waterStatus === 1) {
+    // Water tile
+    tileEl.classList.add("water");
+    tileEl.dataset.water = "true";
+    const indicator = document.createElement("span");
+    indicator.className = "water-indicator";
+    indicator.title = "Water tile";
+    indicator.textContent = "💧";
+    tileEl.appendChild(indicator);
+  } else if (waterStatus === -1) {
+    // Explicit not water (protected)
+    tileEl.classList.add("explicit-not-water");
+    tileEl.dataset.explicitNotWater = "true";
+    const indicator = document.createElement("span");
+    indicator.className = "explicit-not-water-indicator";
+    indicator.title = "Explicitly NOT water (protected)";
+    indicator.textContent = "🛡️";
+    tileEl.appendChild(indicator);
+  }
+  // waterStatus === 0: unset, no visual indicator needed
 }
 
 async function handleWaterFillClick(tileEl) {
@@ -2089,6 +2160,9 @@ function restoreSavedQuadrants() {
 (async function initialize() {
   // Initialize model selector
   initModelSelector();
+
+  // Initialize water highlight toggle
+  initWaterHighlight();
 
   // Restore saved tool
   restoreSavedTool();

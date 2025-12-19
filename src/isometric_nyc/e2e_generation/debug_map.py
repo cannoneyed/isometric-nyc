@@ -39,20 +39,38 @@ def get_generation_config(conn: sqlite3.Connection) -> dict:
   return json.loads(row[0])
 
 
-def get_generated_quadrants(conn: sqlite3.Connection) -> list[tuple[int, int]]:
+def get_generated_quadrants(
+  conn: sqlite3.Connection,
+) -> list[tuple[int, int, int]]:
   """
   Get all quadrants that have been generated (have generation data).
 
-  Returns list of (quadrant_x, quadrant_y) tuples.
+  Returns list of (quadrant_x, quadrant_y, water_status) tuples.
+  water_status: -1 = explicit not water, 0 = unset, 1 = water
   """
   cursor = conn.cursor()
-  cursor.execute("""
-    SELECT quadrant_x, quadrant_y
-    FROM quadrants
-    WHERE generation IS NOT NULL
-    ORDER BY quadrant_x, quadrant_y
-  """)
-  return [(row[0], row[1]) for row in cursor.fetchall()]
+
+  # Check if is_water column exists
+  cursor.execute("PRAGMA table_info(quadrants)")
+  columns = [row[1] for row in cursor.fetchall()]
+  has_water_column = "is_water" in columns
+
+  if has_water_column:
+    cursor.execute("""
+      SELECT quadrant_x, quadrant_y, COALESCE(is_water, 0)
+      FROM quadrants
+      WHERE generation IS NOT NULL
+      ORDER BY quadrant_x, quadrant_y
+    """)
+    return [(row[0], row[1], row[2]) for row in cursor.fetchall()]
+  else:
+    cursor.execute("""
+      SELECT quadrant_x, quadrant_y
+      FROM quadrants
+      WHERE generation IS NOT NULL
+      ORDER BY quadrant_x, quadrant_y
+    """)
+    return [(row[0], row[1], 0) for row in cursor.fetchall()]
 
 
 def calculate_quadrant_corners(
@@ -122,7 +140,7 @@ def calculate_quadrant_corners(
 
 def generate_html(
   config: dict,
-  quadrant_polygons: list[tuple[int, int, list[tuple[float, float]]]],
+  quadrant_polygons: list[tuple[int, int, list[tuple[float, float]], int]],
   seed_lat: float,
   seed_lng: float,
   center_lat: float,
@@ -131,14 +149,16 @@ def generate_html(
   """Generate the HTML content for the debug map."""
 
   # Convert quadrant data to JSON for JavaScript
+  # water_status: -1 = explicit not water, 0 = unset, 1 = water
   quadrants_json = json.dumps(
     [
       {
         "x": qx,
         "y": qy,
         "corners": [[lat, lng] for lat, lng in corners],
+        "water_status": water_status,
       }
-      for qx, qy, corners in quadrant_polygons
+      for qx, qy, corners, water_status in quadrant_polygons
     ]
   )
 
@@ -293,6 +313,16 @@ def generate_html(
       border: 2px solid rgba(255, 107, 107, 0.7);
     }}
 
+    .legend-swatch.water {{
+      background: rgba(59, 130, 246, 0.35);
+      border: 2px solid rgba(59, 130, 246, 0.7);
+    }}
+
+    .legend-swatch.protected {{
+      background: rgba(220, 38, 38, 0.25);
+      border: 2px dashed rgba(220, 38, 38, 0.7);
+    }}
+
     .legend-swatch.seed {{
       background: #10b981;
       border: 2px solid #fff;
@@ -326,6 +356,14 @@ def generate_html(
     <div class="legend-item">
       <div class="legend-swatch quadrant"></div>
       <span>Generated Quadrant</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-swatch water"></div>
+      <span>Water Tile</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-swatch protected"></div>
+      <span>Protected (Not Water)</span>
     </div>
     <div class="legend-item">
       <div class="legend-swatch seed"></div>
@@ -369,7 +407,7 @@ def generate_html(
 
     const coordsDisplay = document.getElementById('coords-display');
 
-    // Style for normal state
+    // Style for normal state (red for land)
     const normalStyle = {{
       fillColor: '#ff6b6b',
       fillOpacity: 0.25,
@@ -378,7 +416,7 @@ def generate_html(
       opacity: 0.6
     }};
 
-    // Style for hover state
+    // Style for hover state (land)
     const hoverStyle = {{
       fillColor: '#ff6b6b',
       fillOpacity: 0.5,
@@ -387,23 +425,83 @@ def generate_html(
       opacity: 1
     }};
 
+    // Style for water tiles (blue)
+    const waterStyle = {{
+      fillColor: '#3b82f6',
+      fillOpacity: 0.35,
+      color: '#3b82f6',
+      weight: 1.5,
+      opacity: 0.7
+    }};
+
+    // Style for water hover state
+    const waterHoverStyle = {{
+      fillColor: '#3b82f6',
+      fillOpacity: 0.6,
+      color: '#fff',
+      weight: 2,
+      opacity: 1
+    }};
+
+    // Style for protected (explicit not water) tiles
+    const protectedStyle = {{
+      fillColor: '#dc2626',
+      fillOpacity: 0.2,
+      color: '#dc2626',
+      weight: 1.5,
+      opacity: 0.6,
+      dashArray: '5, 5'
+    }};
+
+    // Style for protected hover state
+    const protectedHoverStyle = {{
+      fillColor: '#dc2626',
+      fillOpacity: 0.4,
+      color: '#fff',
+      weight: 2,
+      opacity: 1,
+      dashArray: '5, 5'
+    }};
+
+    // Helper to get style based on water_status
+    function getStyle(waterStatus) {{
+      if (waterStatus === 1) return waterStyle;
+      if (waterStatus === -1) return protectedStyle;
+      return normalStyle;
+    }}
+
+    function getHoverStyle(waterStatus) {{
+      if (waterStatus === 1) return waterHoverStyle;
+      if (waterStatus === -1) return protectedHoverStyle;
+      return hoverStyle;
+    }}
+
     // Add quadrant polygons
     quadrants.forEach(q => {{
-      const polygon = L.polygon(q.corners, normalStyle).addTo(map);
+      const style = getStyle(q.water_status);
+      const hStyle = getHoverStyle(q.water_status);
+      const polygon = L.polygon(q.corners, style).addTo(map);
 
       polygon.on('mouseover', function(e) {{
-        this.setStyle(hoverStyle);
+        this.setStyle(hStyle);
+        let statusLabel = '';
+        if (q.water_status === 1) {{
+          statusLabel = ' <span style="color: #3b82f6;">💧</span>';
+        }} else if (q.water_status === -1) {{
+          statusLabel = ' <span style="color: #dc2626;">🛡️</span>';
+        }}
         coordsDisplay.innerHTML = `
           <div class="coords">
             <span class="label">x:</span><span class="x">${{q.x}}</span>
             <span class="separator">,</span>
             <span class="label">y:</span><span class="y">${{q.y}}</span>
+            ${{statusLabel}}
           </div>
         `;
       }});
 
       polygon.on('mouseout', function(e) {{
-        this.setStyle(normalStyle);
+        this.setStyle(style);
         coordsDisplay.innerHTML = '<span class="no-hover">Hover over a tile</span>';
       }});
     }});
@@ -483,14 +581,26 @@ def create_debug_map(
     quadrant_polygons = []
     all_lats = []
     all_lngs = []
+    water_count = 0
+    protected_count = 0
 
-    for qx, qy in generated:
+    for qx, qy, water_status in generated:
       corners = calculate_quadrant_corners(config, qx, qy)
-      quadrant_polygons.append((qx, qy, corners))
+      quadrant_polygons.append((qx, qy, corners, water_status))
+
+      if water_status == 1:
+        water_count += 1
+      elif water_status == -1:
+        protected_count += 1
 
       for lat, lng in corners:
         all_lats.append(lat)
         all_lngs.append(lng)
+
+    if water_count > 0:
+      print(f"   💧 {water_count} water tiles")
+    if protected_count > 0:
+      print(f"   🛡️  {protected_count} protected tiles")
 
     # Calculate center for map
     seed_lat = config["seed"]["lat"]
