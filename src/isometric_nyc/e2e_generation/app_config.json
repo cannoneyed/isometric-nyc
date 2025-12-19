@@ -1,26 +1,37 @@
 {
   "models": [
     {
+      "name": "Local",
+      "model_id": "local",
+      "endpoint": "http://localhost:8888/edit-b64",
+      "num_inference_steps": 15,
+      "model_type": "local",
+      "use_base64": true
+    },
+    {
       "name": "Omni v1",
       "model_id": "cannoneyed-quiet-green-lamprey",
       "api_key_env": "OXEN_OMNI_v04_WATER_API_KEY",
       "endpoint": "https://hub.oxen.ai/api/images/edit",
-      "num_inference_steps": 28
+      "num_inference_steps": 28,
+      "model_type": "oxen"
     },
     {
       "name": "Omni v2",
       "model_id": "cannoneyed-rural-rose-dingo",
       "api_key_env": "OXEN_OMNI_v04_WATER_V2_API_KEY",
       "endpoint": "https://hub.oxen.ai/api/images/edit",
-      "num_inference_steps": 28
+      "num_inference_steps": 28,
+      "model_type": "oxen"
     },
     {
       "name": "Omni (Original)",
       "model_id": "cannoneyed-gentle-gold-antlion",
       "api_key_env": "OXEN_OMNI_v04_API_KEY",
       "endpoint": "https://hub.oxen.ai/api/images/edit",
-      "num_inference_steps": 28
+      "num_inference_steps": 28,
+      "model_type": "oxen"
     }
   ],
-  "default_model_id": "cannoneyed-quiet-green-lamprey"
+  "default_model_id": "local"
 }

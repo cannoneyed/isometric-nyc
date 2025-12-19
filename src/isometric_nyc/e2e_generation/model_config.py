@@ -21,11 +21,18 @@ class ModelConfig:
   api_key_env: str  # Environment variable name for the API key
   endpoint: str = "https://hub.oxen.ai/api/images/edit"
   num_inference_steps: int = 28
+  model_type: str = "oxen"  # "oxen" for Oxen API, "local" for local inference
+  use_base64: bool = False  # Use base64 encoding for local inference (faster)
 
   @property
   def api_key(self) -> str | None:
     """Get the API key from environment variables."""
-    return os.getenv(self.api_key_env)
+    return os.getenv(self.api_key_env) if self.api_key_env else None
+
+  @property
+  def is_local(self) -> bool:
+    """Check if this model uses local inference."""
+    return self.model_type == "local"
 
   def to_dict(self) -> dict[str, Any]:
     """Convert to dictionary for JSON serialization (without API key)."""
@@ -34,6 +41,8 @@ class ModelConfig:
       "model_id": self.model_id,
       "endpoint": self.endpoint,
       "num_inference_steps": self.num_inference_steps,
+      "model_type": self.model_type,
+      "use_base64": self.use_base64,
     }
 
 
@@ -94,9 +103,11 @@ def load_app_config(config_path: Path | None = None) -> AppConfig:
       ModelConfig(
         name=model_data["name"],
         model_id=model_data["model_id"],
-        api_key_env=model_data["api_key_env"],
+        api_key_env=model_data.get("api_key_env", ""),
         endpoint=model_data.get("endpoint", "https://hub.oxen.ai/api/images/edit"),
         num_inference_steps=model_data.get("num_inference_steps", 28),
+        model_type=model_data.get("model_type", "oxen"),
+        use_base64=model_data.get("use_base64", False),
       )
     )
 
@@ -156,6 +167,8 @@ def save_app_config(config: AppConfig, config_path: Path | None = None) -> None:
         "api_key_env": model.api_key_env,
         "endpoint": model.endpoint,
         "num_inference_steps": model.num_inference_steps,
+        "model_type": model.model_type,
+        "use_base64": model.use_base64,
       }
     )
 

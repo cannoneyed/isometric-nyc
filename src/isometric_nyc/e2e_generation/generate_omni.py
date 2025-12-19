@@ -112,6 +112,229 @@ def parse_quadrant_list(s: str) -> list[tuple[int, int]]:
 
 
 # =============================================================================
+# Local Inference API Functions
+# =============================================================================
+
+
+def call_local_api_b64(
+  image: "Image.Image",
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+  use_jpeg: bool = True,
+  jpeg_quality: int = 90,
+) -> "Image.Image":
+  """
+  Call the local inference API using base64 encoding (faster than multipart).
+
+  The local API expects JSON with:
+    - image_b64: Base64-encoded input image
+    - prompt: The generation prompt
+    - steps: Number of inference steps
+
+  Args:
+      image: PIL Image of the input template
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+      use_jpeg: If True, compress image as JPEG (much smaller). Default True.
+      jpeg_quality: JPEG quality 1-100 (default 90, good balance of size/quality)
+
+  Returns:
+      PIL Image of the generated result
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  import base64
+  import time
+  from io import BytesIO
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "http://localhost:8888/edit-b64"
+    num_inference_steps = 15
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  # Convert PIL image to base64 (use JPEG for compression if enabled)
+  img_buffer = BytesIO()
+  if use_jpeg:
+    # Convert to RGB if needed (JPEG doesn't support alpha)
+    if image.mode in ("RGBA", "LA", "P"):
+      rgb_image = Image.new("RGB", image.size, (255, 255, 255))
+      if image.mode == "P":
+        image = image.convert("RGBA")
+      rgb_image.paste(image, mask=image.split()[-1] if image.mode == "RGBA" else None)
+      image = rgb_image
+    image.save(img_buffer, format="JPEG", quality=jpeg_quality, optimize=True)
+    img_format = "JPEG"
+  else:
+    image.save(img_buffer, format="PNG")
+    img_format = "PNG"
+  image_b64 = base64.b64encode(img_buffer.getvalue()).decode()
+
+  # Prepare JSON payload
+  payload = {
+    "image_b64": image_b64,
+    "prompt": prompt,
+    "steps": num_inference_steps,
+  }
+
+  print(f"   🏠 Calling local API (base64) at {endpoint}...")
+  print(f"   📊 Steps: {num_inference_steps}")
+  print(f"   📦 Image: {len(image_b64):,} bytes ({img_format}, base64)")
+
+  start_time = time.time()
+  response = requests.post(
+    endpoint,
+    json=payload,
+    headers={"Content-Type": "application/json"},
+    timeout=600,  # 10 minute timeout for local inference
+  )
+  response.raise_for_status()
+  elapsed_time = time.time() - start_time
+
+  # Parse JSON response
+  result = response.json()
+
+  if "image_b64" not in result:
+    raise ValueError(f"Expected 'image_b64' in response, got keys: {list(result.keys())}")
+
+  result_b64 = result["image_b64"]
+  print(f"   ✓ Received {len(result_b64)} bytes (base64) from local API")
+  print(f"   ⏱️  Generation took {elapsed_time:.1f}s")
+
+  # Decode base64 to PIL Image
+  return Image.open(BytesIO(base64.b64decode(result_b64)))
+
+
+def call_local_api(
+  image: "Image.Image",
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+  use_jpeg: bool = True,
+  jpeg_quality: int = 90,
+) -> "Image.Image":
+  """
+  Call the local inference API to generate pixel art.
+
+  The local API expects multipart/form-data with:
+    - file: The input image as PNG or JPEG
+    - prompt: The generation prompt
+    - steps: Number of inference steps
+
+  Args:
+      image: PIL Image of the input template
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+      use_jpeg: If True, compress image as JPEG (much smaller). Default True.
+      jpeg_quality: JPEG quality 1-100 (default 90, good balance of size/quality)
+
+  Returns:
+      PIL Image of the generated result
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  import time
+  from io import BytesIO
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "http://localhost:8888/edit"
+    num_inference_steps = 15
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  # Convert PIL image to bytes (use JPEG for compression if enabled)
+  img_buffer = BytesIO()
+  if use_jpeg:
+    # Convert to RGB if needed (JPEG doesn't support alpha)
+    if image.mode in ("RGBA", "LA", "P"):
+      rgb_image = Image.new("RGB", image.size, (255, 255, 255))
+      if image.mode == "P":
+        image = image.convert("RGBA")
+      rgb_image.paste(image, mask=image.split()[-1] if image.mode == "RGBA" else None)
+      image = rgb_image
+    image.save(img_buffer, format="JPEG", quality=jpeg_quality, optimize=True)
+    filename = "input.jpg"
+    mime_type = "image/jpeg"
+    img_format = "JPEG"
+  else:
+    image.save(img_buffer, format="PNG")
+    filename = "input.png"
+    mime_type = "image/png"
+    img_format = "PNG"
+  img_buffer.seek(0)
+
+  # Prepare multipart form data
+  files = {
+    "file": (filename, img_buffer, mime_type),
+  }
+  data = {
+    "prompt": prompt,
+    "steps": str(num_inference_steps),
+  }
+
+  print(f"   🏠 Calling local API at {endpoint}...")
+  print(f"   📊 Steps: {num_inference_steps}")
+  print(f"   📦 Image: {img_buffer.getbuffer().nbytes:,} bytes ({img_format})")
+
+  start_time = time.time()
+  response = requests.post(
+    endpoint,
+    files=files,
+    data=data,
+    headers={"accept": "image/png"},
+    timeout=600,  # 10 minute timeout for local inference
+  )
+  response.raise_for_status()
+  elapsed_time = time.time() - start_time
+
+  # Check content type
+  content_type = response.headers.get("content-type", "")
+  if "image" not in content_type:
+    raise ValueError(f"Expected image response, got content-type: {content_type}")
+
+  print(f"   ✓ Received {len(response.content)} bytes from local API")
+  print(f"   ⏱️  Generation took {elapsed_time:.1f}s")
+
+  # Parse the response as an image
+  return Image.open(BytesIO(response.content))
+
+
+# =============================================================================
 # Oxen API Functions
 # =============================================================================
 
@@ -137,6 +360,8 @@ def call_oxen_api(
       requests.HTTPError: If the API call fails
       ValueError: If the response format is unexpected
   """
+  import time
+
   # Use provided config or defaults
   if model_config is not None:
     endpoint = model_config.endpoint
@@ -178,10 +403,13 @@ def call_oxen_api(
   }
 
   print(f"   🤖 Calling Oxen API with model {model_id}...")
+  start_time = time.time()
   response = requests.post(endpoint, headers=headers, json=payload, timeout=300)
   response.raise_for_status()
+  elapsed_time = time.time() - start_time
 
   result = response.json()
+  print(f"   ⏱️  Oxen API call took {elapsed_time:.1f}s")
 
   # Log the response structure for debugging
   print(f"   📥 API response keys: {list(result.keys())}")
@@ -537,27 +765,49 @@ def run_generation_for_quadrants(
 
   template_image, placement = result
 
-  # Save template to temp file and upload to GCS
-  with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-    template_path = Path(tmp.name)
-    template_image.save(template_path)
+  # Check if we're using local or Oxen API
+  is_local = model_config is not None and model_config.is_local
+  use_base64 = model_config is not None and model_config.use_base64
 
+  template_path = None
   try:
-    update_status("uploading", "Uploading template to cloud...")
-    print("📤 Uploading template to GCS...")
-    print(f"   Template path: {template_path}")
-    print(f"   Template size: {template_image.size[0]}x{template_image.size[1]}")
-    image_url = upload_to_gcs(template_path, bucket_name)
-    print(f"   Uploaded URL: {image_url}")
+    if is_local:
+      # Local inference - no GCS upload needed
+      print(f"📋 Template size: {template_image.size[0]}x{template_image.size[1]}")
 
-    update_status("generating", "Calling AI model (this may take a minute)...")
-    print("🤖 Calling Oxen API...")
-    generated_url = call_oxen_api(image_url, model_config, prompt)
+      update_status("generating", "Calling local model (this may take a minute)...")
+      if use_base64:
+        print("🏠 Using local inference (base64 mode)...")
+        generated_image = call_local_api_b64(template_image, model_config, prompt)
+      else:
+        print("🏠 Using local inference (multipart mode)...")
+        generated_image = call_local_api(template_image, model_config, prompt)
+      print("   ✓ Local inference complete")
+    else:
+      # Oxen API - upload to GCS first
+      with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        template_path = Path(tmp.name)
+        template_image.save(template_path)
 
-    update_status("saving", "Downloading and saving results...")
-    print("📥 Downloading generated image...")
-    print(f"   Generated URL: {generated_url}")
-    generated_image = download_image_to_pil(generated_url)
+      update_status("uploading", "Uploading template to cloud...")
+      print("📤 Uploading template to GCS...")
+      print(f"   Template path: {template_path}")
+      print(f"   Template size: {template_image.size[0]}x{template_image.size[1]}")
+      image_url = upload_to_gcs(template_path, bucket_name)
+      print(f"   Uploaded URL: {image_url}")
+
+      update_status("generating", "Calling AI model (this may take a minute)...")
+      print("🤖 Calling Oxen API...")
+      generated_url = call_oxen_api(image_url, model_config, prompt)
+
+      update_status("saving", "Downloading and saving results...")
+      print("📥 Downloading generated image...")
+      print(f"   Generated URL: {generated_url}")
+      generated_image = download_image_to_pil(generated_url)
+
+    # For local inference, update status to saving now
+    if is_local:
+      update_status("saving", "Saving results...")
 
     # Extract quadrants from generated image and save to database
     print("💾 Saving generated quadrants to database...")
@@ -609,5 +859,6 @@ def run_generation_for_quadrants(
     }
 
   finally:
-    # Clean up temp file
-    template_path.unlink(missing_ok=True)
+    # Clean up temp file if it was created (only for Oxen API path)
+    if template_path is not None:
+      template_path.unlink(missing_ok=True)
