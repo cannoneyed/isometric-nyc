@@ -169,3 +169,6 @@ exports/
 
 # Cloudflare R2
 .wrangler/
+
+# Oxen weights
+weights/

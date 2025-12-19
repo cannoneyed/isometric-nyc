@@ -16,13 +16,10 @@
    - Follows the structure/shapes hinted at by the render pixels inside the border
    - Removes the red border completely in the output
 
-**Critical Style Rules (SimCity 3000 Aesthetic):**
-1. **Clean Pixel Art:** The output must be clean, detailed but low-resolution, as if on a VGA monitor.
-2. **No Whitebox/Untextured:** Every building must be fully textured with brick, concrete, glass, etc.
-3. **Straight Isometric Lines:** Use 2:1 pixel slope for isometric projection.
-4. **Consistent Lighting:** Match the lighting direction of the reference images.
 
 **Output:**
 - Generate the **complete** image with the bordered area filled in - ensure you preserve the context of the surrounding area.
 - The output should be 1024x1024 pixels
 - Remove all traces of the red border
+- All sections must flow seamlessly into the surrounding area. There should be no hard edges, visible seams, or gaps.
+- The infilled region MUST PERFECTLY BLEND INTO THE SURROUNDING AREA.
