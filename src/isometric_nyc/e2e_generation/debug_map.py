@@ -73,6 +73,39 @@ def get_generated_quadrants(
     return [(row[0], row[1], 0) for row in cursor.fetchall()]
 
 
+def get_pending_quadrants(
+  conn: sqlite3.Connection,
+) -> list[tuple[int, int]]:
+  """
+  Get all unique quadrants from pending queue items.
+
+  Returns list of (quadrant_x, quadrant_y) tuples.
+  """
+  cursor = conn.cursor()
+
+  # Check if generation_queue table exists
+  cursor.execute("""
+    SELECT name FROM sqlite_master
+    WHERE type='table' AND name='generation_queue'
+  """)
+  if not cursor.fetchone():
+    return []
+
+  # Get all pending queue items and extract their quadrants
+  cursor.execute("""
+    SELECT quadrants FROM generation_queue
+    WHERE status = 'pending'
+  """)
+
+  pending_set: set[tuple[int, int]] = set()
+  for (quadrants_json,) in cursor.fetchall():
+    quadrants = json.loads(quadrants_json)
+    for qx, qy in quadrants:
+      pending_set.add((qx, qy))
+
+  return sorted(pending_set)
+
+
 def calculate_quadrant_corners(
   config: dict, quadrant_x: int, quadrant_y: int
 ) -> list[tuple[float, float]]:
@@ -141,6 +174,7 @@ def calculate_quadrant_corners(
 def generate_html(
   config: dict,
   quadrant_polygons: list[tuple[int, int, list[tuple[float, float]], int]],
+  pending_polygons: list[tuple[int, int, list[tuple[float, float]]]],
   seed_lat: float,
   seed_lng: float,
   center_lat: float,
@@ -159,6 +193,18 @@ def generate_html(
         "water_status": water_status,
       }
       for qx, qy, corners, water_status in quadrant_polygons
+    ]
+  )
+
+  # Convert pending quadrant data to JSON for JavaScript
+  pending_json = json.dumps(
+    [
+      {
+        "x": qx,
+        "y": qy,
+        "corners": [[lat, lng] for lat, lng in corners],
+      }
+      for qx, qy, corners in pending_polygons
     ]
   )
 
@@ -333,6 +379,11 @@ def generate_html(
       background: rgba(59, 130, 246, 0.15);
       border: 2px solid rgba(59, 130, 246, 0.7);
     }}
+
+    .legend-swatch.pending {{
+      background: rgba(168, 85, 247, 0.35);
+      border: 2px solid rgba(168, 85, 247, 0.7);
+    }}
   </style>
 </head>
 <body>
@@ -366,6 +417,10 @@ def generate_html(
       <span>Protected (Not Water)</span>
     </div>
     <div class="legend-item">
+      <div class="legend-swatch pending"></div>
+      <span>Pending Generation</span>
+    </div>
+    <div class="legend-item">
       <div class="legend-swatch seed"></div>
       <span>Seed Point</span>
     </div>
@@ -373,6 +428,7 @@ def generate_html(
 
   <script>
     const quadrants = {quadrants_json};
+    const pendingQuadrants = {pending_json};
     const nycBoundary = {nyc_boundary_json};
     const seedLat = {seed_lat};
     const seedLng = {seed_lng};
@@ -463,6 +519,24 @@ def generate_html(
       dashArray: '5, 5'
     }};
 
+    // Style for pending quadrants (purple)
+    const pendingStyle = {{
+      fillColor: '#a855f7',
+      fillOpacity: 0.25,
+      color: '#a855f7',
+      weight: 1.5,
+      opacity: 0.6
+    }};
+
+    // Style for pending hover state
+    const pendingHoverStyle = {{
+      fillColor: '#a855f7',
+      fillOpacity: 0.5,
+      color: '#fff',
+      weight: 2,
+      opacity: 1
+    }};
+
     // Helper to get style based on water_status
     function getStyle(waterStatus) {{
       if (waterStatus === 1) return waterStyle;
@@ -506,6 +580,28 @@ def generate_html(
       }});
     }});
 
+    // Add pending quadrant polygons (purple)
+    pendingQuadrants.forEach(q => {{
+      const polygon = L.polygon(q.corners, pendingStyle).addTo(map);
+
+      polygon.on('mouseover', function(e) {{
+        this.setStyle(pendingHoverStyle);
+        coordsDisplay.innerHTML = `
+          <div class="coords">
+            <span class="label">x:</span><span class="x">${{q.x}}</span>
+            <span class="separator">,</span>
+            <span class="label">y:</span><span class="y">${{q.y}}</span>
+            <span style="color: #a855f7;">⏳</span>
+          </div>
+        `;
+      }});
+
+      polygon.on('mouseout', function(e) {{
+        this.setStyle(pendingStyle);
+        coordsDisplay.innerHTML = '<span class="no-hover">Hover over a tile</span>';
+      }});
+    }});
+
     // Add seed point marker
     const seedIcon = L.divIcon({{
       className: 'seed-marker',
@@ -526,8 +622,9 @@ def generate_html(
       .bindPopup('Seed Point');
 
     // Fit map to quadrant bounds if we have quadrants
-    if (quadrants.length > 0) {{
-      const allLatLngs = quadrants.flatMap(q => q.corners);
+    const allQuadrantCorners = [...quadrants, ...pendingQuadrants];
+    if (allQuadrantCorners.length > 0) {{
+      const allLatLngs = allQuadrantCorners.flatMap(q => q.corners);
       const bounds = L.latLngBounds(allLatLngs);
       map.fitBounds(bounds.pad(0.1));
     }}
@@ -576,6 +673,14 @@ def create_debug_map(
     if not generated:
       print("⚠️  No generated quadrants found. Creating empty map.")
 
+    # Get pending quadrants from the generation queue
+    pending = get_pending_quadrants(conn)
+    # Filter out any pending quadrants that are already generated
+    generated_set = {(qx, qy) for qx, qy, _ in generated}
+    pending = [(qx, qy) for qx, qy in pending if (qx, qy) not in generated_set]
+    if pending:
+      print(f"   ⏳ {len(pending)} pending quadrants in queue")
+
     # Calculate corners for all generated quadrants
     print("\n🔲 Calculating quadrant geographic footprints...")
     quadrant_polygons = []
@@ -593,6 +698,15 @@ def create_debug_map(
       elif water_status == -1:
         protected_count += 1
 
+      for lat, lng in corners:
+        all_lats.append(lat)
+        all_lngs.append(lng)
+
+    # Calculate corners for pending quadrants
+    pending_polygons = []
+    for qx, qy in pending:
+      corners = calculate_quadrant_corners(config, qx, qy)
+      pending_polygons.append((qx, qy, corners))
       for lat, lng in corners:
         all_lats.append(lat)
         all_lngs.append(lng)
@@ -622,6 +736,7 @@ def create_debug_map(
     html_content = generate_html(
       config=config,
       quadrant_polygons=quadrant_polygons,
+      pending_polygons=pending_polygons,
       seed_lat=seed_lat,
       seed_lng=seed_lng,
       center_lat=center_lat,

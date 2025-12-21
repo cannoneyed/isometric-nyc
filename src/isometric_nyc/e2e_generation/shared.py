@@ -409,6 +409,70 @@ def calculate_quadrant_lat_lng(
   )
 
 
+def latlng_to_quadrant_coords(
+  config: dict, lat: float, lng: float
+) -> tuple[float, float]:
+  """
+  Convert a lat/lng position to quadrant (x, y) coordinates.
+
+  This is the inverse of calculate_quadrant_lat_lng. Given a geographic position,
+  returns the floating-point quadrant coordinates where that point would fall.
+
+  Args:
+    config: Generation config dictionary
+    lat: Latitude of the point
+    lng: Longitude of the point
+
+  Returns:
+    Tuple of (quadrant_x, quadrant_y) as floats
+  """
+  seed_lat = config["seed"]["lat"]
+  seed_lng = config["seed"]["lng"]
+  width_px = config["width_px"]
+  height_px = config["height_px"]
+  view_height_meters = config["view_height_meters"]
+  azimuth = config["camera_azimuth_degrees"]
+  elevation = config["camera_elevation_degrees"]
+  tile_step = config.get("tile_step", 0.5)
+
+  meters_per_pixel = view_height_meters / height_px
+
+  # Convert lat/lng difference to meters
+  delta_north_meters = (lat - seed_lat) * 111111.0
+  delta_east_meters = (lng - seed_lng) * 111111.0 * math.cos(math.radians(seed_lat))
+
+  # Inverse rotation by azimuth (rotate back to camera-aligned coordinates)
+  azimuth_rad = math.radians(azimuth)
+  cos_a = math.cos(azimuth_rad)
+  sin_a = math.sin(azimuth_rad)
+
+  # Inverse of the rotation in calculate_offset:
+  # delta_east = delta_rot_x * cos_a + delta_rot_y * sin_a
+  # delta_north = -delta_rot_x * sin_a + delta_rot_y * cos_a
+  # Solving for delta_rot_x, delta_rot_y:
+  delta_rot_x = delta_east_meters * cos_a - delta_north_meters * sin_a
+  delta_rot_y = delta_east_meters * sin_a + delta_north_meters * cos_a
+
+  # Convert back to pixel shifts
+  elev_rad = math.radians(elevation)
+  sin_elev = math.sin(elev_rad)
+
+  shift_right_meters = delta_rot_x
+  shift_up_meters = -delta_rot_y * sin_elev
+
+  shift_x_px = shift_right_meters / meters_per_pixel
+  shift_y_px = shift_up_meters / meters_per_pixel
+
+  # Convert pixel shifts to quadrant coordinates
+  quadrant_step_x_px = width_px * tile_step
+  quadrant_step_y_px = height_px * tile_step
+
+  quadrant_x = shift_x_px / quadrant_step_x_px
+  quadrant_y = -shift_y_px / quadrant_step_y_px  # Negative because y increases downward
+
+  return quadrant_x, quadrant_y
+
+
 # =============================================================================
 # Image Utilities
 # =============================================================================

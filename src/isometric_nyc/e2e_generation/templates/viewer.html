@@ -94,6 +94,14 @@
               />
               💧 Water</label
             >
+            <label
+              ><input
+                type="checkbox"
+                id="showNycOutline"
+                onchange="toggleNycOutline()"
+              />
+              🗽 NYC</label
+            >
           </div>
           <div class="toggle-group model-group">
             <label class="model-label"
@@ -346,6 +354,8 @@
       class="grid-container {% if show_lines %}show-lines{% endif %} {% if show_coords %}show-coords{% endif %}"
       id="gridContainer"
     >
+      <!-- NYC Outline SVG overlay -->
+      <svg class="nyc-outline-overlay" id="nycOutlineOverlay"></svg>
       <div class="grid">
         {% for dy in range(ny) %} {% for dx in range(nx) %} {% set qx = x + dx
         %} {% set qy = y + dy %} {% set has_gen = tiles.get((dx, dy), False) %}

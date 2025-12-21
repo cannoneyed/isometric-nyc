@@ -1,0 +1,10991 @@
+# Local inference plan implementation
+_Exported on 12/19/2025 at 15:31:07 EST from Cursor (2.2.20)_
+
+---
+
+**User**
+
+implement the plan in @tasks/033_local_inference.md 
+
+---
+
+**Cursor**
+
+I'll implement the local inference feature. Let me start by examining the current implementation in the app and viewer files.
+
+Let me also look at the model configuration system and how generation is currently handled:
+
+Let me check if there's an existing app_config.json and understand the current model configuration structure better:
+
+Now I understand the system. I need to:
+1. Add a `model_type` field to `ModelConfig` to distinguish between "oxen" and "local" inference
+2. Add a `call_local_api()` function for local inference
+3. Update the generation logic to choose the appropriate API based on model type
+4. Add the local model to the config
+
+Let me create a todo list and implement these changes:
+
+```python
+"""
+Model configuration for the generation app.
+
+Loads model configurations from app_config.json and provides
+utilities for selecting and using different AI models.
+"""
+
+import json
+import os
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+
+@dataclass
+class ModelConfig:
+  """Configuration for a single AI model."""
+
+  name: str
+  model_id: str
+  api_key_env: str  # Environment variable name for the API key
+  endpoint: str = "https://hub.oxen.ai/api/images/edit"
+  num_inference_steps: int = 28
+  model_type: str = "oxen"  # "oxen" for Oxen API, "local" for local inference
+
+  @property
+  def api_key(self) -> str | None:
+    """Get the API key from environment variables."""
+    return os.getenv(self.api_key_env) if self.api_key_env else None
+
+  @property
+  def is_local(self) -> bool:
+    """Check if this model uses local inference."""
+    return self.model_type == "local"
+
+  def to_dict(self) -> dict[str, Any]:
+    """Convert to dictionary for JSON serialization (without API key)."""
+    return {
+      "name": self.name,
+      "model_id": self.model_id,
+      "endpoint": self.endpoint,
+      "num_inference_steps": self.num_inference_steps,
+      "model_type": self.model_type,
+    }
+
+
+@dataclass
+class AppConfig:
+  """Full application configuration."""
+
+  models: list[ModelConfig]
+  default_model_id: str | None = None
+
+  def get_model(self, model_id: str) -> ModelConfig | None:
+    """Get a model configuration by its ID."""
+    for model in self.models:
+      if model.model_id == model_id:
+        return model
+    return None
+
+  def get_default_model(self) -> ModelConfig | None:
+    """Get the default model, or the first model if no default is set."""
+    if self.default_model_id:
+      return self.get_model(self.default_model_id)
+    return self.models[0] if self.models else None
+
+  def to_dict(self) -> dict[str, Any]:
+    """Convert to dictionary for JSON serialization."""
+    return {
+      "models": [m.to_dict() for m in self.models],
+      "default_model_id": self.default_model_id,
+    }
+
+
+def load_app_config(config_path: Path | None = None) -> AppConfig:
+  """
+  Load the application configuration from app_config.json.
+
+  Args:
+    config_path: Path to the config file. If None, looks in the generation dir.
+
+  Returns:
+    AppConfig object with model configurations
+
+  If the config file doesn't exist, returns a default configuration
+  with the legacy Oxen models.
+  """
+  if config_path is None:
+    config_path = Path(__file__).parent / "app_config.json"
+
+  if not config_path.exists():
+    # Return default configuration with legacy models
+    return get_default_config()
+
+  with open(config_path) as f:
+    data = json.load(f)
+
+  models = []
+  for model_data in data.get("models", []):
+    models.append(
+      ModelConfig(
+        name=model_data["name"],
+        model_id=model_data["model_id"],
+        api_key_env=model_data["api_key_env"],
+        endpoint=model_data.get("endpoint", "https://hub.oxen.ai/api/images/edit"),
+        num_inference_steps=model_data.get("num_inference_steps", 28),
+      )
+    )
+
+  return AppConfig(
+    models=models,
+    default_model_id=data.get("default_model_id"),
+  )
+
+
+def get_default_config() -> AppConfig:
+  """
+  Get the default configuration with legacy Oxen models.
+
+  This is used when no app_config.json exists.
+  """
+  return AppConfig(
+    models=[
+      ModelConfig(
+        name="Omni Water v1",
+        model_id="cannoneyed-quiet-green-lamprey",
+        api_key_env="OXEN_OMNI_v04_WATER_API_KEY",
+      ),
+      ModelConfig(
+        name="Omni Water v2",
+        model_id="cannoneyed-rural-rose-dingo",
+        api_key_env="OXEN_OMNI_WATER_V2_API_KEY",
+      ),
+      ModelConfig(
+        name="Omni (Original)",
+        model_id="cannoneyed-gentle-gold-antlion",
+        api_key_env="OXEN_OMNI_API_KEY",
+      ),
+    ],
+    default_model_id="cannoneyed-quiet-green-lamprey",
+  )
+
+
+def save_app_config(config: AppConfig, config_path: Path | None = None) -> None:
+  """
+  Save the application configuration to app_config.json.
+
+  Note: This does NOT save API keys - those should remain in environment variables.
+  """
+  if config_path is None:
+    config_path = Path(__file__).parent / "app_config.json"
+
+  data = {
+    "models": [],
+    "default_model_id": config.default_model_id,
+  }
+
+  for model in config.models:
+    data["models"].append(
+      {
+        "name": model.name,
+        "model_id": model.model_id,
+        "api_key_env": model.api_key_env,
+        "endpoint": model.endpoint,
+        "num_inference_steps": model.num_inference_steps,
+      }
+    )
+
+  with open(config_path, "w") as f:
+    json.dump(data, f, indent=2)
+
+```
+
+```python
+"""
+Model configuration for the generation app.
+
+Loads model configurations from app_config.json and provides
+utilities for selecting and using different AI models.
+"""
+
+import json
+import os
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+
+@dataclass
+class ModelConfig:
+  """Configuration for a single AI model."""
+
+  name: str
+  model_id: str
+  api_key_env: str  # Environment variable name for the API key
+  endpoint: str = "https://hub.oxen.ai/api/images/edit"
+  num_inference_steps: int = 28
+  model_type: str = "oxen"  # "oxen" for Oxen API, "local" for local inference
+
+  @property
+  def api_key(self) -> str | None:
+    """Get the API key from environment variables."""
+    return os.getenv(self.api_key_env) if self.api_key_env else None
+
+  @property
+  def is_local(self) -> bool:
+    """Check if this model uses local inference."""
+    return self.model_type == "local"
+
+  def to_dict(self) -> dict[str, Any]:
+    """Convert to dictionary for JSON serialization (without API key)."""
+    return {
+      "name": self.name,
+      "model_id": self.model_id,
+      "endpoint": self.endpoint,
+      "num_inference_steps": self.num_inference_steps,
+      "model_type": self.model_type,
+    }
+
+
+@dataclass
+class AppConfig:
+  """Full application configuration."""
+
+  models: list[ModelConfig]
+  default_model_id: str | None = None
+
+  def get_model(self, model_id: str) -> ModelConfig | None:
+    """Get a model configuration by its ID."""
+    for model in self.models:
+      if model.model_id == model_id:
+        return model
+    return None
+
+  def get_default_model(self) -> ModelConfig | None:
+    """Get the default model, or the first model if no default is set."""
+    if self.default_model_id:
+      return self.get_model(self.default_model_id)
+    return self.models[0] if self.models else None
+
+  def to_dict(self) -> dict[str, Any]:
+    """Convert to dictionary for JSON serialization."""
+    return {
+      "models": [m.to_dict() for m in self.models],
+      "default_model_id": self.default_model_id,
+    }
+
+
+def load_app_config(config_path: Path | None = None) -> AppConfig:
+  """
+  Load the application configuration from app_config.json.
+
+  Args:
+    config_path: Path to the config file. If None, looks in the generation dir.
+
+  Returns:
+    AppConfig object with model configurations
+
+  If the config file doesn't exist, returns a default configuration
+  with the legacy Oxen models.
+  """
+  if config_path is None:
+    config_path = Path(__file__).parent / "app_config.json"
+
+  if not config_path.exists():
+    # Return default configuration with legacy models
+    return get_default_config()
+
+  with open(config_path) as f:
+    data = json.load(f)
+
+  models = []
+  for model_data in data.get("models", []):
+    models.append(
+      ModelConfig(
+        name=model_data["name"],
+        model_id=model_data["model_id"],
+        api_key_env=model_data.get("api_key_env", ""),
+        endpoint=model_data.get("endpoint", "https://hub.oxen.ai/api/images/edit"),
+        num_inference_steps=model_data.get("num_inference_steps", 28),
+        model_type=model_data.get("model_type", "oxen"),
+      )
+    )
+
+  return AppConfig(
+    models=models,
+    default_model_id=data.get("default_model_id"),
+  )
+
+
+def get_default_config() -> AppConfig:
+  """
+  Get the default configuration with legacy Oxen models.
+
+  This is used when no app_config.json exists.
+  """
+  return AppConfig(
+    models=[
+      ModelConfig(
+        name="Omni Water v1",
+        model_id="cannoneyed-quiet-green-lamprey",
+        api_key_env="OXEN_OMNI_v04_WATER_API_KEY",
+      ),
+      ModelConfig(
+        name="Omni Water v2",
+        model_id="cannoneyed-rural-rose-dingo",
+        api_key_env="OXEN_OMNI_WATER_V2_API_KEY",
+      ),
+      ModelConfig(
+        name="Omni (Original)",
+        model_id="cannoneyed-gentle-gold-antlion",
+        api_key_env="OXEN_OMNI_API_KEY",
+      ),
+    ],
+    default_model_id="cannoneyed-quiet-green-lamprey",
+  )
+
+
+def save_app_config(config: AppConfig, config_path: Path | None = None) -> None:
+  """
+  Save the application configuration to app_config.json.
+
+  Note: This does NOT save API keys - those should remain in environment variables.
+  """
+  if config_path is None:
+    config_path = Path(__file__).parent / "app_config.json"
+
+  data = {
+    "models": [],
+    "default_model_id": config.default_model_id,
+  }
+
+  for model in config.models:
+    data["models"].append(
+      {
+        "name": model.name,
+        "model_id": model.model_id,
+        "api_key_env": model.api_key_env,
+        "endpoint": model.endpoint,
+        "num_inference_steps": model.num_inference_steps,
+      }
+    )
+
+  with open(config_path, "w") as f:
+    json.dump(data, f, indent=2)
+
+```
+
+```python
+"""
+Model configuration for the generation app.
+
+Loads model configurations from app_config.json and provides
+utilities for selecting and using different AI models.
+"""
+
+import json
+import os
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+
+@dataclass
+class ModelConfig:
+  """Configuration for a single AI model."""
+
+  name: str
+  model_id: str
+  api_key_env: str  # Environment variable name for the API key
+  endpoint: str = "https://hub.oxen.ai/api/images/edit"
+  num_inference_steps: int = 28
+  model_type: str = "oxen"  # "oxen" for Oxen API, "local" for local inference
+
+  @property
+  def api_key(self) -> str | None:
+    """Get the API key from environment variables."""
+    return os.getenv(self.api_key_env) if self.api_key_env else None
+
+  @property
+  def is_local(self) -> bool:
+    """Check if this model uses local inference."""
+    return self.model_type == "local"
+
+  def to_dict(self) -> dict[str, Any]:
+    """Convert to dictionary for JSON serialization (without API key)."""
+    return {
+      "name": self.name,
+      "model_id": self.model_id,
+      "endpoint": self.endpoint,
+      "num_inference_steps": self.num_inference_steps,
+      "model_type": self.model_type,
+    }
+
+
+@dataclass
+class AppConfig:
+  """Full application configuration."""
+
+  models: list[ModelConfig]
+  default_model_id: str | None = None
+
+  def get_model(self, model_id: str) -> ModelConfig | None:
+    """Get a model configuration by its ID."""
+    for model in self.models:
+      if model.model_id == model_id:
+        return model
+    return None
+
+  def get_default_model(self) -> ModelConfig | None:
+    """Get the default model, or the first model if no default is set."""
+    if self.default_model_id:
+      return self.get_model(self.default_model_id)
+    return self.models[0] if self.models else None
+
+  def to_dict(self) -> dict[str, Any]:
+    """Convert to dictionary for JSON serialization."""
+    return {
+      "models": [m.to_dict() for m in self.models],
+      "default_model_id": self.default_model_id,
+    }
+
+
+def load_app_config(config_path: Path | None = None) -> AppConfig:
+  """
+  Load the application configuration from app_config.json.
+
+  Args:
+    config_path: Path to the config file. If None, looks in the generation dir.
+
+  Returns:
+    AppConfig object with model configurations
+
+  If the config file doesn't exist, returns a default configuration
+  with the legacy Oxen models.
+  """
+  if config_path is None:
+    config_path = Path(__file__).parent / "app_config.json"
+
+  if not config_path.exists():
+    # Return default configuration with legacy models
+    return get_default_config()
+
+  with open(config_path) as f:
+    data = json.load(f)
+
+  models = []
+  for model_data in data.get("models", []):
+    models.append(
+      ModelConfig(
+        name=model_data["name"],
+        model_id=model_data["model_id"],
+        api_key_env=model_data.get("api_key_env", ""),
+        endpoint=model_data.get("endpoint", "https://hub.oxen.ai/api/images/edit"),
+        num_inference_steps=model_data.get("num_inference_steps", 28),
+        model_type=model_data.get("model_type", "oxen"),
+      )
+    )
+
+  return AppConfig(
+    models=models,
+    default_model_id=data.get("default_model_id"),
+  )
+
+
+def get_default_config() -> AppConfig:
+  """
+  Get the default configuration with legacy Oxen models.
+
+  This is used when no app_config.json exists.
+  """
+  return AppConfig(
+    models=[
+      ModelConfig(
+        name="Omni Water v1",
+        model_id="cannoneyed-quiet-green-lamprey",
+        api_key_env="OXEN_OMNI_v04_WATER_API_KEY",
+      ),
+      ModelConfig(
+        name="Omni Water v2",
+        model_id="cannoneyed-rural-rose-dingo",
+        api_key_env="OXEN_OMNI_WATER_V2_API_KEY",
+      ),
+      ModelConfig(
+        name="Omni (Original)",
+        model_id="cannoneyed-gentle-gold-antlion",
+        api_key_env="OXEN_OMNI_API_KEY",
+      ),
+    ],
+    default_model_id="cannoneyed-quiet-green-lamprey",
+  )
+
+
+def save_app_config(config: AppConfig, config_path: Path | None = None) -> None:
+  """
+  Save the application configuration to app_config.json.
+
+  Note: This does NOT save API keys - those should remain in environment variables.
+  """
+  if config_path is None:
+    config_path = Path(__file__).parent / "app_config.json"
+
+  data = {
+    "models": [],
+    "default_model_id": config.default_model_id,
+  }
+
+  for model in config.models:
+    data["models"].append(
+      {
+        "name": model.name,
+        "model_id": model.model_id,
+        "api_key_env": model.api_key_env,
+        "endpoint": model.endpoint,
+        "num_inference_steps": model.num_inference_steps,
+        "model_type": model.model_type,
+      }
+    )
+
+  with open(config_path, "w") as f:
+    json.dump(data, f, indent=2)
+
+```
+
+Now let me add the local API function and update the generation logic in `generate_omni.py`:
+
+```python
+"""
+Reusable library for generating pixel art using the Oxen.ai model.
+
+This module provides the core generation logic that can be used by:
+- view_generations.py (Flask web server)
+- generate_tiles_omni.py (command-line script)
+- automatic_generation.py (automated generation)
+
+The main entry point is `run_generation_for_quadrants()` which handles:
+1. Validating the quadrant selection
+2. Rendering any missing quadrants
+3. Building the template image
+4. Uploading to GCS and calling the Oxen API
+5. Saving the generated quadrants to the database
+"""
+
+import os
+import re
+import sqlite3
+import tempfile
+from io import BytesIO
+from pathlib import Path
+from typing import Callable
+from urllib.parse import urlencode
+
+import requests
+from dotenv import load_dotenv
+from PIL import Image
+from playwright.sync_api import sync_playwright
+
+from isometric_nyc.e2e_generation.infill_template import (
+  QUADRANT_SIZE,
+  InfillRegion,
+  TemplateBuilder,
+  validate_quadrant_selection,
+)
+from isometric_nyc.e2e_generation.shared import (
+  DEFAULT_WEB_PORT,
+  ensure_quadrant_exists,
+  image_to_png_bytes,
+  png_bytes_to_image,
+  save_quadrant_generation,
+  save_quadrant_render,
+  split_tile_into_quadrants,
+  upload_to_gcs,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_generation as shared_get_quadrant_generation,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_render as shared_get_quadrant_render,
+)
+
+# Load environment variables
+load_dotenv()
+
+# Oxen API configuration
+OMNI_MODEL_ID = "cannoneyed-gentle-gold-antlion"
+OMNI_WATER_MODEL_ID = "cannoneyed-quiet-green-lamprey"
+OMNI_WATER_V2_MODEL_ID = "cannoneyed-rural-rose-dingo"
+
+GCS_BUCKET_NAME = "isometric-nyc-infills"
+
+
+# =============================================================================
+# Quadrant Parsing Utilities
+# =============================================================================
+
+
+def parse_quadrant_tuple(s: str) -> tuple[int, int]:
+  """
+  Parse a quadrant tuple string like "(0,1)" or "0,1" into a tuple.
+
+  Args:
+      s: String in format "(x,y)" or "x,y"
+
+  Returns:
+      Tuple of (x, y) coordinates
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  s = s.strip()
+  # Remove optional parentheses
+  if s.startswith("(") and s.endswith(")"):
+    s = s[1:-1]
+  parts = s.split(",")
+  if len(parts) != 2:
+    raise ValueError(f"Invalid quadrant tuple format: {s}")
+  return (int(parts[0].strip()), int(parts[1].strip()))
+
+
+def parse_quadrant_list(s: str) -> list[tuple[int, int]]:
+  """
+  Parse a comma-separated list of quadrant tuples.
+
+  Args:
+      s: String like "(0,1),(0,2)" or "(0,1), (0,2)"
+
+  Returns:
+      List of (x, y) coordinate tuples
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  # Use regex to find all (x,y) patterns
+  pattern = r"\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)"
+  matches = re.findall(pattern, s)
+  if not matches:
+    raise ValueError(f"No valid quadrant tuples found in: {s}")
+  return [(int(x), int(y)) for x, y in matches]
+
+
+# =============================================================================
+# Local Inference API Functions
+# =============================================================================
+
+
+def call_local_api(
+  image: "Image.Image",
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> "Image.Image":
+  """
+  Call the local inference API to generate pixel art.
+
+  The local API expects multipart/form-data with:
+    - file: The input image as PNG
+    - prompt: The generation prompt
+    - steps: Number of inference steps
+
+  Args:
+      image: PIL Image of the input template
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      PIL Image of the generated result
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  from io import BytesIO
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "http://localhost:8888/edit"
+    num_inference_steps = 15
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  # Convert PIL image to bytes
+  img_buffer = BytesIO()
+  image.save(img_buffer, format="PNG")
+  img_buffer.seek(0)
+
+  # Prepare multipart form data
+  files = {
+    "file": ("input.png", img_buffer, "image/png"),
+  }
+  data = {
+    "prompt": prompt,
+    "steps": str(num_inference_steps),
+  }
+
+  print(f"   🏠 Calling local API at {endpoint}...")
+  print(f"   📊 Steps: {num_inference_steps}")
+
+  response = requests.post(
+    endpoint,
+    files=files,
+    data=data,
+    headers={"accept": "image/png"},
+    timeout=600,  # 10 minute timeout for local inference
+  )
+  response.raise_for_status()
+
+  # Check content type
+  content_type = response.headers.get("content-type", "")
+  if "image" not in content_type:
+    raise ValueError(f"Expected image response, got content-type: {content_type}")
+
+  print(f"   ✓ Received {len(response.content)} bytes from local API")
+
+  # Parse the response as an image
+  return Image.open(BytesIO(response.content))
+
+
+# =============================================================================
+# Oxen API Functions
+# =============================================================================
+
+
+def call_oxen_api(
+  image_url: str,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> str:
+  """
+  Call the Oxen API to generate pixel art.
+
+  Args:
+      image_url: Public URL of the input template image
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      URL of the generated image
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    model_id = model_config.model_id
+    api_key = model_config.api_key
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "https://hub.oxen.ai/api/images/edit"
+    model_id = OMNI_WATER_MODEL_ID
+    api_key = os.getenv("OXEN_OMNI_v04_WATER_API_KEY")
+    num_inference_steps = 28
+
+  if not api_key:
+    raise ValueError(f"API key not found for model {model_id}")
+
+  headers = {
+    "Authorization": f"Bearer {api_key}",
+    "Content-Type": "application/json",
+  }
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  payload = {
+    "model": model_id,
+    "input_image": image_url,
+    "prompt": prompt,
+    "num_inference_steps": num_inference_steps,
+  }
+
+  print(f"   🤖 Calling Oxen API with model {model_id}...")
+  response = requests.post(endpoint, headers=headers, json=payload, timeout=300)
+  response.raise_for_status()
+
+  result = response.json()
+
+  # Log the response structure for debugging
+  print(f"   📥 API response keys: {list(result.keys())}")
+
+  # Try various response formats
+  if "images" in result and len(result["images"]) > 0:
+    image_data = result["images"][0]
+    print(
+      f"   📥 Image data keys: {list(image_data.keys()) if isinstance(image_data, dict) else type(image_data)}"
+    )
+
+    # Try different possible keys for the image URL
+    if isinstance(image_data, dict):
+      if "url" in image_data:
+        return image_data["url"]
+      elif "image_url" in image_data:
+        return image_data["image_url"]
+      elif "data" in image_data:
+        # Some APIs return base64 data - we'd need to handle this differently
+        raise ValueError(
+          f"API returned base64 data instead of URL: {list(image_data.keys())}"
+        )
+      else:
+        raise ValueError(
+          f"Image data missing 'url' key. Available keys: {list(image_data.keys())}"
+        )
+    elif isinstance(image_data, str):
+      # Direct URL string
+      return image_data
+    else:
+      raise ValueError(f"Unexpected image data type: {type(image_data)}")
+  elif "url" in result:
+    return result["url"]
+  elif "image_url" in result:
+    return result["image_url"]
+  elif "output" in result:
+    return result["output"]
+  elif "error" in result:
+    raise ValueError(f"API returned error: {result['error']}")
+  elif "message" in result:
+    raise ValueError(f"API returned message: {result['message']}")
+  else:
+    raise ValueError(
+      f"Unexpected API response format. Keys: {list(result.keys())}, Full response: {result}"
+    )
+
+
+def download_image_to_pil(
+  url: str,
+  max_retries: int = 3,
+  retry_delay: float = 10.0,
+) -> Image.Image:
+  """
+  Download an image from a URL and return as PIL Image.
+
+  Includes retry logic for transient errors (e.g., 403 Forbidden when
+  the image is not yet available).
+
+  Args:
+      url: URL of the image to download
+      max_retries: Maximum number of retry attempts (default: 3)
+      retry_delay: Seconds to wait between retries (default: 10.0)
+
+  Returns:
+      PIL Image object
+
+  Raises:
+      requests.HTTPError: If all retry attempts fail
+  """
+  import time
+
+  last_error = None
+
+  for attempt in range(1, max_retries + 1):
+    try:
+      response = requests.get(url, timeout=120)
+      response.raise_for_status()
+      return Image.open(BytesIO(response.content))
+    except requests.exceptions.HTTPError as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download failed (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+    except requests.exceptions.RequestException as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download error (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+
+  # If we get here, all retries failed
+  if last_error:
+    raise last_error
+  raise RuntimeError("Download failed with no error captured")
+
+
+# =============================================================================
+# Rendering Functions
+# =============================================================================
+
+
+def render_quadrant(
+  conn: sqlite3.Connection,
+  config: dict,
+  x: int,
+  y: int,
+  port: int,
+) -> bytes | None:
+  """
+  Render a quadrant and save to database.
+
+  This renders the tile containing the quadrant and saves all 4 quadrants.
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      x: Quadrant x coordinate
+      y: Quadrant y coordinate
+      port: Web server port for rendering
+
+  Returns:
+      PNG bytes of the rendered quadrant, or None if failed
+  """
+  # Ensure the quadrant exists in the database
+  quadrant = ensure_quadrant_exists(conn, config, x, y)
+
+  print(f"   🎨 Rendering tile for quadrant ({x}, {y})...")
+
+  # Build URL for rendering
+  params = {
+    "export": "true",
+    "lat": quadrant["lat"],
+    "lon": quadrant["lng"],
+    "width": config["width_px"],
+    "height": config["height_px"],
+    "azimuth": config["camera_azimuth_degrees"],
+    "elevation": config["camera_elevation_degrees"],
+    "view_height": config.get("view_height_meters", 200),
+  }
+  query_string = urlencode(params)
+  url = f"http://localhost:{port}/?{query_string}"
+
+  # Render using Playwright
+  with sync_playwright() as p:
+    browser = p.chromium.launch(
+      headless=True,
+      args=[
+        "--enable-webgl",
+        "--use-gl=angle",
+        "--ignore-gpu-blocklist",
+      ],
+    )
+
+    context = browser.new_context(
+      viewport={"width": config["width_px"], "height": config["height_px"]},
+      device_scale_factor=1,
+    )
+    page = context.new_page()
+
+    page.goto(url, wait_until="networkidle")
+
+    try:
+      page.wait_for_function("window.TILES_LOADED === true", timeout=60000)
+    except Exception:
+      print("      ⚠️  Timeout waiting for tiles, continuing anyway...")
+
+    # Get screenshot as bytes
+    screenshot_bytes = page.screenshot(type="png")
+
+    page.close()
+    context.close()
+    browser.close()
+
+  # Open as PIL image and split into quadrants
+  full_tile = Image.open(BytesIO(screenshot_bytes))
+  quadrant_images = split_tile_into_quadrants(full_tile)
+
+  # Save all quadrants to database
+  result_bytes = None
+  for (dx, dy), quad_img in quadrant_images.items():
+    qx, qy = x + dx, y + dy
+    png_bytes = image_to_png_bytes(quad_img)
+    save_quadrant_render(conn, config, qx, qy, png_bytes)
+    print(f"      ✓ Saved render for ({qx}, {qy})")
+
+    # Return the specific quadrant we were asked for
+    if qx == x and qy == y:
+      result_bytes = png_bytes
+
+  return result_bytes
+
+
+# =============================================================================
+# Core Generation Logic
+# =============================================================================
+
+
+def run_generation_for_quadrants(
+  conn: sqlite3.Connection,
+  config: dict,
+  selected_quadrants: list[tuple[int, int]],
+  port: int = DEFAULT_WEB_PORT,
+  bucket_name: str = GCS_BUCKET_NAME,
+  status_callback: Callable[[str, str], None] | None = None,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  context_quadrants: list[tuple[int, int]] | None = None,
+  prompt: str | None = None,
+) -> dict:
+  """
+  Run the full generation pipeline for selected quadrants.
+
+  This is the main entry point for generation. It:
+  1. Validates the quadrant selection
+  2. Renders any missing quadrants
+  3. Builds the template image with appropriate borders
+  4. Uploads to GCS and calls the Oxen API
+  5. Saves the generated quadrants to the database
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      selected_quadrants: List of (x, y) quadrant coordinates to generate
+      port: Web server port for rendering (default: 5173)
+      bucket_name: GCS bucket name for uploads
+      status_callback: Optional callback(status, message) for progress updates
+      model_config: Optional model configuration for the Oxen API (ModelConfig from model_config.py)
+      context_quadrants: Optional list of (x, y) quadrant coordinates to use as
+        context. These quadrants provide surrounding pixel art context for the
+        generation. If a context quadrant has a generation, that will be used;
+        otherwise the render will be used.
+      prompt: Optional additional prompt text for generation
+
+  Returns:
+      Dict with:
+          - success: bool
+          - message: str (on success)
+          - error: str (on failure)
+          - quadrants: list of generated quadrant coords (on success)
+  """
+  # Convert context quadrants to a set for fast lookup
+  context_set: set[tuple[int, int]] = (
+    set(context_quadrants) if context_quadrants else set()
+  )
+  if context_set:
+    print(f"   📋 Using {len(context_set)} context quadrant(s): {list(context_set)}")
+  if prompt:
+    print(f"   📝 Additional prompt: {prompt}")
+
+  def update_status(status: str, message: str = "") -> None:
+    if status_callback:
+      status_callback(status, message)
+
+  update_status("validating", "Checking API key...")
+
+  # Create helper functions for validation
+  # These are modified to treat context quadrants as "generated" if they have
+  # either a generation or a render
+  def has_generation_in_db(qx: int, qy: int) -> bool:
+    # Check if this quadrant has an actual generation
+    gen = shared_get_quadrant_generation(conn, qx, qy)
+    if gen is not None:
+      return True
+
+    # For context quadrants, treat them as "generated" if they have a render
+    # This allows context quadrants to provide surrounding content even if
+    # they don't have generations yet
+    if (qx, qy) in context_set:
+      render = shared_get_quadrant_render(conn, qx, qy)
+      return render is not None
+
+    return False
+
+  def get_render_from_db_with_render(qx: int, qy: int) -> Image.Image | None:
+    """Get render, rendering if it doesn't exist yet."""
+    render_bytes = shared_get_quadrant_render(conn, qx, qy)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+
+    # Need to render
+    update_status("rendering", f"Rendering quadrant ({qx}, {qy})...")
+    print(f"   📦 Rendering quadrant ({qx}, {qy})...")
+    render_bytes = render_quadrant(conn, config, qx, qy, port)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+    return None
+
+  def get_generation_from_db(qx: int, qy: int) -> Image.Image | None:
+    """Get generation, falling back to render for context quadrants."""
+    gen_bytes = shared_get_quadrant_generation(conn, qx, qy)
+    if gen_bytes:
+      return png_bytes_to_image(gen_bytes)
+
+    # For context quadrants, fall back to render if no generation exists
+    # This allows context quadrants to provide surrounding pixel art context
+    # even if they only have renders
+    if (qx, qy) in context_set:
+      render_bytes = shared_get_quadrant_render(conn, qx, qy)
+      if render_bytes:
+        print(f"   📋 Using render as context for ({qx}, {qy})")
+        return png_bytes_to_image(render_bytes)
+
+    return None
+
+  update_status("validating", "Validating quadrant selection...")
+
+  # Validate selection with auto-expansion
+  is_valid, msg, placement = validate_quadrant_selection(
+    selected_quadrants, has_generation_in_db, allow_expansion=True
+  )
+
+  if not is_valid:
+    update_status("error", msg)
+    return {"success": False, "error": msg}
+
+  print(f"✅ Validation: {msg}")
+
+  # Get primary quadrants (the ones user selected, not padding)
+  primary_quadrants = (
+    placement.primary_quadrants if placement.primary_quadrants else selected_quadrants
+  )
+  padding_quadrants = placement.padding_quadrants if placement else []
+
+  if padding_quadrants:
+    print(f"   📦 Padding quadrants: {padding_quadrants}")
+
+  # Create the infill region (may be expanded)
+  if placement._expanded_region is not None:
+    region = placement._expanded_region
+  else:
+    region = InfillRegion.from_quadrants(selected_quadrants)
+
+  # Build the template
+  update_status("rendering", "Building template image...")
+  builder = TemplateBuilder(
+    region, has_generation_in_db, get_render_from_db_with_render, get_generation_from_db
+  )
+
+  print("📋 Building template...")
+  result = builder.build(border_width=2, allow_expansion=True)
+
+  if result is None:
+    error_msg = builder._last_validation_error or "Failed to build template"
+    update_status("error", error_msg)
+    return {
+      "success": False,
+      "error": error_msg,
+    }
+
+  template_image, placement = result
+
+  # Save template to temp file and upload to GCS
+  with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+    template_path = Path(tmp.name)
+    template_image.save(template_path)
+
+  try:
+    update_status("uploading", "Uploading template to cloud...")
+    print("📤 Uploading template to GCS...")
+    print(f"   Template path: {template_path}")
+    print(f"   Template size: {template_image.size[0]}x{template_image.size[1]}")
+    image_url = upload_to_gcs(template_path, bucket_name)
+    print(f"   Uploaded URL: {image_url}")
+
+    update_status("generating", "Calling AI model (this may take a minute)...")
+    print("🤖 Calling Oxen API...")
+    generated_url = call_oxen_api(image_url, model_config, prompt)
+
+    update_status("saving", "Downloading and saving results...")
+    print("📥 Downloading generated image...")
+    print(f"   Generated URL: {generated_url}")
+    generated_image = download_image_to_pil(generated_url)
+
+    # Extract quadrants from generated image and save to database
+    print("💾 Saving generated quadrants to database...")
+
+    # Figure out what quadrants are in the infill region
+    all_infill_quadrants = (
+      placement.all_infill_quadrants
+      if placement.all_infill_quadrants
+      else region.overlapping_quadrants()
+    )
+
+    # For each infill quadrant, extract pixels from the generated image
+    saved_count = 0
+    for qx, qy in all_infill_quadrants:
+      # Calculate position in the generated image
+      quad_world_x = qx * QUADRANT_SIZE
+      quad_world_y = qy * QUADRANT_SIZE
+
+      template_x = quad_world_x - placement.world_offset_x
+      template_y = quad_world_y - placement.world_offset_y
+
+      # Crop this quadrant from the generated image
+      crop_box = (
+        template_x,
+        template_y,
+        template_x + QUADRANT_SIZE,
+        template_y + QUADRANT_SIZE,
+      )
+      quad_img = generated_image.crop(crop_box)
+      png_bytes = image_to_png_bytes(quad_img)
+
+      # Only save primary quadrants (not padding)
+      if (qx, qy) in primary_quadrants or (qx, qy) in [
+        (q[0], q[1]) for q in primary_quadrants
+      ]:
+        if save_quadrant_generation(conn, config, qx, qy, png_bytes):
+          print(f"   ✓ Saved generation for ({qx}, {qy})")
+          saved_count += 1
+        else:
+          print(f"   ⚠️ Failed to save generation for ({qx}, {qy})")
+      else:
+        print(f"   ⏭️ Skipped padding quadrant ({qx}, {qy})")
+
+    update_status("complete", f"Generated {saved_count} quadrant(s)")
+    return {
+      "success": True,
+      "message": f"Generated {saved_count} quadrant{'s' if saved_count != 1 else ''}",
+      "quadrants": list(primary_quadrants),
+    }
+
+  finally:
+    # Clean up temp file
+    template_path.unlink(missing_ok=True)
+
+```
+
+Now let me update the generation logic to dispatch based on model type. The key is to update the section that calls the Oxen API:
+
+```python
+"""
+Reusable library for generating pixel art using the Oxen.ai model.
+
+This module provides the core generation logic that can be used by:
+- view_generations.py (Flask web server)
+- generate_tiles_omni.py (command-line script)
+- automatic_generation.py (automated generation)
+
+The main entry point is `run_generation_for_quadrants()` which handles:
+1. Validating the quadrant selection
+2. Rendering any missing quadrants
+3. Building the template image
+4. Uploading to GCS and calling the Oxen API
+5. Saving the generated quadrants to the database
+"""
+
+import os
+import re
+import sqlite3
+import tempfile
+from io import BytesIO
+from pathlib import Path
+from typing import Callable
+from urllib.parse import urlencode
+
+import requests
+from dotenv import load_dotenv
+from PIL import Image
+from playwright.sync_api import sync_playwright
+
+from isometric_nyc.e2e_generation.infill_template import (
+  QUADRANT_SIZE,
+  InfillRegion,
+  TemplateBuilder,
+  validate_quadrant_selection,
+)
+from isometric_nyc.e2e_generation.shared import (
+  DEFAULT_WEB_PORT,
+  ensure_quadrant_exists,
+  image_to_png_bytes,
+  png_bytes_to_image,
+  save_quadrant_generation,
+  save_quadrant_render,
+  split_tile_into_quadrants,
+  upload_to_gcs,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_generation as shared_get_quadrant_generation,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_render as shared_get_quadrant_render,
+)
+
+# Load environment variables
+load_dotenv()
+
+# Oxen API configuration
+OMNI_MODEL_ID = "cannoneyed-gentle-gold-antlion"
+OMNI_WATER_MODEL_ID = "cannoneyed-quiet-green-lamprey"
+OMNI_WATER_V2_MODEL_ID = "cannoneyed-rural-rose-dingo"
+
+GCS_BUCKET_NAME = "isometric-nyc-infills"
+
+
+# =============================================================================
+# Quadrant Parsing Utilities
+# =============================================================================
+
+
+def parse_quadrant_tuple(s: str) -> tuple[int, int]:
+  """
+  Parse a quadrant tuple string like "(0,1)" or "0,1" into a tuple.
+
+  Args:
+      s: String in format "(x,y)" or "x,y"
+
+  Returns:
+      Tuple of (x, y) coordinates
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  s = s.strip()
+  # Remove optional parentheses
+  if s.startswith("(") and s.endswith(")"):
+    s = s[1:-1]
+  parts = s.split(",")
+  if len(parts) != 2:
+    raise ValueError(f"Invalid quadrant tuple format: {s}")
+  return (int(parts[0].strip()), int(parts[1].strip()))
+
+
+def parse_quadrant_list(s: str) -> list[tuple[int, int]]:
+  """
+  Parse a comma-separated list of quadrant tuples.
+
+  Args:
+      s: String like "(0,1),(0,2)" or "(0,1), (0,2)"
+
+  Returns:
+      List of (x, y) coordinate tuples
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  # Use regex to find all (x,y) patterns
+  pattern = r"\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)"
+  matches = re.findall(pattern, s)
+  if not matches:
+    raise ValueError(f"No valid quadrant tuples found in: {s}")
+  return [(int(x), int(y)) for x, y in matches]
+
+
+# =============================================================================
+# Local Inference API Functions
+# =============================================================================
+
+
+def call_local_api(
+  image: "Image.Image",
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> "Image.Image":
+  """
+  Call the local inference API to generate pixel art.
+
+  The local API expects multipart/form-data with:
+    - file: The input image as PNG
+    - prompt: The generation prompt
+    - steps: Number of inference steps
+
+  Args:
+      image: PIL Image of the input template
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      PIL Image of the generated result
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  from io import BytesIO
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "http://localhost:8888/edit"
+    num_inference_steps = 15
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  # Convert PIL image to bytes
+  img_buffer = BytesIO()
+  image.save(img_buffer, format="PNG")
+  img_buffer.seek(0)
+
+  # Prepare multipart form data
+  files = {
+    "file": ("input.png", img_buffer, "image/png"),
+  }
+  data = {
+    "prompt": prompt,
+    "steps": str(num_inference_steps),
+  }
+
+  print(f"   🏠 Calling local API at {endpoint}...")
+  print(f"   📊 Steps: {num_inference_steps}")
+
+  response = requests.post(
+    endpoint,
+    files=files,
+    data=data,
+    headers={"accept": "image/png"},
+    timeout=600,  # 10 minute timeout for local inference
+  )
+  response.raise_for_status()
+
+  # Check content type
+  content_type = response.headers.get("content-type", "")
+  if "image" not in content_type:
+    raise ValueError(f"Expected image response, got content-type: {content_type}")
+
+  print(f"   ✓ Received {len(response.content)} bytes from local API")
+
+  # Parse the response as an image
+  return Image.open(BytesIO(response.content))
+
+
+# =============================================================================
+# Oxen API Functions
+# =============================================================================
+
+
+def call_oxen_api(
+  image_url: str,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> str:
+  """
+  Call the Oxen API to generate pixel art.
+
+  Args:
+      image_url: Public URL of the input template image
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      URL of the generated image
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    model_id = model_config.model_id
+    api_key = model_config.api_key
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "https://hub.oxen.ai/api/images/edit"
+    model_id = OMNI_WATER_MODEL_ID
+    api_key = os.getenv("OXEN_OMNI_v04_WATER_API_KEY")
+    num_inference_steps = 28
+
+  if not api_key:
+    raise ValueError(f"API key not found for model {model_id}")
+
+  headers = {
+    "Authorization": f"Bearer {api_key}",
+    "Content-Type": "application/json",
+  }
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  payload = {
+    "model": model_id,
+    "input_image": image_url,
+    "prompt": prompt,
+    "num_inference_steps": num_inference_steps,
+  }
+
+  print(f"   🤖 Calling Oxen API with model {model_id}...")
+  response = requests.post(endpoint, headers=headers, json=payload, timeout=300)
+  response.raise_for_status()
+
+  result = response.json()
+
+  # Log the response structure for debugging
+  print(f"   📥 API response keys: {list(result.keys())}")
+
+  # Try various response formats
+  if "images" in result and len(result["images"]) > 0:
+    image_data = result["images"][0]
+    print(
+      f"   📥 Image data keys: {list(image_data.keys()) if isinstance(image_data, dict) else type(image_data)}"
+    )
+
+    # Try different possible keys for the image URL
+    if isinstance(image_data, dict):
+      if "url" in image_data:
+        return image_data["url"]
+      elif "image_url" in image_data:
+        return image_data["image_url"]
+      elif "data" in image_data:
+        # Some APIs return base64 data - we'd need to handle this differently
+        raise ValueError(
+          f"API returned base64 data instead of URL: {list(image_data.keys())}"
+        )
+      else:
+        raise ValueError(
+          f"Image data missing 'url' key. Available keys: {list(image_data.keys())}"
+        )
+    elif isinstance(image_data, str):
+      # Direct URL string
+      return image_data
+    else:
+      raise ValueError(f"Unexpected image data type: {type(image_data)}")
+  elif "url" in result:
+    return result["url"]
+  elif "image_url" in result:
+    return result["image_url"]
+  elif "output" in result:
+    return result["output"]
+  elif "error" in result:
+    raise ValueError(f"API returned error: {result['error']}")
+  elif "message" in result:
+    raise ValueError(f"API returned message: {result['message']}")
+  else:
+    raise ValueError(
+      f"Unexpected API response format. Keys: {list(result.keys())}, Full response: {result}"
+    )
+
+
+def download_image_to_pil(
+  url: str,
+  max_retries: int = 3,
+  retry_delay: float = 10.0,
+) -> Image.Image:
+  """
+  Download an image from a URL and return as PIL Image.
+
+  Includes retry logic for transient errors (e.g., 403 Forbidden when
+  the image is not yet available).
+
+  Args:
+      url: URL of the image to download
+      max_retries: Maximum number of retry attempts (default: 3)
+      retry_delay: Seconds to wait between retries (default: 10.0)
+
+  Returns:
+      PIL Image object
+
+  Raises:
+      requests.HTTPError: If all retry attempts fail
+  """
+  import time
+
+  last_error = None
+
+  for attempt in range(1, max_retries + 1):
+    try:
+      response = requests.get(url, timeout=120)
+      response.raise_for_status()
+      return Image.open(BytesIO(response.content))
+    except requests.exceptions.HTTPError as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download failed (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+    except requests.exceptions.RequestException as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download error (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+
+  # If we get here, all retries failed
+  if last_error:
+    raise last_error
+  raise RuntimeError("Download failed with no error captured")
+
+
+# =============================================================================
+# Rendering Functions
+# =============================================================================
+
+
+def render_quadrant(
+  conn: sqlite3.Connection,
+  config: dict,
+  x: int,
+  y: int,
+  port: int,
+) -> bytes | None:
+  """
+  Render a quadrant and save to database.
+
+  This renders the tile containing the quadrant and saves all 4 quadrants.
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      x: Quadrant x coordinate
+      y: Quadrant y coordinate
+      port: Web server port for rendering
+
+  Returns:
+      PNG bytes of the rendered quadrant, or None if failed
+  """
+  # Ensure the quadrant exists in the database
+  quadrant = ensure_quadrant_exists(conn, config, x, y)
+
+  print(f"   🎨 Rendering tile for quadrant ({x}, {y})...")
+
+  # Build URL for rendering
+  params = {
+    "export": "true",
+    "lat": quadrant["lat"],
+    "lon": quadrant["lng"],
+    "width": config["width_px"],
+    "height": config["height_px"],
+    "azimuth": config["camera_azimuth_degrees"],
+    "elevation": config["camera_elevation_degrees"],
+    "view_height": config.get("view_height_meters", 200),
+  }
+  query_string = urlencode(params)
+  url = f"http://localhost:{port}/?{query_string}"
+
+  # Render using Playwright
+  with sync_playwright() as p:
+    browser = p.chromium.launch(
+      headless=True,
+      args=[
+        "--enable-webgl",
+        "--use-gl=angle",
+        "--ignore-gpu-blocklist",
+      ],
+    )
+
+    context = browser.new_context(
+      viewport={"width": config["width_px"], "height": config["height_px"]},
+      device_scale_factor=1,
+    )
+    page = context.new_page()
+
+    page.goto(url, wait_until="networkidle")
+
+    try:
+      page.wait_for_function("window.TILES_LOADED === true", timeout=60000)
+    except Exception:
+      print("      ⚠️  Timeout waiting for tiles, continuing anyway...")
+
+    # Get screenshot as bytes
+    screenshot_bytes = page.screenshot(type="png")
+
+    page.close()
+    context.close()
+    browser.close()
+
+  # Open as PIL image and split into quadrants
+  full_tile = Image.open(BytesIO(screenshot_bytes))
+  quadrant_images = split_tile_into_quadrants(full_tile)
+
+  # Save all quadrants to database
+  result_bytes = None
+  for (dx, dy), quad_img in quadrant_images.items():
+    qx, qy = x + dx, y + dy
+    png_bytes = image_to_png_bytes(quad_img)
+    save_quadrant_render(conn, config, qx, qy, png_bytes)
+    print(f"      ✓ Saved render for ({qx}, {qy})")
+
+    # Return the specific quadrant we were asked for
+    if qx == x and qy == y:
+      result_bytes = png_bytes
+
+  return result_bytes
+
+
+# =============================================================================
+# Core Generation Logic
+# =============================================================================
+
+
+def run_generation_for_quadrants(
+  conn: sqlite3.Connection,
+  config: dict,
+  selected_quadrants: list[tuple[int, int]],
+  port: int = DEFAULT_WEB_PORT,
+  bucket_name: str = GCS_BUCKET_NAME,
+  status_callback: Callable[[str, str], None] | None = None,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  context_quadrants: list[tuple[int, int]] | None = None,
+  prompt: str | None = None,
+) -> dict:
+  """
+  Run the full generation pipeline for selected quadrants.
+
+  This is the main entry point for generation. It:
+  1. Validates the quadrant selection
+  2. Renders any missing quadrants
+  3. Builds the template image with appropriate borders
+  4. Uploads to GCS and calls the Oxen API
+  5. Saves the generated quadrants to the database
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      selected_quadrants: List of (x, y) quadrant coordinates to generate
+      port: Web server port for rendering (default: 5173)
+      bucket_name: GCS bucket name for uploads
+      status_callback: Optional callback(status, message) for progress updates
+      model_config: Optional model configuration for the Oxen API (ModelConfig from model_config.py)
+      context_quadrants: Optional list of (x, y) quadrant coordinates to use as
+        context. These quadrants provide surrounding pixel art context for the
+        generation. If a context quadrant has a generation, that will be used;
+        otherwise the render will be used.
+      prompt: Optional additional prompt text for generation
+
+  Returns:
+      Dict with:
+          - success: bool
+          - message: str (on success)
+          - error: str (on failure)
+          - quadrants: list of generated quadrant coords (on success)
+  """
+  # Convert context quadrants to a set for fast lookup
+  context_set: set[tuple[int, int]] = (
+    set(context_quadrants) if context_quadrants else set()
+  )
+  if context_set:
+    print(f"   📋 Using {len(context_set)} context quadrant(s): {list(context_set)}")
+  if prompt:
+    print(f"   📝 Additional prompt: {prompt}")
+
+  def update_status(status: str, message: str = "") -> None:
+    if status_callback:
+      status_callback(status, message)
+
+  update_status("validating", "Checking API key...")
+
+  # Create helper functions for validation
+  # These are modified to treat context quadrants as "generated" if they have
+  # either a generation or a render
+  def has_generation_in_db(qx: int, qy: int) -> bool:
+    # Check if this quadrant has an actual generation
+    gen = shared_get_quadrant_generation(conn, qx, qy)
+    if gen is not None:
+      return True
+
+    # For context quadrants, treat them as "generated" if they have a render
+    # This allows context quadrants to provide surrounding content even if
+    # they don't have generations yet
+    if (qx, qy) in context_set:
+      render = shared_get_quadrant_render(conn, qx, qy)
+      return render is not None
+
+    return False
+
+  def get_render_from_db_with_render(qx: int, qy: int) -> Image.Image | None:
+    """Get render, rendering if it doesn't exist yet."""
+    render_bytes = shared_get_quadrant_render(conn, qx, qy)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+
+    # Need to render
+    update_status("rendering", f"Rendering quadrant ({qx}, {qy})...")
+    print(f"   📦 Rendering quadrant ({qx}, {qy})...")
+    render_bytes = render_quadrant(conn, config, qx, qy, port)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+    return None
+
+  def get_generation_from_db(qx: int, qy: int) -> Image.Image | None:
+    """Get generation, falling back to render for context quadrants."""
+    gen_bytes = shared_get_quadrant_generation(conn, qx, qy)
+    if gen_bytes:
+      return png_bytes_to_image(gen_bytes)
+
+    # For context quadrants, fall back to render if no generation exists
+    # This allows context quadrants to provide surrounding pixel art context
+    # even if they only have renders
+    if (qx, qy) in context_set:
+      render_bytes = shared_get_quadrant_render(conn, qx, qy)
+      if render_bytes:
+        print(f"   📋 Using render as context for ({qx}, {qy})")
+        return png_bytes_to_image(render_bytes)
+
+    return None
+
+  update_status("validating", "Validating quadrant selection...")
+
+  # Validate selection with auto-expansion
+  is_valid, msg, placement = validate_quadrant_selection(
+    selected_quadrants, has_generation_in_db, allow_expansion=True
+  )
+
+  if not is_valid:
+    update_status("error", msg)
+    return {"success": False, "error": msg}
+
+  print(f"✅ Validation: {msg}")
+
+  # Get primary quadrants (the ones user selected, not padding)
+  primary_quadrants = (
+    placement.primary_quadrants if placement.primary_quadrants else selected_quadrants
+  )
+  padding_quadrants = placement.padding_quadrants if placement else []
+
+  if padding_quadrants:
+    print(f"   📦 Padding quadrants: {padding_quadrants}")
+
+  # Create the infill region (may be expanded)
+  if placement._expanded_region is not None:
+    region = placement._expanded_region
+  else:
+    region = InfillRegion.from_quadrants(selected_quadrants)
+
+  # Build the template
+  update_status("rendering", "Building template image...")
+  builder = TemplateBuilder(
+    region, has_generation_in_db, get_render_from_db_with_render, get_generation_from_db
+  )
+
+  print("📋 Building template...")
+  result = builder.build(border_width=2, allow_expansion=True)
+
+  if result is None:
+    error_msg = builder._last_validation_error or "Failed to build template"
+    update_status("error", error_msg)
+    return {
+      "success": False,
+      "error": error_msg,
+    }
+
+  template_image, placement = result
+
+  # Check if we're using local or Oxen API
+  is_local = model_config is not None and model_config.is_local
+
+  template_path = None
+  try:
+    if is_local:
+      # Local inference - no GCS upload needed
+      print(f"📋 Template size: {template_image.size[0]}x{template_image.size[1]}")
+
+      update_status("generating", "Calling local model (this may take a minute)...")
+      print("🏠 Using local inference...")
+      generated_image = call_local_api(template_image, model_config, prompt)
+      print("   ✓ Local inference complete")
+    else:
+      # Oxen API - upload to GCS first
+      with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        template_path = Path(tmp.name)
+        template_image.save(template_path)
+
+      update_status("uploading", "Uploading template to cloud...")
+      print("📤 Uploading template to GCS...")
+      print(f"   Template path: {template_path}")
+      print(f"   Template size: {template_image.size[0]}x{template_image.size[1]}")
+      image_url = upload_to_gcs(template_path, bucket_name)
+      print(f"   Uploaded URL: {image_url}")
+
+      update_status("generating", "Calling AI model (this may take a minute)...")
+      print("🤖 Calling Oxen API...")
+      generated_url = call_oxen_api(image_url, model_config, prompt)
+
+      update_status("saving", "Downloading and saving results...")
+      print("📥 Downloading generated image...")
+      print(f"   Generated URL: {generated_url}")
+      generated_image = download_image_to_pil(generated_url)
+
+    # Extract quadrants from generated image and save to database
+    print("💾 Saving generated quadrants to database...")
+
+    # Figure out what quadrants are in the infill region
+    all_infill_quadrants = (
+      placement.all_infill_quadrants
+      if placement.all_infill_quadrants
+      else region.overlapping_quadrants()
+    )
+
+    # For each infill quadrant, extract pixels from the generated image
+    saved_count = 0
+    for qx, qy in all_infill_quadrants:
+      # Calculate position in the generated image
+      quad_world_x = qx * QUADRANT_SIZE
+      quad_world_y = qy * QUADRANT_SIZE
+
+      template_x = quad_world_x - placement.world_offset_x
+      template_y = quad_world_y - placement.world_offset_y
+
+      # Crop this quadrant from the generated image
+      crop_box = (
+        template_x,
+        template_y,
+        template_x + QUADRANT_SIZE,
+        template_y + QUADRANT_SIZE,
+      )
+      quad_img = generated_image.crop(crop_box)
+      png_bytes = image_to_png_bytes(quad_img)
+
+      # Only save primary quadrants (not padding)
+      if (qx, qy) in primary_quadrants or (qx, qy) in [
+        (q[0], q[1]) for q in primary_quadrants
+      ]:
+        if save_quadrant_generation(conn, config, qx, qy, png_bytes):
+          print(f"   ✓ Saved generation for ({qx}, {qy})")
+          saved_count += 1
+        else:
+          print(f"   ⚠️ Failed to save generation for ({qx}, {qy})")
+      else:
+        print(f"   ⏭️ Skipped padding quadrant ({qx}, {qy})")
+
+    update_status("complete", f"Generated {saved_count} quadrant(s)")
+    return {
+      "success": True,
+      "message": f"Generated {saved_count} quadrant{'s' if saved_count != 1 else ''}",
+      "quadrants": list(primary_quadrants),
+    }
+
+  finally:
+    # Clean up temp file
+    template_path.unlink(missing_ok=True)
+
+```
+
+Now I need to update the finally block to handle the conditional temp file cleanup:
+
+```python
+"""
+Reusable library for generating pixel art using the Oxen.ai model.
+
+This module provides the core generation logic that can be used by:
+- view_generations.py (Flask web server)
+- generate_tiles_omni.py (command-line script)
+- automatic_generation.py (automated generation)
+
+The main entry point is `run_generation_for_quadrants()` which handles:
+1. Validating the quadrant selection
+2. Rendering any missing quadrants
+3. Building the template image
+4. Uploading to GCS and calling the Oxen API
+5. Saving the generated quadrants to the database
+"""
+
+import os
+import re
+import sqlite3
+import tempfile
+from io import BytesIO
+from pathlib import Path
+from typing import Callable
+from urllib.parse import urlencode
+
+import requests
+from dotenv import load_dotenv
+from PIL import Image
+from playwright.sync_api import sync_playwright
+
+from isometric_nyc.e2e_generation.infill_template import (
+  QUADRANT_SIZE,
+  InfillRegion,
+  TemplateBuilder,
+  validate_quadrant_selection,
+)
+from isometric_nyc.e2e_generation.shared import (
+  DEFAULT_WEB_PORT,
+  ensure_quadrant_exists,
+  image_to_png_bytes,
+  png_bytes_to_image,
+  save_quadrant_generation,
+  save_quadrant_render,
+  split_tile_into_quadrants,
+  upload_to_gcs,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_generation as shared_get_quadrant_generation,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_render as shared_get_quadrant_render,
+)
+
+# Load environment variables
+load_dotenv()
+
+# Oxen API configuration
+OMNI_MODEL_ID = "cannoneyed-gentle-gold-antlion"
+OMNI_WATER_MODEL_ID = "cannoneyed-quiet-green-lamprey"
+OMNI_WATER_V2_MODEL_ID = "cannoneyed-rural-rose-dingo"
+
+GCS_BUCKET_NAME = "isometric-nyc-infills"
+
+
+# =============================================================================
+# Quadrant Parsing Utilities
+# =============================================================================
+
+
+def parse_quadrant_tuple(s: str) -> tuple[int, int]:
+  """
+  Parse a quadrant tuple string like "(0,1)" or "0,1" into a tuple.
+
+  Args:
+      s: String in format "(x,y)" or "x,y"
+
+  Returns:
+      Tuple of (x, y) coordinates
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  s = s.strip()
+  # Remove optional parentheses
+  if s.startswith("(") and s.endswith(")"):
+    s = s[1:-1]
+  parts = s.split(",")
+  if len(parts) != 2:
+    raise ValueError(f"Invalid quadrant tuple format: {s}")
+  return (int(parts[0].strip()), int(parts[1].strip()))
+
+
+def parse_quadrant_list(s: str) -> list[tuple[int, int]]:
+  """
+  Parse a comma-separated list of quadrant tuples.
+
+  Args:
+      s: String like "(0,1),(0,2)" or "(0,1), (0,2)"
+
+  Returns:
+      List of (x, y) coordinate tuples
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  # Use regex to find all (x,y) patterns
+  pattern = r"\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)"
+  matches = re.findall(pattern, s)
+  if not matches:
+    raise ValueError(f"No valid quadrant tuples found in: {s}")
+  return [(int(x), int(y)) for x, y in matches]
+
+
+# =============================================================================
+# Local Inference API Functions
+# =============================================================================
+
+
+def call_local_api(
+  image: "Image.Image",
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> "Image.Image":
+  """
+  Call the local inference API to generate pixel art.
+
+  The local API expects multipart/form-data with:
+    - file: The input image as PNG
+    - prompt: The generation prompt
+    - steps: Number of inference steps
+
+  Args:
+      image: PIL Image of the input template
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      PIL Image of the generated result
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  from io import BytesIO
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "http://localhost:8888/edit"
+    num_inference_steps = 15
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  # Convert PIL image to bytes
+  img_buffer = BytesIO()
+  image.save(img_buffer, format="PNG")
+  img_buffer.seek(0)
+
+  # Prepare multipart form data
+  files = {
+    "file": ("input.png", img_buffer, "image/png"),
+  }
+  data = {
+    "prompt": prompt,
+    "steps": str(num_inference_steps),
+  }
+
+  print(f"   🏠 Calling local API at {endpoint}...")
+  print(f"   📊 Steps: {num_inference_steps}")
+
+  response = requests.post(
+    endpoint,
+    files=files,
+    data=data,
+    headers={"accept": "image/png"},
+    timeout=600,  # 10 minute timeout for local inference
+  )
+  response.raise_for_status()
+
+  # Check content type
+  content_type = response.headers.get("content-type", "")
+  if "image" not in content_type:
+    raise ValueError(f"Expected image response, got content-type: {content_type}")
+
+  print(f"   ✓ Received {len(response.content)} bytes from local API")
+
+  # Parse the response as an image
+  return Image.open(BytesIO(response.content))
+
+
+# =============================================================================
+# Oxen API Functions
+# =============================================================================
+
+
+def call_oxen_api(
+  image_url: str,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> str:
+  """
+  Call the Oxen API to generate pixel art.
+
+  Args:
+      image_url: Public URL of the input template image
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      URL of the generated image
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    model_id = model_config.model_id
+    api_key = model_config.api_key
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "https://hub.oxen.ai/api/images/edit"
+    model_id = OMNI_WATER_MODEL_ID
+    api_key = os.getenv("OXEN_OMNI_v04_WATER_API_KEY")
+    num_inference_steps = 28
+
+  if not api_key:
+    raise ValueError(f"API key not found for model {model_id}")
+
+  headers = {
+    "Authorization": f"Bearer {api_key}",
+    "Content-Type": "application/json",
+  }
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  payload = {
+    "model": model_id,
+    "input_image": image_url,
+    "prompt": prompt,
+    "num_inference_steps": num_inference_steps,
+  }
+
+  print(f"   🤖 Calling Oxen API with model {model_id}...")
+  response = requests.post(endpoint, headers=headers, json=payload, timeout=300)
+  response.raise_for_status()
+
+  result = response.json()
+
+  # Log the response structure for debugging
+  print(f"   📥 API response keys: {list(result.keys())}")
+
+  # Try various response formats
+  if "images" in result and len(result["images"]) > 0:
+    image_data = result["images"][0]
+    print(
+      f"   📥 Image data keys: {list(image_data.keys()) if isinstance(image_data, dict) else type(image_data)}"
+    )
+
+    # Try different possible keys for the image URL
+    if isinstance(image_data, dict):
+      if "url" in image_data:
+        return image_data["url"]
+      elif "image_url" in image_data:
+        return image_data["image_url"]
+      elif "data" in image_data:
+        # Some APIs return base64 data - we'd need to handle this differently
+        raise ValueError(
+          f"API returned base64 data instead of URL: {list(image_data.keys())}"
+        )
+      else:
+        raise ValueError(
+          f"Image data missing 'url' key. Available keys: {list(image_data.keys())}"
+        )
+    elif isinstance(image_data, str):
+      # Direct URL string
+      return image_data
+    else:
+      raise ValueError(f"Unexpected image data type: {type(image_data)}")
+  elif "url" in result:
+    return result["url"]
+  elif "image_url" in result:
+    return result["image_url"]
+  elif "output" in result:
+    return result["output"]
+  elif "error" in result:
+    raise ValueError(f"API returned error: {result['error']}")
+  elif "message" in result:
+    raise ValueError(f"API returned message: {result['message']}")
+  else:
+    raise ValueError(
+      f"Unexpected API response format. Keys: {list(result.keys())}, Full response: {result}"
+    )
+
+
+def download_image_to_pil(
+  url: str,
+  max_retries: int = 3,
+  retry_delay: float = 10.0,
+) -> Image.Image:
+  """
+  Download an image from a URL and return as PIL Image.
+
+  Includes retry logic for transient errors (e.g., 403 Forbidden when
+  the image is not yet available).
+
+  Args:
+      url: URL of the image to download
+      max_retries: Maximum number of retry attempts (default: 3)
+      retry_delay: Seconds to wait between retries (default: 10.0)
+
+  Returns:
+      PIL Image object
+
+  Raises:
+      requests.HTTPError: If all retry attempts fail
+  """
+  import time
+
+  last_error = None
+
+  for attempt in range(1, max_retries + 1):
+    try:
+      response = requests.get(url, timeout=120)
+      response.raise_for_status()
+      return Image.open(BytesIO(response.content))
+    except requests.exceptions.HTTPError as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download failed (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+    except requests.exceptions.RequestException as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download error (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+
+  # If we get here, all retries failed
+  if last_error:
+    raise last_error
+  raise RuntimeError("Download failed with no error captured")
+
+
+# =============================================================================
+# Rendering Functions
+# =============================================================================
+
+
+def render_quadrant(
+  conn: sqlite3.Connection,
+  config: dict,
+  x: int,
+  y: int,
+  port: int,
+) -> bytes | None:
+  """
+  Render a quadrant and save to database.
+
+  This renders the tile containing the quadrant and saves all 4 quadrants.
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      x: Quadrant x coordinate
+      y: Quadrant y coordinate
+      port: Web server port for rendering
+
+  Returns:
+      PNG bytes of the rendered quadrant, or None if failed
+  """
+  # Ensure the quadrant exists in the database
+  quadrant = ensure_quadrant_exists(conn, config, x, y)
+
+  print(f"   🎨 Rendering tile for quadrant ({x}, {y})...")
+
+  # Build URL for rendering
+  params = {
+    "export": "true",
+    "lat": quadrant["lat"],
+    "lon": quadrant["lng"],
+    "width": config["width_px"],
+    "height": config["height_px"],
+    "azimuth": config["camera_azimuth_degrees"],
+    "elevation": config["camera_elevation_degrees"],
+    "view_height": config.get("view_height_meters", 200),
+  }
+  query_string = urlencode(params)
+  url = f"http://localhost:{port}/?{query_string}"
+
+  # Render using Playwright
+  with sync_playwright() as p:
+    browser = p.chromium.launch(
+      headless=True,
+      args=[
+        "--enable-webgl",
+        "--use-gl=angle",
+        "--ignore-gpu-blocklist",
+      ],
+    )
+
+    context = browser.new_context(
+      viewport={"width": config["width_px"], "height": config["height_px"]},
+      device_scale_factor=1,
+    )
+    page = context.new_page()
+
+    page.goto(url, wait_until="networkidle")
+
+    try:
+      page.wait_for_function("window.TILES_LOADED === true", timeout=60000)
+    except Exception:
+      print("      ⚠️  Timeout waiting for tiles, continuing anyway...")
+
+    # Get screenshot as bytes
+    screenshot_bytes = page.screenshot(type="png")
+
+    page.close()
+    context.close()
+    browser.close()
+
+  # Open as PIL image and split into quadrants
+  full_tile = Image.open(BytesIO(screenshot_bytes))
+  quadrant_images = split_tile_into_quadrants(full_tile)
+
+  # Save all quadrants to database
+  result_bytes = None
+  for (dx, dy), quad_img in quadrant_images.items():
+    qx, qy = x + dx, y + dy
+    png_bytes = image_to_png_bytes(quad_img)
+    save_quadrant_render(conn, config, qx, qy, png_bytes)
+    print(f"      ✓ Saved render for ({qx}, {qy})")
+
+    # Return the specific quadrant we were asked for
+    if qx == x and qy == y:
+      result_bytes = png_bytes
+
+  return result_bytes
+
+
+# =============================================================================
+# Core Generation Logic
+# =============================================================================
+
+
+def run_generation_for_quadrants(
+  conn: sqlite3.Connection,
+  config: dict,
+  selected_quadrants: list[tuple[int, int]],
+  port: int = DEFAULT_WEB_PORT,
+  bucket_name: str = GCS_BUCKET_NAME,
+  status_callback: Callable[[str, str], None] | None = None,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  context_quadrants: list[tuple[int, int]] | None = None,
+  prompt: str | None = None,
+) -> dict:
+  """
+  Run the full generation pipeline for selected quadrants.
+
+  This is the main entry point for generation. It:
+  1. Validates the quadrant selection
+  2. Renders any missing quadrants
+  3. Builds the template image with appropriate borders
+  4. Uploads to GCS and calls the Oxen API
+  5. Saves the generated quadrants to the database
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      selected_quadrants: List of (x, y) quadrant coordinates to generate
+      port: Web server port for rendering (default: 5173)
+      bucket_name: GCS bucket name for uploads
+      status_callback: Optional callback(status, message) for progress updates
+      model_config: Optional model configuration for the Oxen API (ModelConfig from model_config.py)
+      context_quadrants: Optional list of (x, y) quadrant coordinates to use as
+        context. These quadrants provide surrounding pixel art context for the
+        generation. If a context quadrant has a generation, that will be used;
+        otherwise the render will be used.
+      prompt: Optional additional prompt text for generation
+
+  Returns:
+      Dict with:
+          - success: bool
+          - message: str (on success)
+          - error: str (on failure)
+          - quadrants: list of generated quadrant coords (on success)
+  """
+  # Convert context quadrants to a set for fast lookup
+  context_set: set[tuple[int, int]] = (
+    set(context_quadrants) if context_quadrants else set()
+  )
+  if context_set:
+    print(f"   📋 Using {len(context_set)} context quadrant(s): {list(context_set)}")
+  if prompt:
+    print(f"   📝 Additional prompt: {prompt}")
+
+  def update_status(status: str, message: str = "") -> None:
+    if status_callback:
+      status_callback(status, message)
+
+  update_status("validating", "Checking API key...")
+
+  # Create helper functions for validation
+  # These are modified to treat context quadrants as "generated" if they have
+  # either a generation or a render
+  def has_generation_in_db(qx: int, qy: int) -> bool:
+    # Check if this quadrant has an actual generation
+    gen = shared_get_quadrant_generation(conn, qx, qy)
+    if gen is not None:
+      return True
+
+    # For context quadrants, treat them as "generated" if they have a render
+    # This allows context quadrants to provide surrounding content even if
+    # they don't have generations yet
+    if (qx, qy) in context_set:
+      render = shared_get_quadrant_render(conn, qx, qy)
+      return render is not None
+
+    return False
+
+  def get_render_from_db_with_render(qx: int, qy: int) -> Image.Image | None:
+    """Get render, rendering if it doesn't exist yet."""
+    render_bytes = shared_get_quadrant_render(conn, qx, qy)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+
+    # Need to render
+    update_status("rendering", f"Rendering quadrant ({qx}, {qy})...")
+    print(f"   📦 Rendering quadrant ({qx}, {qy})...")
+    render_bytes = render_quadrant(conn, config, qx, qy, port)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+    return None
+
+  def get_generation_from_db(qx: int, qy: int) -> Image.Image | None:
+    """Get generation, falling back to render for context quadrants."""
+    gen_bytes = shared_get_quadrant_generation(conn, qx, qy)
+    if gen_bytes:
+      return png_bytes_to_image(gen_bytes)
+
+    # For context quadrants, fall back to render if no generation exists
+    # This allows context quadrants to provide surrounding pixel art context
+    # even if they only have renders
+    if (qx, qy) in context_set:
+      render_bytes = shared_get_quadrant_render(conn, qx, qy)
+      if render_bytes:
+        print(f"   📋 Using render as context for ({qx}, {qy})")
+        return png_bytes_to_image(render_bytes)
+
+    return None
+
+  update_status("validating", "Validating quadrant selection...")
+
+  # Validate selection with auto-expansion
+  is_valid, msg, placement = validate_quadrant_selection(
+    selected_quadrants, has_generation_in_db, allow_expansion=True
+  )
+
+  if not is_valid:
+    update_status("error", msg)
+    return {"success": False, "error": msg}
+
+  print(f"✅ Validation: {msg}")
+
+  # Get primary quadrants (the ones user selected, not padding)
+  primary_quadrants = (
+    placement.primary_quadrants if placement.primary_quadrants else selected_quadrants
+  )
+  padding_quadrants = placement.padding_quadrants if placement else []
+
+  if padding_quadrants:
+    print(f"   📦 Padding quadrants: {padding_quadrants}")
+
+  # Create the infill region (may be expanded)
+  if placement._expanded_region is not None:
+    region = placement._expanded_region
+  else:
+    region = InfillRegion.from_quadrants(selected_quadrants)
+
+  # Build the template
+  update_status("rendering", "Building template image...")
+  builder = TemplateBuilder(
+    region, has_generation_in_db, get_render_from_db_with_render, get_generation_from_db
+  )
+
+  print("📋 Building template...")
+  result = builder.build(border_width=2, allow_expansion=True)
+
+  if result is None:
+    error_msg = builder._last_validation_error or "Failed to build template"
+    update_status("error", error_msg)
+    return {
+      "success": False,
+      "error": error_msg,
+    }
+
+  template_image, placement = result
+
+  # Check if we're using local or Oxen API
+  is_local = model_config is not None and model_config.is_local
+
+  template_path = None
+  try:
+    if is_local:
+      # Local inference - no GCS upload needed
+      print(f"📋 Template size: {template_image.size[0]}x{template_image.size[1]}")
+
+      update_status("generating", "Calling local model (this may take a minute)...")
+      print("🏠 Using local inference...")
+      generated_image = call_local_api(template_image, model_config, prompt)
+      print("   ✓ Local inference complete")
+    else:
+      # Oxen API - upload to GCS first
+      with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        template_path = Path(tmp.name)
+        template_image.save(template_path)
+
+      update_status("uploading", "Uploading template to cloud...")
+      print("📤 Uploading template to GCS...")
+      print(f"   Template path: {template_path}")
+      print(f"   Template size: {template_image.size[0]}x{template_image.size[1]}")
+      image_url = upload_to_gcs(template_path, bucket_name)
+      print(f"   Uploaded URL: {image_url}")
+
+      update_status("generating", "Calling AI model (this may take a minute)...")
+      print("🤖 Calling Oxen API...")
+      generated_url = call_oxen_api(image_url, model_config, prompt)
+
+      update_status("saving", "Downloading and saving results...")
+      print("📥 Downloading generated image...")
+      print(f"   Generated URL: {generated_url}")
+      generated_image = download_image_to_pil(generated_url)
+
+    # Extract quadrants from generated image and save to database
+    print("💾 Saving generated quadrants to database...")
+
+    # Figure out what quadrants are in the infill region
+    all_infill_quadrants = (
+      placement.all_infill_quadrants
+      if placement.all_infill_quadrants
+      else region.overlapping_quadrants()
+    )
+
+    # For each infill quadrant, extract pixels from the generated image
+    saved_count = 0
+    for qx, qy in all_infill_quadrants:
+      # Calculate position in the generated image
+      quad_world_x = qx * QUADRANT_SIZE
+      quad_world_y = qy * QUADRANT_SIZE
+
+      template_x = quad_world_x - placement.world_offset_x
+      template_y = quad_world_y - placement.world_offset_y
+
+      # Crop this quadrant from the generated image
+      crop_box = (
+        template_x,
+        template_y,
+        template_x + QUADRANT_SIZE,
+        template_y + QUADRANT_SIZE,
+      )
+      quad_img = generated_image.crop(crop_box)
+      png_bytes = image_to_png_bytes(quad_img)
+
+      # Only save primary quadrants (not padding)
+      if (qx, qy) in primary_quadrants or (qx, qy) in [
+        (q[0], q[1]) for q in primary_quadrants
+      ]:
+        if save_quadrant_generation(conn, config, qx, qy, png_bytes):
+          print(f"   ✓ Saved generation for ({qx}, {qy})")
+          saved_count += 1
+        else:
+          print(f"   ⚠️ Failed to save generation for ({qx}, {qy})")
+      else:
+        print(f"   ⏭️ Skipped padding quadrant ({qx}, {qy})")
+
+    update_status("complete", f"Generated {saved_count} quadrant(s)")
+    return {
+      "success": True,
+      "message": f"Generated {saved_count} quadrant{'s' if saved_count != 1 else ''}",
+      "quadrants": list(primary_quadrants),
+    }
+
+  finally:
+    # Clean up temp file if it was created (only for Oxen API path)
+    if template_path is not None:
+      template_path.unlink(missing_ok=True)
+
+```
+
+Let me add the "saving" status for the local path and check the code flow:
+
+Let me add the "saving" status for the local path too:
+
+```python
+"""
+Reusable library for generating pixel art using the Oxen.ai model.
+
+This module provides the core generation logic that can be used by:
+- view_generations.py (Flask web server)
+- generate_tiles_omni.py (command-line script)
+- automatic_generation.py (automated generation)
+
+The main entry point is `run_generation_for_quadrants()` which handles:
+1. Validating the quadrant selection
+2. Rendering any missing quadrants
+3. Building the template image
+4. Uploading to GCS and calling the Oxen API
+5. Saving the generated quadrants to the database
+"""
+
+import os
+import re
+import sqlite3
+import tempfile
+from io import BytesIO
+from pathlib import Path
+from typing import Callable
+from urllib.parse import urlencode
+
+import requests
+from dotenv import load_dotenv
+from PIL import Image
+from playwright.sync_api import sync_playwright
+
+from isometric_nyc.e2e_generation.infill_template import (
+  QUADRANT_SIZE,
+  InfillRegion,
+  TemplateBuilder,
+  validate_quadrant_selection,
+)
+from isometric_nyc.e2e_generation.shared import (
+  DEFAULT_WEB_PORT,
+  ensure_quadrant_exists,
+  image_to_png_bytes,
+  png_bytes_to_image,
+  save_quadrant_generation,
+  save_quadrant_render,
+  split_tile_into_quadrants,
+  upload_to_gcs,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_generation as shared_get_quadrant_generation,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_render as shared_get_quadrant_render,
+)
+
+# Load environment variables
+load_dotenv()
+
+# Oxen API configuration
+OMNI_MODEL_ID = "cannoneyed-gentle-gold-antlion"
+OMNI_WATER_MODEL_ID = "cannoneyed-quiet-green-lamprey"
+OMNI_WATER_V2_MODEL_ID = "cannoneyed-rural-rose-dingo"
+
+GCS_BUCKET_NAME = "isometric-nyc-infills"
+
+
+# =============================================================================
+# Quadrant Parsing Utilities
+# =============================================================================
+
+
+def parse_quadrant_tuple(s: str) -> tuple[int, int]:
+  """
+  Parse a quadrant tuple string like "(0,1)" or "0,1" into a tuple.
+
+  Args:
+      s: String in format "(x,y)" or "x,y"
+
+  Returns:
+      Tuple of (x, y) coordinates
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  s = s.strip()
+  # Remove optional parentheses
+  if s.startswith("(") and s.endswith(")"):
+    s = s[1:-1]
+  parts = s.split(",")
+  if len(parts) != 2:
+    raise ValueError(f"Invalid quadrant tuple format: {s}")
+  return (int(parts[0].strip()), int(parts[1].strip()))
+
+
+def parse_quadrant_list(s: str) -> list[tuple[int, int]]:
+  """
+  Parse a comma-separated list of quadrant tuples.
+
+  Args:
+      s: String like "(0,1),(0,2)" or "(0,1), (0,2)"
+
+  Returns:
+      List of (x, y) coordinate tuples
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  # Use regex to find all (x,y) patterns
+  pattern = r"\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)"
+  matches = re.findall(pattern, s)
+  if not matches:
+    raise ValueError(f"No valid quadrant tuples found in: {s}")
+  return [(int(x), int(y)) for x, y in matches]
+
+
+# =============================================================================
+# Local Inference API Functions
+# =============================================================================
+
+
+def call_local_api(
+  image: "Image.Image",
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> "Image.Image":
+  """
+  Call the local inference API to generate pixel art.
+
+  The local API expects multipart/form-data with:
+    - file: The input image as PNG
+    - prompt: The generation prompt
+    - steps: Number of inference steps
+
+  Args:
+      image: PIL Image of the input template
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      PIL Image of the generated result
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  from io import BytesIO
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "http://localhost:8888/edit"
+    num_inference_steps = 15
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  # Convert PIL image to bytes
+  img_buffer = BytesIO()
+  image.save(img_buffer, format="PNG")
+  img_buffer.seek(0)
+
+  # Prepare multipart form data
+  files = {
+    "file": ("input.png", img_buffer, "image/png"),
+  }
+  data = {
+    "prompt": prompt,
+    "steps": str(num_inference_steps),
+  }
+
+  print(f"   🏠 Calling local API at {endpoint}...")
+  print(f"   📊 Steps: {num_inference_steps}")
+
+  response = requests.post(
+    endpoint,
+    files=files,
+    data=data,
+    headers={"accept": "image/png"},
+    timeout=600,  # 10 minute timeout for local inference
+  )
+  response.raise_for_status()
+
+  # Check content type
+  content_type = response.headers.get("content-type", "")
+  if "image" not in content_type:
+    raise ValueError(f"Expected image response, got content-type: {content_type}")
+
+  print(f"   ✓ Received {len(response.content)} bytes from local API")
+
+  # Parse the response as an image
+  return Image.open(BytesIO(response.content))
+
+
+# =============================================================================
+# Oxen API Functions
+# =============================================================================
+
+
+def call_oxen_api(
+  image_url: str,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> str:
+  """
+  Call the Oxen API to generate pixel art.
+
+  Args:
+      image_url: Public URL of the input template image
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      URL of the generated image
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    model_id = model_config.model_id
+    api_key = model_config.api_key
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "https://hub.oxen.ai/api/images/edit"
+    model_id = OMNI_WATER_MODEL_ID
+    api_key = os.getenv("OXEN_OMNI_v04_WATER_API_KEY")
+    num_inference_steps = 28
+
+  if not api_key:
+    raise ValueError(f"API key not found for model {model_id}")
+
+  headers = {
+    "Authorization": f"Bearer {api_key}",
+    "Content-Type": "application/json",
+  }
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  payload = {
+    "model": model_id,
+    "input_image": image_url,
+    "prompt": prompt,
+    "num_inference_steps": num_inference_steps,
+  }
+
+  print(f"   🤖 Calling Oxen API with model {model_id}...")
+  response = requests.post(endpoint, headers=headers, json=payload, timeout=300)
+  response.raise_for_status()
+
+  result = response.json()
+
+  # Log the response structure for debugging
+  print(f"   📥 API response keys: {list(result.keys())}")
+
+  # Try various response formats
+  if "images" in result and len(result["images"]) > 0:
+    image_data = result["images"][0]
+    print(
+      f"   📥 Image data keys: {list(image_data.keys()) if isinstance(image_data, dict) else type(image_data)}"
+    )
+
+    # Try different possible keys for the image URL
+    if isinstance(image_data, dict):
+      if "url" in image_data:
+        return image_data["url"]
+      elif "image_url" in image_data:
+        return image_data["image_url"]
+      elif "data" in image_data:
+        # Some APIs return base64 data - we'd need to handle this differently
+        raise ValueError(
+          f"API returned base64 data instead of URL: {list(image_data.keys())}"
+        )
+      else:
+        raise ValueError(
+          f"Image data missing 'url' key. Available keys: {list(image_data.keys())}"
+        )
+    elif isinstance(image_data, str):
+      # Direct URL string
+      return image_data
+    else:
+      raise ValueError(f"Unexpected image data type: {type(image_data)}")
+  elif "url" in result:
+    return result["url"]
+  elif "image_url" in result:
+    return result["image_url"]
+  elif "output" in result:
+    return result["output"]
+  elif "error" in result:
+    raise ValueError(f"API returned error: {result['error']}")
+  elif "message" in result:
+    raise ValueError(f"API returned message: {result['message']}")
+  else:
+    raise ValueError(
+      f"Unexpected API response format. Keys: {list(result.keys())}, Full response: {result}"
+    )
+
+
+def download_image_to_pil(
+  url: str,
+  max_retries: int = 3,
+  retry_delay: float = 10.0,
+) -> Image.Image:
+  """
+  Download an image from a URL and return as PIL Image.
+
+  Includes retry logic for transient errors (e.g., 403 Forbidden when
+  the image is not yet available).
+
+  Args:
+      url: URL of the image to download
+      max_retries: Maximum number of retry attempts (default: 3)
+      retry_delay: Seconds to wait between retries (default: 10.0)
+
+  Returns:
+      PIL Image object
+
+  Raises:
+      requests.HTTPError: If all retry attempts fail
+  """
+  import time
+
+  last_error = None
+
+  for attempt in range(1, max_retries + 1):
+    try:
+      response = requests.get(url, timeout=120)
+      response.raise_for_status()
+      return Image.open(BytesIO(response.content))
+    except requests.exceptions.HTTPError as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download failed (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+    except requests.exceptions.RequestException as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download error (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+
+  # If we get here, all retries failed
+  if last_error:
+    raise last_error
+  raise RuntimeError("Download failed with no error captured")
+
+
+# =============================================================================
+# Rendering Functions
+# =============================================================================
+
+
+def render_quadrant(
+  conn: sqlite3.Connection,
+  config: dict,
+  x: int,
+  y: int,
+  port: int,
+) -> bytes | None:
+  """
+  Render a quadrant and save to database.
+
+  This renders the tile containing the quadrant and saves all 4 quadrants.
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      x: Quadrant x coordinate
+      y: Quadrant y coordinate
+      port: Web server port for rendering
+
+  Returns:
+      PNG bytes of the rendered quadrant, or None if failed
+  """
+  # Ensure the quadrant exists in the database
+  quadrant = ensure_quadrant_exists(conn, config, x, y)
+
+  print(f"   🎨 Rendering tile for quadrant ({x}, {y})...")
+
+  # Build URL for rendering
+  params = {
+    "export": "true",
+    "lat": quadrant["lat"],
+    "lon": quadrant["lng"],
+    "width": config["width_px"],
+    "height": config["height_px"],
+    "azimuth": config["camera_azimuth_degrees"],
+    "elevation": config["camera_elevation_degrees"],
+    "view_height": config.get("view_height_meters", 200),
+  }
+  query_string = urlencode(params)
+  url = f"http://localhost:{port}/?{query_string}"
+
+  # Render using Playwright
+  with sync_playwright() as p:
+    browser = p.chromium.launch(
+      headless=True,
+      args=[
+        "--enable-webgl",
+        "--use-gl=angle",
+        "--ignore-gpu-blocklist",
+      ],
+    )
+
+    context = browser.new_context(
+      viewport={"width": config["width_px"], "height": config["height_px"]},
+      device_scale_factor=1,
+    )
+    page = context.new_page()
+
+    page.goto(url, wait_until="networkidle")
+
+    try:
+      page.wait_for_function("window.TILES_LOADED === true", timeout=60000)
+    except Exception:
+      print("      ⚠️  Timeout waiting for tiles, continuing anyway...")
+
+    # Get screenshot as bytes
+    screenshot_bytes = page.screenshot(type="png")
+
+    page.close()
+    context.close()
+    browser.close()
+
+  # Open as PIL image and split into quadrants
+  full_tile = Image.open(BytesIO(screenshot_bytes))
+  quadrant_images = split_tile_into_quadrants(full_tile)
+
+  # Save all quadrants to database
+  result_bytes = None
+  for (dx, dy), quad_img in quadrant_images.items():
+    qx, qy = x + dx, y + dy
+    png_bytes = image_to_png_bytes(quad_img)
+    save_quadrant_render(conn, config, qx, qy, png_bytes)
+    print(f"      ✓ Saved render for ({qx}, {qy})")
+
+    # Return the specific quadrant we were asked for
+    if qx == x and qy == y:
+      result_bytes = png_bytes
+
+  return result_bytes
+
+
+# =============================================================================
+# Core Generation Logic
+# =============================================================================
+
+
+def run_generation_for_quadrants(
+  conn: sqlite3.Connection,
+  config: dict,
+  selected_quadrants: list[tuple[int, int]],
+  port: int = DEFAULT_WEB_PORT,
+  bucket_name: str = GCS_BUCKET_NAME,
+  status_callback: Callable[[str, str], None] | None = None,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  context_quadrants: list[tuple[int, int]] | None = None,
+  prompt: str | None = None,
+) -> dict:
+  """
+  Run the full generation pipeline for selected quadrants.
+
+  This is the main entry point for generation. It:
+  1. Validates the quadrant selection
+  2. Renders any missing quadrants
+  3. Builds the template image with appropriate borders
+  4. Uploads to GCS and calls the Oxen API
+  5. Saves the generated quadrants to the database
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      selected_quadrants: List of (x, y) quadrant coordinates to generate
+      port: Web server port for rendering (default: 5173)
+      bucket_name: GCS bucket name for uploads
+      status_callback: Optional callback(status, message) for progress updates
+      model_config: Optional model configuration for the Oxen API (ModelConfig from model_config.py)
+      context_quadrants: Optional list of (x, y) quadrant coordinates to use as
+        context. These quadrants provide surrounding pixel art context for the
+        generation. If a context quadrant has a generation, that will be used;
+        otherwise the render will be used.
+      prompt: Optional additional prompt text for generation
+
+  Returns:
+      Dict with:
+          - success: bool
+          - message: str (on success)
+          - error: str (on failure)
+          - quadrants: list of generated quadrant coords (on success)
+  """
+  # Convert context quadrants to a set for fast lookup
+  context_set: set[tuple[int, int]] = (
+    set(context_quadrants) if context_quadrants else set()
+  )
+  if context_set:
+    print(f"   📋 Using {len(context_set)} context quadrant(s): {list(context_set)}")
+  if prompt:
+    print(f"   📝 Additional prompt: {prompt}")
+
+  def update_status(status: str, message: str = "") -> None:
+    if status_callback:
+      status_callback(status, message)
+
+  update_status("validating", "Checking API key...")
+
+  # Create helper functions for validation
+  # These are modified to treat context quadrants as "generated" if they have
+  # either a generation or a render
+  def has_generation_in_db(qx: int, qy: int) -> bool:
+    # Check if this quadrant has an actual generation
+    gen = shared_get_quadrant_generation(conn, qx, qy)
+    if gen is not None:
+      return True
+
+    # For context quadrants, treat them as "generated" if they have a render
+    # This allows context quadrants to provide surrounding content even if
+    # they don't have generations yet
+    if (qx, qy) in context_set:
+      render = shared_get_quadrant_render(conn, qx, qy)
+      return render is not None
+
+    return False
+
+  def get_render_from_db_with_render(qx: int, qy: int) -> Image.Image | None:
+    """Get render, rendering if it doesn't exist yet."""
+    render_bytes = shared_get_quadrant_render(conn, qx, qy)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+
+    # Need to render
+    update_status("rendering", f"Rendering quadrant ({qx}, {qy})...")
+    print(f"   📦 Rendering quadrant ({qx}, {qy})...")
+    render_bytes = render_quadrant(conn, config, qx, qy, port)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+    return None
+
+  def get_generation_from_db(qx: int, qy: int) -> Image.Image | None:
+    """Get generation, falling back to render for context quadrants."""
+    gen_bytes = shared_get_quadrant_generation(conn, qx, qy)
+    if gen_bytes:
+      return png_bytes_to_image(gen_bytes)
+
+    # For context quadrants, fall back to render if no generation exists
+    # This allows context quadrants to provide surrounding pixel art context
+    # even if they only have renders
+    if (qx, qy) in context_set:
+      render_bytes = shared_get_quadrant_render(conn, qx, qy)
+      if render_bytes:
+        print(f"   📋 Using render as context for ({qx}, {qy})")
+        return png_bytes_to_image(render_bytes)
+
+    return None
+
+  update_status("validating", "Validating quadrant selection...")
+
+  # Validate selection with auto-expansion
+  is_valid, msg, placement = validate_quadrant_selection(
+    selected_quadrants, has_generation_in_db, allow_expansion=True
+  )
+
+  if not is_valid:
+    update_status("error", msg)
+    return {"success": False, "error": msg}
+
+  print(f"✅ Validation: {msg}")
+
+  # Get primary quadrants (the ones user selected, not padding)
+  primary_quadrants = (
+    placement.primary_quadrants if placement.primary_quadrants else selected_quadrants
+  )
+  padding_quadrants = placement.padding_quadrants if placement else []
+
+  if padding_quadrants:
+    print(f"   📦 Padding quadrants: {padding_quadrants}")
+
+  # Create the infill region (may be expanded)
+  if placement._expanded_region is not None:
+    region = placement._expanded_region
+  else:
+    region = InfillRegion.from_quadrants(selected_quadrants)
+
+  # Build the template
+  update_status("rendering", "Building template image...")
+  builder = TemplateBuilder(
+    region, has_generation_in_db, get_render_from_db_with_render, get_generation_from_db
+  )
+
+  print("📋 Building template...")
+  result = builder.build(border_width=2, allow_expansion=True)
+
+  if result is None:
+    error_msg = builder._last_validation_error or "Failed to build template"
+    update_status("error", error_msg)
+    return {
+      "success": False,
+      "error": error_msg,
+    }
+
+  template_image, placement = result
+
+  # Check if we're using local or Oxen API
+  is_local = model_config is not None and model_config.is_local
+
+  template_path = None
+  try:
+    if is_local:
+      # Local inference - no GCS upload needed
+      print(f"📋 Template size: {template_image.size[0]}x{template_image.size[1]}")
+
+      update_status("generating", "Calling local model (this may take a minute)...")
+      print("🏠 Using local inference...")
+      generated_image = call_local_api(template_image, model_config, prompt)
+      print("   ✓ Local inference complete")
+    else:
+      # Oxen API - upload to GCS first
+      with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        template_path = Path(tmp.name)
+        template_image.save(template_path)
+
+      update_status("uploading", "Uploading template to cloud...")
+      print("📤 Uploading template to GCS...")
+      print(f"   Template path: {template_path}")
+      print(f"   Template size: {template_image.size[0]}x{template_image.size[1]}")
+      image_url = upload_to_gcs(template_path, bucket_name)
+      print(f"   Uploaded URL: {image_url}")
+
+      update_status("generating", "Calling AI model (this may take a minute)...")
+      print("🤖 Calling Oxen API...")
+      generated_url = call_oxen_api(image_url, model_config, prompt)
+
+      update_status("saving", "Downloading and saving results...")
+      print("📥 Downloading generated image...")
+      print(f"   Generated URL: {generated_url}")
+      generated_image = download_image_to_pil(generated_url)
+
+    # For local inference, update status to saving now
+    if is_local:
+      update_status("saving", "Saving results...")
+
+    # Extract quadrants from generated image and save to database
+    print("💾 Saving generated quadrants to database...")
+
+    # Figure out what quadrants are in the infill region
+    all_infill_quadrants = (
+      placement.all_infill_quadrants
+      if placement.all_infill_quadrants
+      else region.overlapping_quadrants()
+    )
+
+    # For each infill quadrant, extract pixels from the generated image
+    saved_count = 0
+    for qx, qy in all_infill_quadrants:
+      # Calculate position in the generated image
+      quad_world_x = qx * QUADRANT_SIZE
+      quad_world_y = qy * QUADRANT_SIZE
+
+      template_x = quad_world_x - placement.world_offset_x
+      template_y = quad_world_y - placement.world_offset_y
+
+      # Crop this quadrant from the generated image
+      crop_box = (
+        template_x,
+        template_y,
+        template_x + QUADRANT_SIZE,
+        template_y + QUADRANT_SIZE,
+      )
+      quad_img = generated_image.crop(crop_box)
+      png_bytes = image_to_png_bytes(quad_img)
+
+      # Only save primary quadrants (not padding)
+      if (qx, qy) in primary_quadrants or (qx, qy) in [
+        (q[0], q[1]) for q in primary_quadrants
+      ]:
+        if save_quadrant_generation(conn, config, qx, qy, png_bytes):
+          print(f"   ✓ Saved generation for ({qx}, {qy})")
+          saved_count += 1
+        else:
+          print(f"   ⚠️ Failed to save generation for ({qx}, {qy})")
+      else:
+        print(f"   ⏭️ Skipped padding quadrant ({qx}, {qy})")
+
+    update_status("complete", f"Generated {saved_count} quadrant(s)")
+    return {
+      "success": True,
+      "message": f"Generated {saved_count} quadrant{'s' if saved_count != 1 else ''}",
+      "quadrants": list(primary_quadrants),
+    }
+
+  finally:
+    # Clean up temp file if it was created (only for Oxen API path)
+    if template_path is not None:
+      template_path.unlink(missing_ok=True)
+
+```
+
+Now let me check lints and add the local model to `app_config.json`:
+
+Now let me add the local model to the app_config.json:
+
+```json
+{
+  "models": [
+    {
+      "name": "Local",
+      "model_id": "local",
+      "endpoint": "http://localhost:8888/edit",
+      "num_inference_steps": 15,
+      "model_type": "local"
+    },
+    {
+      "name": "Omni v1",
+      "model_id": "cannoneyed-quiet-green-lamprey",
+      "api_key_env": "OXEN_OMNI_v04_WATER_API_KEY",
+      "endpoint": "https://hub.oxen.ai/api/images/edit",
+      "num_inference_steps": 28,
+      "model_type": "oxen"
+    },
+    {
+      "name": "Omni v2",
+      "model_id": "cannoneyed-rural-rose-dingo",
+      "api_key_env": "OXEN_OMNI_v04_WATER_V2_API_KEY",
+      "endpoint": "https://hub.oxen.ai/api/images/edit",
+      "num_inference_steps": 28,
+      "model_type": "oxen"
+    },
+    {
+      "name": "Omni (Original)",
+      "model_id": "cannoneyed-gentle-gold-antlion",
+      "api_key_env": "OXEN_OMNI_v04_API_KEY",
+      "endpoint": "https://hub.oxen.ai/api/images/edit",
+      "num_inference_steps": 28,
+      "model_type": "oxen"
+    }
+  ],
+  "default_model_id": "local"
+}
+
+```
+
+The implementation is complete. Let me provide a summary of the changes made:
+
+## Summary
+
+I've implemented local inference support for the generation app. Here are the changes:
+
+### 1. `model_config.py`
+- Added `model_type` field to `ModelConfig` with default value `"oxen"`
+- Added `is_local` property for easy type checking
+- Updated serialization/deserialization to handle the new field
+- Made `api_key_env` optional (not needed for local inference)
+
+### 2. `generate_omni.py`
+- Added new `call_local_api()` function that:
+  - Takes a PIL Image directly (no GCS upload needed)
+  - Sends multipart/form-data request to the local endpoint
+  - Returns the generated image directly as a PIL Image
+- Updated `run_generation_for_quadrants()` to:
+  - Check if the model is local using `model_config.is_local`
+  - Skip GCS upload for local models and call `call_local_api()` directly
+  - Handle proper cleanup (temp file only created for Oxen API path)
+
+### 3. `app_config.json`
+- Added "Local" model configuration at the top of the list:
+  - `model_id`: `"local"`
+  - `endpoint`: `"http://localhost:8888/edit"`
+  - `num_inference_steps`: `15` (matching the curl example)
+  - `model_type`: `"local"`
+- Set default model to `"local"`
+- Added `model_type: "oxen"` to all existing Oxen models for clarity
+
+### Usage
+The local model will now appear in the model dropdown in the viewer UI. When selected, generations will use the local inference server at `http://localhost:8888/edit` instead of the Oxen API. The Oxen models still work as before - just select them from the dropdown.
+
+---
+
+**User**
+
+OK great - i'm updating the server to be able to also handle a base64 encoded image generation endpoint, a la
+
+
+@app.post("/edit-b64")
+async def edit_image_b64(req: EditRequest):
+    """Faster endpoint using base64 JSON instead of multipart form."""
+    # 1. Decode base64 image
+    image_data = base64.b64decode(req.image_b64)
+    input_image = Image.open(BytesIO(image_data)).convert("RGB")
+    
+    # 2. Run Inference
+    print(f"🎨 Editing with prompt: {req.prompt} (steps={req.steps})")
+    
+    gc.collect()
+    torch.cuda.empty_cache()
+    
+    with torch.inference_mode():
+        output = pipeline(
+            prompt=req.prompt,
+            image=input_image,
+            num_inference_steps=req.steps,
+            guidance_scale=3.0,
+            generator=torch.manual_seed(42)
+        )
+    
+    result_image = output.images[0]
+
+    # 3. Return base64 encoded result
+    buffer = BytesIO()
+    result_image.save(buffer, format="PNG")
+    result_b64 = base64.b64encode(buffer.getvalue()).decode()
+    
+    return {"image_b64": result_b64}
+
+----
+
+Can you also add the functionality to optionally use the base64 encoded image from the client app.py as well?
+
+a la
+
+```
+import base64
+import httpx
+from PIL import Image
+from io import BytesIO
+
+def edit_image(image_path: str, prompt: str, steps: int = 25) -> Image.Image:
+    # Encode image to base64
+    with open(image_path, "rb") as f:
+        image_b64 = base64.b64encode(f.read()).decode()
+    
+    # Call API (httpx is faster than requests)
+    response = httpx.post(
+        "http://localhost:8080/edit-b64",
+        json={"image_b64": image_b64, "prompt": prompt, "steps": steps},
+        timeout=300.0
+    )
+    
+    # Decode result
+    result_b64 = response.json()["image_b64"]
+    return Image.open(BytesIO(base64.b64decode(result_b64)))
+``` 
+
+---
+
+**Cursor**
+
+I'll add support for the base64 endpoint. I'll add a `use_base64` option to the model config and a new function that uses the base64 API.
+
+```python
+"""
+Model configuration for the generation app.
+
+Loads model configurations from app_config.json and provides
+utilities for selecting and using different AI models.
+"""
+
+import json
+import os
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+
+@dataclass
+class ModelConfig:
+  """Configuration for a single AI model."""
+
+  name: str
+  model_id: str
+  api_key_env: str  # Environment variable name for the API key
+  endpoint: str = "https://hub.oxen.ai/api/images/edit"
+  num_inference_steps: int = 28
+  model_type: str = "oxen"  # "oxen" for Oxen API, "local" for local inference
+  use_base64: bool = False  # Use base64 encoding for local inference (faster)
+
+  @property
+  def api_key(self) -> str | None:
+    """Get the API key from environment variables."""
+    return os.getenv(self.api_key_env) if self.api_key_env else None
+
+  @property
+  def is_local(self) -> bool:
+    """Check if this model uses local inference."""
+    return self.model_type == "local"
+
+  def to_dict(self) -> dict[str, Any]:
+    """Convert to dictionary for JSON serialization (without API key)."""
+    return {
+      "name": self.name,
+      "model_id": self.model_id,
+      "endpoint": self.endpoint,
+      "num_inference_steps": self.num_inference_steps,
+      "model_type": self.model_type,
+      "use_base64": self.use_base64,
+    }
+
+
+@dataclass
+class AppConfig:
+  """Full application configuration."""
+
+  models: list[ModelConfig]
+  default_model_id: str | None = None
+
+  def get_model(self, model_id: str) -> ModelConfig | None:
+    """Get a model configuration by its ID."""
+    for model in self.models:
+      if model.model_id == model_id:
+        return model
+    return None
+
+  def get_default_model(self) -> ModelConfig | None:
+    """Get the default model, or the first model if no default is set."""
+    if self.default_model_id:
+      return self.get_model(self.default_model_id)
+    return self.models[0] if self.models else None
+
+  def to_dict(self) -> dict[str, Any]:
+    """Convert to dictionary for JSON serialization."""
+    return {
+      "models": [m.to_dict() for m in self.models],
+      "default_model_id": self.default_model_id,
+    }
+
+
+def load_app_config(config_path: Path | None = None) -> AppConfig:
+  """
+  Load the application configuration from app_config.json.
+
+  Args:
+    config_path: Path to the config file. If None, looks in the generation dir.
+
+  Returns:
+    AppConfig object with model configurations
+
+  If the config file doesn't exist, returns a default configuration
+  with the legacy Oxen models.
+  """
+  if config_path is None:
+    config_path = Path(__file__).parent / "app_config.json"
+
+  if not config_path.exists():
+    # Return default configuration with legacy models
+    return get_default_config()
+
+  with open(config_path) as f:
+    data = json.load(f)
+
+  models = []
+  for model_data in data.get("models", []):
+    models.append(
+      ModelConfig(
+        name=model_data["name"],
+        model_id=model_data["model_id"],
+        api_key_env=model_data.get("api_key_env", ""),
+        endpoint=model_data.get("endpoint", "https://hub.oxen.ai/api/images/edit"),
+        num_inference_steps=model_data.get("num_inference_steps", 28),
+        model_type=model_data.get("model_type", "oxen"),
+      )
+    )
+
+  return AppConfig(
+    models=models,
+    default_model_id=data.get("default_model_id"),
+  )
+
+
+def get_default_config() -> AppConfig:
+  """
+  Get the default configuration with legacy Oxen models.
+
+  This is used when no app_config.json exists.
+  """
+  return AppConfig(
+    models=[
+      ModelConfig(
+        name="Omni Water v1",
+        model_id="cannoneyed-quiet-green-lamprey",
+        api_key_env="OXEN_OMNI_v04_WATER_API_KEY",
+      ),
+      ModelConfig(
+        name="Omni Water v2",
+        model_id="cannoneyed-rural-rose-dingo",
+        api_key_env="OXEN_OMNI_WATER_V2_API_KEY",
+      ),
+      ModelConfig(
+        name="Omni (Original)",
+        model_id="cannoneyed-gentle-gold-antlion",
+        api_key_env="OXEN_OMNI_API_KEY",
+      ),
+    ],
+    default_model_id="cannoneyed-quiet-green-lamprey",
+  )
+
+
+def save_app_config(config: AppConfig, config_path: Path | None = None) -> None:
+  """
+  Save the application configuration to app_config.json.
+
+  Note: This does NOT save API keys - those should remain in environment variables.
+  """
+  if config_path is None:
+    config_path = Path(__file__).parent / "app_config.json"
+
+  data = {
+    "models": [],
+    "default_model_id": config.default_model_id,
+  }
+
+  for model in config.models:
+    data["models"].append(
+      {
+        "name": model.name,
+        "model_id": model.model_id,
+        "api_key_env": model.api_key_env,
+        "endpoint": model.endpoint,
+        "num_inference_steps": model.num_inference_steps,
+        "model_type": model.model_type,
+      }
+    )
+
+  with open(config_path, "w") as f:
+    json.dump(data, f, indent=2)
+
+```
+
+```python
+"""
+Model configuration for the generation app.
+
+Loads model configurations from app_config.json and provides
+utilities for selecting and using different AI models.
+"""
+
+import json
+import os
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+
+@dataclass
+class ModelConfig:
+  """Configuration for a single AI model."""
+
+  name: str
+  model_id: str
+  api_key_env: str  # Environment variable name for the API key
+  endpoint: str = "https://hub.oxen.ai/api/images/edit"
+  num_inference_steps: int = 28
+  model_type: str = "oxen"  # "oxen" for Oxen API, "local" for local inference
+  use_base64: bool = False  # Use base64 encoding for local inference (faster)
+
+  @property
+  def api_key(self) -> str | None:
+    """Get the API key from environment variables."""
+    return os.getenv(self.api_key_env) if self.api_key_env else None
+
+  @property
+  def is_local(self) -> bool:
+    """Check if this model uses local inference."""
+    return self.model_type == "local"
+
+  def to_dict(self) -> dict[str, Any]:
+    """Convert to dictionary for JSON serialization (without API key)."""
+    return {
+      "name": self.name,
+      "model_id": self.model_id,
+      "endpoint": self.endpoint,
+      "num_inference_steps": self.num_inference_steps,
+      "model_type": self.model_type,
+      "use_base64": self.use_base64,
+    }
+
+
+@dataclass
+class AppConfig:
+  """Full application configuration."""
+
+  models: list[ModelConfig]
+  default_model_id: str | None = None
+
+  def get_model(self, model_id: str) -> ModelConfig | None:
+    """Get a model configuration by its ID."""
+    for model in self.models:
+      if model.model_id == model_id:
+        return model
+    return None
+
+  def get_default_model(self) -> ModelConfig | None:
+    """Get the default model, or the first model if no default is set."""
+    if self.default_model_id:
+      return self.get_model(self.default_model_id)
+    return self.models[0] if self.models else None
+
+  def to_dict(self) -> dict[str, Any]:
+    """Convert to dictionary for JSON serialization."""
+    return {
+      "models": [m.to_dict() for m in self.models],
+      "default_model_id": self.default_model_id,
+    }
+
+
+def load_app_config(config_path: Path | None = None) -> AppConfig:
+  """
+  Load the application configuration from app_config.json.
+
+  Args:
+    config_path: Path to the config file. If None, looks in the generation dir.
+
+  Returns:
+    AppConfig object with model configurations
+
+  If the config file doesn't exist, returns a default configuration
+  with the legacy Oxen models.
+  """
+  if config_path is None:
+    config_path = Path(__file__).parent / "app_config.json"
+
+  if not config_path.exists():
+    # Return default configuration with legacy models
+    return get_default_config()
+
+  with open(config_path) as f:
+    data = json.load(f)
+
+  models = []
+  for model_data in data.get("models", []):
+    models.append(
+      ModelConfig(
+        name=model_data["name"],
+        model_id=model_data["model_id"],
+        api_key_env=model_data.get("api_key_env", ""),
+        endpoint=model_data.get("endpoint", "https://hub.oxen.ai/api/images/edit"),
+        num_inference_steps=model_data.get("num_inference_steps", 28),
+        model_type=model_data.get("model_type", "oxen"),
+        use_base64=model_data.get("use_base64", False),
+      )
+    )
+
+  return AppConfig(
+    models=models,
+    default_model_id=data.get("default_model_id"),
+  )
+
+
+def get_default_config() -> AppConfig:
+  """
+  Get the default configuration with legacy Oxen models.
+
+  This is used when no app_config.json exists.
+  """
+  return AppConfig(
+    models=[
+      ModelConfig(
+        name="Omni Water v1",
+        model_id="cannoneyed-quiet-green-lamprey",
+        api_key_env="OXEN_OMNI_v04_WATER_API_KEY",
+      ),
+      ModelConfig(
+        name="Omni Water v2",
+        model_id="cannoneyed-rural-rose-dingo",
+        api_key_env="OXEN_OMNI_WATER_V2_API_KEY",
+      ),
+      ModelConfig(
+        name="Omni (Original)",
+        model_id="cannoneyed-gentle-gold-antlion",
+        api_key_env="OXEN_OMNI_API_KEY",
+      ),
+    ],
+    default_model_id="cannoneyed-quiet-green-lamprey",
+  )
+
+
+def save_app_config(config: AppConfig, config_path: Path | None = None) -> None:
+  """
+  Save the application configuration to app_config.json.
+
+  Note: This does NOT save API keys - those should remain in environment variables.
+  """
+  if config_path is None:
+    config_path = Path(__file__).parent / "app_config.json"
+
+  data = {
+    "models": [],
+    "default_model_id": config.default_model_id,
+  }
+
+  for model in config.models:
+    data["models"].append(
+      {
+        "name": model.name,
+        "model_id": model.model_id,
+        "api_key_env": model.api_key_env,
+        "endpoint": model.endpoint,
+        "num_inference_steps": model.num_inference_steps,
+        "model_type": model.model_type,
+      }
+    )
+
+  with open(config_path, "w") as f:
+    json.dump(data, f, indent=2)
+
+```
+
+```python
+"""
+Model configuration for the generation app.
+
+Loads model configurations from app_config.json and provides
+utilities for selecting and using different AI models.
+"""
+
+import json
+import os
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+
+@dataclass
+class ModelConfig:
+  """Configuration for a single AI model."""
+
+  name: str
+  model_id: str
+  api_key_env: str  # Environment variable name for the API key
+  endpoint: str = "https://hub.oxen.ai/api/images/edit"
+  num_inference_steps: int = 28
+  model_type: str = "oxen"  # "oxen" for Oxen API, "local" for local inference
+  use_base64: bool = False  # Use base64 encoding for local inference (faster)
+
+  @property
+  def api_key(self) -> str | None:
+    """Get the API key from environment variables."""
+    return os.getenv(self.api_key_env) if self.api_key_env else None
+
+  @property
+  def is_local(self) -> bool:
+    """Check if this model uses local inference."""
+    return self.model_type == "local"
+
+  def to_dict(self) -> dict[str, Any]:
+    """Convert to dictionary for JSON serialization (without API key)."""
+    return {
+      "name": self.name,
+      "model_id": self.model_id,
+      "endpoint": self.endpoint,
+      "num_inference_steps": self.num_inference_steps,
+      "model_type": self.model_type,
+      "use_base64": self.use_base64,
+    }
+
+
+@dataclass
+class AppConfig:
+  """Full application configuration."""
+
+  models: list[ModelConfig]
+  default_model_id: str | None = None
+
+  def get_model(self, model_id: str) -> ModelConfig | None:
+    """Get a model configuration by its ID."""
+    for model in self.models:
+      if model.model_id == model_id:
+        return model
+    return None
+
+  def get_default_model(self) -> ModelConfig | None:
+    """Get the default model, or the first model if no default is set."""
+    if self.default_model_id:
+      return self.get_model(self.default_model_id)
+    return self.models[0] if self.models else None
+
+  def to_dict(self) -> dict[str, Any]:
+    """Convert to dictionary for JSON serialization."""
+    return {
+      "models": [m.to_dict() for m in self.models],
+      "default_model_id": self.default_model_id,
+    }
+
+
+def load_app_config(config_path: Path | None = None) -> AppConfig:
+  """
+  Load the application configuration from app_config.json.
+
+  Args:
+    config_path: Path to the config file. If None, looks in the generation dir.
+
+  Returns:
+    AppConfig object with model configurations
+
+  If the config file doesn't exist, returns a default configuration
+  with the legacy Oxen models.
+  """
+  if config_path is None:
+    config_path = Path(__file__).parent / "app_config.json"
+
+  if not config_path.exists():
+    # Return default configuration with legacy models
+    return get_default_config()
+
+  with open(config_path) as f:
+    data = json.load(f)
+
+  models = []
+  for model_data in data.get("models", []):
+    models.append(
+      ModelConfig(
+        name=model_data["name"],
+        model_id=model_data["model_id"],
+        api_key_env=model_data.get("api_key_env", ""),
+        endpoint=model_data.get("endpoint", "https://hub.oxen.ai/api/images/edit"),
+        num_inference_steps=model_data.get("num_inference_steps", 28),
+        model_type=model_data.get("model_type", "oxen"),
+        use_base64=model_data.get("use_base64", False),
+      )
+    )
+
+  return AppConfig(
+    models=models,
+    default_model_id=data.get("default_model_id"),
+  )
+
+
+def get_default_config() -> AppConfig:
+  """
+  Get the default configuration with legacy Oxen models.
+
+  This is used when no app_config.json exists.
+  """
+  return AppConfig(
+    models=[
+      ModelConfig(
+        name="Omni Water v1",
+        model_id="cannoneyed-quiet-green-lamprey",
+        api_key_env="OXEN_OMNI_v04_WATER_API_KEY",
+      ),
+      ModelConfig(
+        name="Omni Water v2",
+        model_id="cannoneyed-rural-rose-dingo",
+        api_key_env="OXEN_OMNI_WATER_V2_API_KEY",
+      ),
+      ModelConfig(
+        name="Omni (Original)",
+        model_id="cannoneyed-gentle-gold-antlion",
+        api_key_env="OXEN_OMNI_API_KEY",
+      ),
+    ],
+    default_model_id="cannoneyed-quiet-green-lamprey",
+  )
+
+
+def save_app_config(config: AppConfig, config_path: Path | None = None) -> None:
+  """
+  Save the application configuration to app_config.json.
+
+  Note: This does NOT save API keys - those should remain in environment variables.
+  """
+  if config_path is None:
+    config_path = Path(__file__).parent / "app_config.json"
+
+  data = {
+    "models": [],
+    "default_model_id": config.default_model_id,
+  }
+
+  for model in config.models:
+    data["models"].append(
+      {
+        "name": model.name,
+        "model_id": model.model_id,
+        "api_key_env": model.api_key_env,
+        "endpoint": model.endpoint,
+        "num_inference_steps": model.num_inference_steps,
+        "model_type": model.model_type,
+        "use_base64": model.use_base64,
+      }
+    )
+
+  with open(config_path, "w") as f:
+    json.dump(data, f, indent=2)
+
+```
+
+Now let me add the base64 API function in `generate_omni.py`:
+
+```python
+"""
+Reusable library for generating pixel art using the Oxen.ai model.
+
+This module provides the core generation logic that can be used by:
+- view_generations.py (Flask web server)
+- generate_tiles_omni.py (command-line script)
+- automatic_generation.py (automated generation)
+
+The main entry point is `run_generation_for_quadrants()` which handles:
+1. Validating the quadrant selection
+2. Rendering any missing quadrants
+3. Building the template image
+4. Uploading to GCS and calling the Oxen API
+5. Saving the generated quadrants to the database
+"""
+
+import os
+import re
+import sqlite3
+import tempfile
+from io import BytesIO
+from pathlib import Path
+from typing import Callable
+from urllib.parse import urlencode
+
+import requests
+from dotenv import load_dotenv
+from PIL import Image
+from playwright.sync_api import sync_playwright
+
+from isometric_nyc.e2e_generation.infill_template import (
+  QUADRANT_SIZE,
+  InfillRegion,
+  TemplateBuilder,
+  validate_quadrant_selection,
+)
+from isometric_nyc.e2e_generation.shared import (
+  DEFAULT_WEB_PORT,
+  ensure_quadrant_exists,
+  image_to_png_bytes,
+  png_bytes_to_image,
+  save_quadrant_generation,
+  save_quadrant_render,
+  split_tile_into_quadrants,
+  upload_to_gcs,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_generation as shared_get_quadrant_generation,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_render as shared_get_quadrant_render,
+)
+
+# Load environment variables
+load_dotenv()
+
+# Oxen API configuration
+OMNI_MODEL_ID = "cannoneyed-gentle-gold-antlion"
+OMNI_WATER_MODEL_ID = "cannoneyed-quiet-green-lamprey"
+OMNI_WATER_V2_MODEL_ID = "cannoneyed-rural-rose-dingo"
+
+GCS_BUCKET_NAME = "isometric-nyc-infills"
+
+
+# =============================================================================
+# Quadrant Parsing Utilities
+# =============================================================================
+
+
+def parse_quadrant_tuple(s: str) -> tuple[int, int]:
+  """
+  Parse a quadrant tuple string like "(0,1)" or "0,1" into a tuple.
+
+  Args:
+      s: String in format "(x,y)" or "x,y"
+
+  Returns:
+      Tuple of (x, y) coordinates
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  s = s.strip()
+  # Remove optional parentheses
+  if s.startswith("(") and s.endswith(")"):
+    s = s[1:-1]
+  parts = s.split(",")
+  if len(parts) != 2:
+    raise ValueError(f"Invalid quadrant tuple format: {s}")
+  return (int(parts[0].strip()), int(parts[1].strip()))
+
+
+def parse_quadrant_list(s: str) -> list[tuple[int, int]]:
+  """
+  Parse a comma-separated list of quadrant tuples.
+
+  Args:
+      s: String like "(0,1),(0,2)" or "(0,1), (0,2)"
+
+  Returns:
+      List of (x, y) coordinate tuples
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  # Use regex to find all (x,y) patterns
+  pattern = r"\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)"
+  matches = re.findall(pattern, s)
+  if not matches:
+    raise ValueError(f"No valid quadrant tuples found in: {s}")
+  return [(int(x), int(y)) for x, y in matches]
+
+
+# =============================================================================
+# Local Inference API Functions
+# =============================================================================
+
+
+def call_local_api_b64(
+  image: "Image.Image",
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> "Image.Image":
+  """
+  Call the local inference API using base64 encoding (faster than multipart).
+
+  The local API expects JSON with:
+    - image_b64: Base64-encoded input image
+    - prompt: The generation prompt
+    - steps: Number of inference steps
+
+  Args:
+      image: PIL Image of the input template
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      PIL Image of the generated result
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  import base64
+  from io import BytesIO
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "http://localhost:8888/edit-b64"
+    num_inference_steps = 15
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  # Convert PIL image to base64
+  img_buffer = BytesIO()
+  image.save(img_buffer, format="PNG")
+  image_b64 = base64.b64encode(img_buffer.getvalue()).decode()
+
+  # Prepare JSON payload
+  payload = {
+    "image_b64": image_b64,
+    "prompt": prompt,
+    "steps": num_inference_steps,
+  }
+
+  print(f"   🏠 Calling local API (base64) at {endpoint}...")
+  print(f"   📊 Steps: {num_inference_steps}")
+  print(f"   📦 Image size: {len(image_b64)} bytes (base64)")
+
+  response = requests.post(
+    endpoint,
+    json=payload,
+    headers={"Content-Type": "application/json"},
+    timeout=600,  # 10 minute timeout for local inference
+  )
+  response.raise_for_status()
+
+  # Parse JSON response
+  result = response.json()
+
+  if "image_b64" not in result:
+    raise ValueError(f"Expected 'image_b64' in response, got keys: {list(result.keys())}")
+
+  result_b64 = result["image_b64"]
+  print(f"   ✓ Received {len(result_b64)} bytes (base64) from local API")
+
+  # Decode base64 to PIL Image
+  return Image.open(BytesIO(base64.b64decode(result_b64)))
+
+
+def call_local_api(
+  image: "Image.Image",
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> "Image.Image":
+  """
+  Call the local inference API to generate pixel art.
+
+  The local API expects multipart/form-data with:
+    - file: The input image as PNG
+    - prompt: The generation prompt
+    - steps: Number of inference steps
+
+  Args:
+      image: PIL Image of the input template
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      PIL Image of the generated result
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  from io import BytesIO
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "http://localhost:8888/edit"
+    num_inference_steps = 15
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  # Convert PIL image to bytes
+  img_buffer = BytesIO()
+  image.save(img_buffer, format="PNG")
+  img_buffer.seek(0)
+
+  # Prepare multipart form data
+  files = {
+    "file": ("input.png", img_buffer, "image/png"),
+  }
+  data = {
+    "prompt": prompt,
+    "steps": str(num_inference_steps),
+  }
+
+  print(f"   🏠 Calling local API at {endpoint}...")
+  print(f"   📊 Steps: {num_inference_steps}")
+
+  response = requests.post(
+    endpoint,
+    files=files,
+    data=data,
+    headers={"accept": "image/png"},
+    timeout=600,  # 10 minute timeout for local inference
+  )
+  response.raise_for_status()
+
+  # Check content type
+  content_type = response.headers.get("content-type", "")
+  if "image" not in content_type:
+    raise ValueError(f"Expected image response, got content-type: {content_type}")
+
+  print(f"   ✓ Received {len(response.content)} bytes from local API")
+
+  # Parse the response as an image
+  return Image.open(BytesIO(response.content))
+
+
+# =============================================================================
+# Oxen API Functions
+# =============================================================================
+
+
+def call_oxen_api(
+  image_url: str,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> str:
+  """
+  Call the Oxen API to generate pixel art.
+
+  Args:
+      image_url: Public URL of the input template image
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      URL of the generated image
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    model_id = model_config.model_id
+    api_key = model_config.api_key
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "https://hub.oxen.ai/api/images/edit"
+    model_id = OMNI_WATER_MODEL_ID
+    api_key = os.getenv("OXEN_OMNI_v04_WATER_API_KEY")
+    num_inference_steps = 28
+
+  if not api_key:
+    raise ValueError(f"API key not found for model {model_id}")
+
+  headers = {
+    "Authorization": f"Bearer {api_key}",
+    "Content-Type": "application/json",
+  }
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  payload = {
+    "model": model_id,
+    "input_image": image_url,
+    "prompt": prompt,
+    "num_inference_steps": num_inference_steps,
+  }
+
+  print(f"   🤖 Calling Oxen API with model {model_id}...")
+  response = requests.post(endpoint, headers=headers, json=payload, timeout=300)
+  response.raise_for_status()
+
+  result = response.json()
+
+  # Log the response structure for debugging
+  print(f"   📥 API response keys: {list(result.keys())}")
+
+  # Try various response formats
+  if "images" in result and len(result["images"]) > 0:
+    image_data = result["images"][0]
+    print(
+      f"   📥 Image data keys: {list(image_data.keys()) if isinstance(image_data, dict) else type(image_data)}"
+    )
+
+    # Try different possible keys for the image URL
+    if isinstance(image_data, dict):
+      if "url" in image_data:
+        return image_data["url"]
+      elif "image_url" in image_data:
+        return image_data["image_url"]
+      elif "data" in image_data:
+        # Some APIs return base64 data - we'd need to handle this differently
+        raise ValueError(
+          f"API returned base64 data instead of URL: {list(image_data.keys())}"
+        )
+      else:
+        raise ValueError(
+          f"Image data missing 'url' key. Available keys: {list(image_data.keys())}"
+        )
+    elif isinstance(image_data, str):
+      # Direct URL string
+      return image_data
+    else:
+      raise ValueError(f"Unexpected image data type: {type(image_data)}")
+  elif "url" in result:
+    return result["url"]
+  elif "image_url" in result:
+    return result["image_url"]
+  elif "output" in result:
+    return result["output"]
+  elif "error" in result:
+    raise ValueError(f"API returned error: {result['error']}")
+  elif "message" in result:
+    raise ValueError(f"API returned message: {result['message']}")
+  else:
+    raise ValueError(
+      f"Unexpected API response format. Keys: {list(result.keys())}, Full response: {result}"
+    )
+
+
+def download_image_to_pil(
+  url: str,
+  max_retries: int = 3,
+  retry_delay: float = 10.0,
+) -> Image.Image:
+  """
+  Download an image from a URL and return as PIL Image.
+
+  Includes retry logic for transient errors (e.g., 403 Forbidden when
+  the image is not yet available).
+
+  Args:
+      url: URL of the image to download
+      max_retries: Maximum number of retry attempts (default: 3)
+      retry_delay: Seconds to wait between retries (default: 10.0)
+
+  Returns:
+      PIL Image object
+
+  Raises:
+      requests.HTTPError: If all retry attempts fail
+  """
+  import time
+
+  last_error = None
+
+  for attempt in range(1, max_retries + 1):
+    try:
+      response = requests.get(url, timeout=120)
+      response.raise_for_status()
+      return Image.open(BytesIO(response.content))
+    except requests.exceptions.HTTPError as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download failed (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+    except requests.exceptions.RequestException as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download error (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+
+  # If we get here, all retries failed
+  if last_error:
+    raise last_error
+  raise RuntimeError("Download failed with no error captured")
+
+
+# =============================================================================
+# Rendering Functions
+# =============================================================================
+
+
+def render_quadrant(
+  conn: sqlite3.Connection,
+  config: dict,
+  x: int,
+  y: int,
+  port: int,
+) -> bytes | None:
+  """
+  Render a quadrant and save to database.
+
+  This renders the tile containing the quadrant and saves all 4 quadrants.
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      x: Quadrant x coordinate
+      y: Quadrant y coordinate
+      port: Web server port for rendering
+
+  Returns:
+      PNG bytes of the rendered quadrant, or None if failed
+  """
+  # Ensure the quadrant exists in the database
+  quadrant = ensure_quadrant_exists(conn, config, x, y)
+
+  print(f"   🎨 Rendering tile for quadrant ({x}, {y})...")
+
+  # Build URL for rendering
+  params = {
+    "export": "true",
+    "lat": quadrant["lat"],
+    "lon": quadrant["lng"],
+    "width": config["width_px"],
+    "height": config["height_px"],
+    "azimuth": config["camera_azimuth_degrees"],
+    "elevation": config["camera_elevation_degrees"],
+    "view_height": config.get("view_height_meters", 200),
+  }
+  query_string = urlencode(params)
+  url = f"http://localhost:{port}/?{query_string}"
+
+  # Render using Playwright
+  with sync_playwright() as p:
+    browser = p.chromium.launch(
+      headless=True,
+      args=[
+        "--enable-webgl",
+        "--use-gl=angle",
+        "--ignore-gpu-blocklist",
+      ],
+    )
+
+    context = browser.new_context(
+      viewport={"width": config["width_px"], "height": config["height_px"]},
+      device_scale_factor=1,
+    )
+    page = context.new_page()
+
+    page.goto(url, wait_until="networkidle")
+
+    try:
+      page.wait_for_function("window.TILES_LOADED === true", timeout=60000)
+    except Exception:
+      print("      ⚠️  Timeout waiting for tiles, continuing anyway...")
+
+    # Get screenshot as bytes
+    screenshot_bytes = page.screenshot(type="png")
+
+    page.close()
+    context.close()
+    browser.close()
+
+  # Open as PIL image and split into quadrants
+  full_tile = Image.open(BytesIO(screenshot_bytes))
+  quadrant_images = split_tile_into_quadrants(full_tile)
+
+  # Save all quadrants to database
+  result_bytes = None
+  for (dx, dy), quad_img in quadrant_images.items():
+    qx, qy = x + dx, y + dy
+    png_bytes = image_to_png_bytes(quad_img)
+    save_quadrant_render(conn, config, qx, qy, png_bytes)
+    print(f"      ✓ Saved render for ({qx}, {qy})")
+
+    # Return the specific quadrant we were asked for
+    if qx == x and qy == y:
+      result_bytes = png_bytes
+
+  return result_bytes
+
+
+# =============================================================================
+# Core Generation Logic
+# =============================================================================
+
+
+def run_generation_for_quadrants(
+  conn: sqlite3.Connection,
+  config: dict,
+  selected_quadrants: list[tuple[int, int]],
+  port: int = DEFAULT_WEB_PORT,
+  bucket_name: str = GCS_BUCKET_NAME,
+  status_callback: Callable[[str, str], None] | None = None,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  context_quadrants: list[tuple[int, int]] | None = None,
+  prompt: str | None = None,
+) -> dict:
+  """
+  Run the full generation pipeline for selected quadrants.
+
+  This is the main entry point for generation. It:
+  1. Validates the quadrant selection
+  2. Renders any missing quadrants
+  3. Builds the template image with appropriate borders
+  4. Uploads to GCS and calls the Oxen API
+  5. Saves the generated quadrants to the database
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      selected_quadrants: List of (x, y) quadrant coordinates to generate
+      port: Web server port for rendering (default: 5173)
+      bucket_name: GCS bucket name for uploads
+      status_callback: Optional callback(status, message) for progress updates
+      model_config: Optional model configuration for the Oxen API (ModelConfig from model_config.py)
+      context_quadrants: Optional list of (x, y) quadrant coordinates to use as
+        context. These quadrants provide surrounding pixel art context for the
+        generation. If a context quadrant has a generation, that will be used;
+        otherwise the render will be used.
+      prompt: Optional additional prompt text for generation
+
+  Returns:
+      Dict with:
+          - success: bool
+          - message: str (on success)
+          - error: str (on failure)
+          - quadrants: list of generated quadrant coords (on success)
+  """
+  # Convert context quadrants to a set for fast lookup
+  context_set: set[tuple[int, int]] = (
+    set(context_quadrants) if context_quadrants else set()
+  )
+  if context_set:
+    print(f"   📋 Using {len(context_set)} context quadrant(s): {list(context_set)}")
+  if prompt:
+    print(f"   📝 Additional prompt: {prompt}")
+
+  def update_status(status: str, message: str = "") -> None:
+    if status_callback:
+      status_callback(status, message)
+
+  update_status("validating", "Checking API key...")
+
+  # Create helper functions for validation
+  # These are modified to treat context quadrants as "generated" if they have
+  # either a generation or a render
+  def has_generation_in_db(qx: int, qy: int) -> bool:
+    # Check if this quadrant has an actual generation
+    gen = shared_get_quadrant_generation(conn, qx, qy)
+    if gen is not None:
+      return True
+
+    # For context quadrants, treat them as "generated" if they have a render
+    # This allows context quadrants to provide surrounding content even if
+    # they don't have generations yet
+    if (qx, qy) in context_set:
+      render = shared_get_quadrant_render(conn, qx, qy)
+      return render is not None
+
+    return False
+
+  def get_render_from_db_with_render(qx: int, qy: int) -> Image.Image | None:
+    """Get render, rendering if it doesn't exist yet."""
+    render_bytes = shared_get_quadrant_render(conn, qx, qy)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+
+    # Need to render
+    update_status("rendering", f"Rendering quadrant ({qx}, {qy})...")
+    print(f"   📦 Rendering quadrant ({qx}, {qy})...")
+    render_bytes = render_quadrant(conn, config, qx, qy, port)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+    return None
+
+  def get_generation_from_db(qx: int, qy: int) -> Image.Image | None:
+    """Get generation, falling back to render for context quadrants."""
+    gen_bytes = shared_get_quadrant_generation(conn, qx, qy)
+    if gen_bytes:
+      return png_bytes_to_image(gen_bytes)
+
+    # For context quadrants, fall back to render if no generation exists
+    # This allows context quadrants to provide surrounding pixel art context
+    # even if they only have renders
+    if (qx, qy) in context_set:
+      render_bytes = shared_get_quadrant_render(conn, qx, qy)
+      if render_bytes:
+        print(f"   📋 Using render as context for ({qx}, {qy})")
+        return png_bytes_to_image(render_bytes)
+
+    return None
+
+  update_status("validating", "Validating quadrant selection...")
+
+  # Validate selection with auto-expansion
+  is_valid, msg, placement = validate_quadrant_selection(
+    selected_quadrants, has_generation_in_db, allow_expansion=True
+  )
+
+  if not is_valid:
+    update_status("error", msg)
+    return {"success": False, "error": msg}
+
+  print(f"✅ Validation: {msg}")
+
+  # Get primary quadrants (the ones user selected, not padding)
+  primary_quadrants = (
+    placement.primary_quadrants if placement.primary_quadrants else selected_quadrants
+  )
+  padding_quadrants = placement.padding_quadrants if placement else []
+
+  if padding_quadrants:
+    print(f"   📦 Padding quadrants: {padding_quadrants}")
+
+  # Create the infill region (may be expanded)
+  if placement._expanded_region is not None:
+    region = placement._expanded_region
+  else:
+    region = InfillRegion.from_quadrants(selected_quadrants)
+
+  # Build the template
+  update_status("rendering", "Building template image...")
+  builder = TemplateBuilder(
+    region, has_generation_in_db, get_render_from_db_with_render, get_generation_from_db
+  )
+
+  print("📋 Building template...")
+  result = builder.build(border_width=2, allow_expansion=True)
+
+  if result is None:
+    error_msg = builder._last_validation_error or "Failed to build template"
+    update_status("error", error_msg)
+    return {
+      "success": False,
+      "error": error_msg,
+    }
+
+  template_image, placement = result
+
+  # Check if we're using local or Oxen API
+  is_local = model_config is not None and model_config.is_local
+
+  template_path = None
+  try:
+    if is_local:
+      # Local inference - no GCS upload needed
+      print(f"📋 Template size: {template_image.size[0]}x{template_image.size[1]}")
+
+      update_status("generating", "Calling local model (this may take a minute)...")
+      print("🏠 Using local inference...")
+      generated_image = call_local_api(template_image, model_config, prompt)
+      print("   ✓ Local inference complete")
+    else:
+      # Oxen API - upload to GCS first
+      with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        template_path = Path(tmp.name)
+        template_image.save(template_path)
+
+      update_status("uploading", "Uploading template to cloud...")
+      print("📤 Uploading template to GCS...")
+      print(f"   Template path: {template_path}")
+      print(f"   Template size: {template_image.size[0]}x{template_image.size[1]}")
+      image_url = upload_to_gcs(template_path, bucket_name)
+      print(f"   Uploaded URL: {image_url}")
+
+      update_status("generating", "Calling AI model (this may take a minute)...")
+      print("🤖 Calling Oxen API...")
+      generated_url = call_oxen_api(image_url, model_config, prompt)
+
+      update_status("saving", "Downloading and saving results...")
+      print("📥 Downloading generated image...")
+      print(f"   Generated URL: {generated_url}")
+      generated_image = download_image_to_pil(generated_url)
+
+    # For local inference, update status to saving now
+    if is_local:
+      update_status("saving", "Saving results...")
+
+    # Extract quadrants from generated image and save to database
+    print("💾 Saving generated quadrants to database...")
+
+    # Figure out what quadrants are in the infill region
+    all_infill_quadrants = (
+      placement.all_infill_quadrants
+      if placement.all_infill_quadrants
+      else region.overlapping_quadrants()
+    )
+
+    # For each infill quadrant, extract pixels from the generated image
+    saved_count = 0
+    for qx, qy in all_infill_quadrants:
+      # Calculate position in the generated image
+      quad_world_x = qx * QUADRANT_SIZE
+      quad_world_y = qy * QUADRANT_SIZE
+
+      template_x = quad_world_x - placement.world_offset_x
+      template_y = quad_world_y - placement.world_offset_y
+
+      # Crop this quadrant from the generated image
+      crop_box = (
+        template_x,
+        template_y,
+        template_x + QUADRANT_SIZE,
+        template_y + QUADRANT_SIZE,
+      )
+      quad_img = generated_image.crop(crop_box)
+      png_bytes = image_to_png_bytes(quad_img)
+
+      # Only save primary quadrants (not padding)
+      if (qx, qy) in primary_quadrants or (qx, qy) in [
+        (q[0], q[1]) for q in primary_quadrants
+      ]:
+        if save_quadrant_generation(conn, config, qx, qy, png_bytes):
+          print(f"   ✓ Saved generation for ({qx}, {qy})")
+          saved_count += 1
+        else:
+          print(f"   ⚠️ Failed to save generation for ({qx}, {qy})")
+      else:
+        print(f"   ⏭️ Skipped padding quadrant ({qx}, {qy})")
+
+    update_status("complete", f"Generated {saved_count} quadrant(s)")
+    return {
+      "success": True,
+      "message": f"Generated {saved_count} quadrant{'s' if saved_count != 1 else ''}",
+      "quadrants": list(primary_quadrants),
+    }
+
+  finally:
+    # Clean up temp file if it was created (only for Oxen API path)
+    if template_path is not None:
+      template_path.unlink(missing_ok=True)
+
+```
+
+Now let me update the dispatch logic to use the base64 API when configured:
+
+```python
+"""
+Reusable library for generating pixel art using the Oxen.ai model.
+
+This module provides the core generation logic that can be used by:
+- view_generations.py (Flask web server)
+- generate_tiles_omni.py (command-line script)
+- automatic_generation.py (automated generation)
+
+The main entry point is `run_generation_for_quadrants()` which handles:
+1. Validating the quadrant selection
+2. Rendering any missing quadrants
+3. Building the template image
+4. Uploading to GCS and calling the Oxen API
+5. Saving the generated quadrants to the database
+"""
+
+import os
+import re
+import sqlite3
+import tempfile
+from io import BytesIO
+from pathlib import Path
+from typing import Callable
+from urllib.parse import urlencode
+
+import requests
+from dotenv import load_dotenv
+from PIL import Image
+from playwright.sync_api import sync_playwright
+
+from isometric_nyc.e2e_generation.infill_template import (
+  QUADRANT_SIZE,
+  InfillRegion,
+  TemplateBuilder,
+  validate_quadrant_selection,
+)
+from isometric_nyc.e2e_generation.shared import (
+  DEFAULT_WEB_PORT,
+  ensure_quadrant_exists,
+  image_to_png_bytes,
+  png_bytes_to_image,
+  save_quadrant_generation,
+  save_quadrant_render,
+  split_tile_into_quadrants,
+  upload_to_gcs,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_generation as shared_get_quadrant_generation,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_render as shared_get_quadrant_render,
+)
+
+# Load environment variables
+load_dotenv()
+
+# Oxen API configuration
+OMNI_MODEL_ID = "cannoneyed-gentle-gold-antlion"
+OMNI_WATER_MODEL_ID = "cannoneyed-quiet-green-lamprey"
+OMNI_WATER_V2_MODEL_ID = "cannoneyed-rural-rose-dingo"
+
+GCS_BUCKET_NAME = "isometric-nyc-infills"
+
+
+# =============================================================================
+# Quadrant Parsing Utilities
+# =============================================================================
+
+
+def parse_quadrant_tuple(s: str) -> tuple[int, int]:
+  """
+  Parse a quadrant tuple string like "(0,1)" or "0,1" into a tuple.
+
+  Args:
+      s: String in format "(x,y)" or "x,y"
+
+  Returns:
+      Tuple of (x, y) coordinates
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  s = s.strip()
+  # Remove optional parentheses
+  if s.startswith("(") and s.endswith(")"):
+    s = s[1:-1]
+  parts = s.split(",")
+  if len(parts) != 2:
+    raise ValueError(f"Invalid quadrant tuple format: {s}")
+  return (int(parts[0].strip()), int(parts[1].strip()))
+
+
+def parse_quadrant_list(s: str) -> list[tuple[int, int]]:
+  """
+  Parse a comma-separated list of quadrant tuples.
+
+  Args:
+      s: String like "(0,1),(0,2)" or "(0,1), (0,2)"
+
+  Returns:
+      List of (x, y) coordinate tuples
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  # Use regex to find all (x,y) patterns
+  pattern = r"\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)"
+  matches = re.findall(pattern, s)
+  if not matches:
+    raise ValueError(f"No valid quadrant tuples found in: {s}")
+  return [(int(x), int(y)) for x, y in matches]
+
+
+# =============================================================================
+# Local Inference API Functions
+# =============================================================================
+
+
+def call_local_api_b64(
+  image: "Image.Image",
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> "Image.Image":
+  """
+  Call the local inference API using base64 encoding (faster than multipart).
+
+  The local API expects JSON with:
+    - image_b64: Base64-encoded input image
+    - prompt: The generation prompt
+    - steps: Number of inference steps
+
+  Args:
+      image: PIL Image of the input template
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      PIL Image of the generated result
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  import base64
+  from io import BytesIO
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "http://localhost:8888/edit-b64"
+    num_inference_steps = 15
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  # Convert PIL image to base64
+  img_buffer = BytesIO()
+  image.save(img_buffer, format="PNG")
+  image_b64 = base64.b64encode(img_buffer.getvalue()).decode()
+
+  # Prepare JSON payload
+  payload = {
+    "image_b64": image_b64,
+    "prompt": prompt,
+    "steps": num_inference_steps,
+  }
+
+  print(f"   🏠 Calling local API (base64) at {endpoint}...")
+  print(f"   📊 Steps: {num_inference_steps}")
+  print(f"   📦 Image size: {len(image_b64)} bytes (base64)")
+
+  response = requests.post(
+    endpoint,
+    json=payload,
+    headers={"Content-Type": "application/json"},
+    timeout=600,  # 10 minute timeout for local inference
+  )
+  response.raise_for_status()
+
+  # Parse JSON response
+  result = response.json()
+
+  if "image_b64" not in result:
+    raise ValueError(f"Expected 'image_b64' in response, got keys: {list(result.keys())}")
+
+  result_b64 = result["image_b64"]
+  print(f"   ✓ Received {len(result_b64)} bytes (base64) from local API")
+
+  # Decode base64 to PIL Image
+  return Image.open(BytesIO(base64.b64decode(result_b64)))
+
+
+def call_local_api(
+  image: "Image.Image",
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> "Image.Image":
+  """
+  Call the local inference API to generate pixel art.
+
+  The local API expects multipart/form-data with:
+    - file: The input image as PNG
+    - prompt: The generation prompt
+    - steps: Number of inference steps
+
+  Args:
+      image: PIL Image of the input template
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      PIL Image of the generated result
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  from io import BytesIO
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "http://localhost:8888/edit"
+    num_inference_steps = 15
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  # Convert PIL image to bytes
+  img_buffer = BytesIO()
+  image.save(img_buffer, format="PNG")
+  img_buffer.seek(0)
+
+  # Prepare multipart form data
+  files = {
+    "file": ("input.png", img_buffer, "image/png"),
+  }
+  data = {
+    "prompt": prompt,
+    "steps": str(num_inference_steps),
+  }
+
+  print(f"   🏠 Calling local API at {endpoint}...")
+  print(f"   📊 Steps: {num_inference_steps}")
+
+  response = requests.post(
+    endpoint,
+    files=files,
+    data=data,
+    headers={"accept": "image/png"},
+    timeout=600,  # 10 minute timeout for local inference
+  )
+  response.raise_for_status()
+
+  # Check content type
+  content_type = response.headers.get("content-type", "")
+  if "image" not in content_type:
+    raise ValueError(f"Expected image response, got content-type: {content_type}")
+
+  print(f"   ✓ Received {len(response.content)} bytes from local API")
+
+  # Parse the response as an image
+  return Image.open(BytesIO(response.content))
+
+
+# =============================================================================
+# Oxen API Functions
+# =============================================================================
+
+
+def call_oxen_api(
+  image_url: str,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> str:
+  """
+  Call the Oxen API to generate pixel art.
+
+  Args:
+      image_url: Public URL of the input template image
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      URL of the generated image
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    model_id = model_config.model_id
+    api_key = model_config.api_key
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "https://hub.oxen.ai/api/images/edit"
+    model_id = OMNI_WATER_MODEL_ID
+    api_key = os.getenv("OXEN_OMNI_v04_WATER_API_KEY")
+    num_inference_steps = 28
+
+  if not api_key:
+    raise ValueError(f"API key not found for model {model_id}")
+
+  headers = {
+    "Authorization": f"Bearer {api_key}",
+    "Content-Type": "application/json",
+  }
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  payload = {
+    "model": model_id,
+    "input_image": image_url,
+    "prompt": prompt,
+    "num_inference_steps": num_inference_steps,
+  }
+
+  print(f"   🤖 Calling Oxen API with model {model_id}...")
+  response = requests.post(endpoint, headers=headers, json=payload, timeout=300)
+  response.raise_for_status()
+
+  result = response.json()
+
+  # Log the response structure for debugging
+  print(f"   📥 API response keys: {list(result.keys())}")
+
+  # Try various response formats
+  if "images" in result and len(result["images"]) > 0:
+    image_data = result["images"][0]
+    print(
+      f"   📥 Image data keys: {list(image_data.keys()) if isinstance(image_data, dict) else type(image_data)}"
+    )
+
+    # Try different possible keys for the image URL
+    if isinstance(image_data, dict):
+      if "url" in image_data:
+        return image_data["url"]
+      elif "image_url" in image_data:
+        return image_data["image_url"]
+      elif "data" in image_data:
+        # Some APIs return base64 data - we'd need to handle this differently
+        raise ValueError(
+          f"API returned base64 data instead of URL: {list(image_data.keys())}"
+        )
+      else:
+        raise ValueError(
+          f"Image data missing 'url' key. Available keys: {list(image_data.keys())}"
+        )
+    elif isinstance(image_data, str):
+      # Direct URL string
+      return image_data
+    else:
+      raise ValueError(f"Unexpected image data type: {type(image_data)}")
+  elif "url" in result:
+    return result["url"]
+  elif "image_url" in result:
+    return result["image_url"]
+  elif "output" in result:
+    return result["output"]
+  elif "error" in result:
+    raise ValueError(f"API returned error: {result['error']}")
+  elif "message" in result:
+    raise ValueError(f"API returned message: {result['message']}")
+  else:
+    raise ValueError(
+      f"Unexpected API response format. Keys: {list(result.keys())}, Full response: {result}"
+    )
+
+
+def download_image_to_pil(
+  url: str,
+  max_retries: int = 3,
+  retry_delay: float = 10.0,
+) -> Image.Image:
+  """
+  Download an image from a URL and return as PIL Image.
+
+  Includes retry logic for transient errors (e.g., 403 Forbidden when
+  the image is not yet available).
+
+  Args:
+      url: URL of the image to download
+      max_retries: Maximum number of retry attempts (default: 3)
+      retry_delay: Seconds to wait between retries (default: 10.0)
+
+  Returns:
+      PIL Image object
+
+  Raises:
+      requests.HTTPError: If all retry attempts fail
+  """
+  import time
+
+  last_error = None
+
+  for attempt in range(1, max_retries + 1):
+    try:
+      response = requests.get(url, timeout=120)
+      response.raise_for_status()
+      return Image.open(BytesIO(response.content))
+    except requests.exceptions.HTTPError as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download failed (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+    except requests.exceptions.RequestException as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download error (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+
+  # If we get here, all retries failed
+  if last_error:
+    raise last_error
+  raise RuntimeError("Download failed with no error captured")
+
+
+# =============================================================================
+# Rendering Functions
+# =============================================================================
+
+
+def render_quadrant(
+  conn: sqlite3.Connection,
+  config: dict,
+  x: int,
+  y: int,
+  port: int,
+) -> bytes | None:
+  """
+  Render a quadrant and save to database.
+
+  This renders the tile containing the quadrant and saves all 4 quadrants.
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      x: Quadrant x coordinate
+      y: Quadrant y coordinate
+      port: Web server port for rendering
+
+  Returns:
+      PNG bytes of the rendered quadrant, or None if failed
+  """
+  # Ensure the quadrant exists in the database
+  quadrant = ensure_quadrant_exists(conn, config, x, y)
+
+  print(f"   🎨 Rendering tile for quadrant ({x}, {y})...")
+
+  # Build URL for rendering
+  params = {
+    "export": "true",
+    "lat": quadrant["lat"],
+    "lon": quadrant["lng"],
+    "width": config["width_px"],
+    "height": config["height_px"],
+    "azimuth": config["camera_azimuth_degrees"],
+    "elevation": config["camera_elevation_degrees"],
+    "view_height": config.get("view_height_meters", 200),
+  }
+  query_string = urlencode(params)
+  url = f"http://localhost:{port}/?{query_string}"
+
+  # Render using Playwright
+  with sync_playwright() as p:
+    browser = p.chromium.launch(
+      headless=True,
+      args=[
+        "--enable-webgl",
+        "--use-gl=angle",
+        "--ignore-gpu-blocklist",
+      ],
+    )
+
+    context = browser.new_context(
+      viewport={"width": config["width_px"], "height": config["height_px"]},
+      device_scale_factor=1,
+    )
+    page = context.new_page()
+
+    page.goto(url, wait_until="networkidle")
+
+    try:
+      page.wait_for_function("window.TILES_LOADED === true", timeout=60000)
+    except Exception:
+      print("      ⚠️  Timeout waiting for tiles, continuing anyway...")
+
+    # Get screenshot as bytes
+    screenshot_bytes = page.screenshot(type="png")
+
+    page.close()
+    context.close()
+    browser.close()
+
+  # Open as PIL image and split into quadrants
+  full_tile = Image.open(BytesIO(screenshot_bytes))
+  quadrant_images = split_tile_into_quadrants(full_tile)
+
+  # Save all quadrants to database
+  result_bytes = None
+  for (dx, dy), quad_img in quadrant_images.items():
+    qx, qy = x + dx, y + dy
+    png_bytes = image_to_png_bytes(quad_img)
+    save_quadrant_render(conn, config, qx, qy, png_bytes)
+    print(f"      ✓ Saved render for ({qx}, {qy})")
+
+    # Return the specific quadrant we were asked for
+    if qx == x and qy == y:
+      result_bytes = png_bytes
+
+  return result_bytes
+
+
+# =============================================================================
+# Core Generation Logic
+# =============================================================================
+
+
+def run_generation_for_quadrants(
+  conn: sqlite3.Connection,
+  config: dict,
+  selected_quadrants: list[tuple[int, int]],
+  port: int = DEFAULT_WEB_PORT,
+  bucket_name: str = GCS_BUCKET_NAME,
+  status_callback: Callable[[str, str], None] | None = None,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  context_quadrants: list[tuple[int, int]] | None = None,
+  prompt: str | None = None,
+) -> dict:
+  """
+  Run the full generation pipeline for selected quadrants.
+
+  This is the main entry point for generation. It:
+  1. Validates the quadrant selection
+  2. Renders any missing quadrants
+  3. Builds the template image with appropriate borders
+  4. Uploads to GCS and calls the Oxen API
+  5. Saves the generated quadrants to the database
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      selected_quadrants: List of (x, y) quadrant coordinates to generate
+      port: Web server port for rendering (default: 5173)
+      bucket_name: GCS bucket name for uploads
+      status_callback: Optional callback(status, message) for progress updates
+      model_config: Optional model configuration for the Oxen API (ModelConfig from model_config.py)
+      context_quadrants: Optional list of (x, y) quadrant coordinates to use as
+        context. These quadrants provide surrounding pixel art context for the
+        generation. If a context quadrant has a generation, that will be used;
+        otherwise the render will be used.
+      prompt: Optional additional prompt text for generation
+
+  Returns:
+      Dict with:
+          - success: bool
+          - message: str (on success)
+          - error: str (on failure)
+          - quadrants: list of generated quadrant coords (on success)
+  """
+  # Convert context quadrants to a set for fast lookup
+  context_set: set[tuple[int, int]] = (
+    set(context_quadrants) if context_quadrants else set()
+  )
+  if context_set:
+    print(f"   📋 Using {len(context_set)} context quadrant(s): {list(context_set)}")
+  if prompt:
+    print(f"   📝 Additional prompt: {prompt}")
+
+  def update_status(status: str, message: str = "") -> None:
+    if status_callback:
+      status_callback(status, message)
+
+  update_status("validating", "Checking API key...")
+
+  # Create helper functions for validation
+  # These are modified to treat context quadrants as "generated" if they have
+  # either a generation or a render
+  def has_generation_in_db(qx: int, qy: int) -> bool:
+    # Check if this quadrant has an actual generation
+    gen = shared_get_quadrant_generation(conn, qx, qy)
+    if gen is not None:
+      return True
+
+    # For context quadrants, treat them as "generated" if they have a render
+    # This allows context quadrants to provide surrounding content even if
+    # they don't have generations yet
+    if (qx, qy) in context_set:
+      render = shared_get_quadrant_render(conn, qx, qy)
+      return render is not None
+
+    return False
+
+  def get_render_from_db_with_render(qx: int, qy: int) -> Image.Image | None:
+    """Get render, rendering if it doesn't exist yet."""
+    render_bytes = shared_get_quadrant_render(conn, qx, qy)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+
+    # Need to render
+    update_status("rendering", f"Rendering quadrant ({qx}, {qy})...")
+    print(f"   📦 Rendering quadrant ({qx}, {qy})...")
+    render_bytes = render_quadrant(conn, config, qx, qy, port)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+    return None
+
+  def get_generation_from_db(qx: int, qy: int) -> Image.Image | None:
+    """Get generation, falling back to render for context quadrants."""
+    gen_bytes = shared_get_quadrant_generation(conn, qx, qy)
+    if gen_bytes:
+      return png_bytes_to_image(gen_bytes)
+
+    # For context quadrants, fall back to render if no generation exists
+    # This allows context quadrants to provide surrounding pixel art context
+    # even if they only have renders
+    if (qx, qy) in context_set:
+      render_bytes = shared_get_quadrant_render(conn, qx, qy)
+      if render_bytes:
+        print(f"   📋 Using render as context for ({qx}, {qy})")
+        return png_bytes_to_image(render_bytes)
+
+    return None
+
+  update_status("validating", "Validating quadrant selection...")
+
+  # Validate selection with auto-expansion
+  is_valid, msg, placement = validate_quadrant_selection(
+    selected_quadrants, has_generation_in_db, allow_expansion=True
+  )
+
+  if not is_valid:
+    update_status("error", msg)
+    return {"success": False, "error": msg}
+
+  print(f"✅ Validation: {msg}")
+
+  # Get primary quadrants (the ones user selected, not padding)
+  primary_quadrants = (
+    placement.primary_quadrants if placement.primary_quadrants else selected_quadrants
+  )
+  padding_quadrants = placement.padding_quadrants if placement else []
+
+  if padding_quadrants:
+    print(f"   📦 Padding quadrants: {padding_quadrants}")
+
+  # Create the infill region (may be expanded)
+  if placement._expanded_region is not None:
+    region = placement._expanded_region
+  else:
+    region = InfillRegion.from_quadrants(selected_quadrants)
+
+  # Build the template
+  update_status("rendering", "Building template image...")
+  builder = TemplateBuilder(
+    region, has_generation_in_db, get_render_from_db_with_render, get_generation_from_db
+  )
+
+  print("📋 Building template...")
+  result = builder.build(border_width=2, allow_expansion=True)
+
+  if result is None:
+    error_msg = builder._last_validation_error or "Failed to build template"
+    update_status("error", error_msg)
+    return {
+      "success": False,
+      "error": error_msg,
+    }
+
+  template_image, placement = result
+
+  # Check if we're using local or Oxen API
+  is_local = model_config is not None and model_config.is_local
+  use_base64 = model_config is not None and model_config.use_base64
+
+  template_path = None
+  try:
+    if is_local:
+      # Local inference - no GCS upload needed
+      print(f"📋 Template size: {template_image.size[0]}x{template_image.size[1]}")
+
+      update_status("generating", "Calling local model (this may take a minute)...")
+      if use_base64:
+        print("🏠 Using local inference (base64 mode)...")
+        generated_image = call_local_api_b64(template_image, model_config, prompt)
+      else:
+        print("🏠 Using local inference (multipart mode)...")
+        generated_image = call_local_api(template_image, model_config, prompt)
+      print("   ✓ Local inference complete")
+    else:
+      # Oxen API - upload to GCS first
+      with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        template_path = Path(tmp.name)
+        template_image.save(template_path)
+
+      update_status("uploading", "Uploading template to cloud...")
+      print("📤 Uploading template to GCS...")
+      print(f"   Template path: {template_path}")
+      print(f"   Template size: {template_image.size[0]}x{template_image.size[1]}")
+      image_url = upload_to_gcs(template_path, bucket_name)
+      print(f"   Uploaded URL: {image_url}")
+
+      update_status("generating", "Calling AI model (this may take a minute)...")
+      print("🤖 Calling Oxen API...")
+      generated_url = call_oxen_api(image_url, model_config, prompt)
+
+      update_status("saving", "Downloading and saving results...")
+      print("📥 Downloading generated image...")
+      print(f"   Generated URL: {generated_url}")
+      generated_image = download_image_to_pil(generated_url)
+
+    # For local inference, update status to saving now
+    if is_local:
+      update_status("saving", "Saving results...")
+
+    # Extract quadrants from generated image and save to database
+    print("💾 Saving generated quadrants to database...")
+
+    # Figure out what quadrants are in the infill region
+    all_infill_quadrants = (
+      placement.all_infill_quadrants
+      if placement.all_infill_quadrants
+      else region.overlapping_quadrants()
+    )
+
+    # For each infill quadrant, extract pixels from the generated image
+    saved_count = 0
+    for qx, qy in all_infill_quadrants:
+      # Calculate position in the generated image
+      quad_world_x = qx * QUADRANT_SIZE
+      quad_world_y = qy * QUADRANT_SIZE
+
+      template_x = quad_world_x - placement.world_offset_x
+      template_y = quad_world_y - placement.world_offset_y
+
+      # Crop this quadrant from the generated image
+      crop_box = (
+        template_x,
+        template_y,
+        template_x + QUADRANT_SIZE,
+        template_y + QUADRANT_SIZE,
+      )
+      quad_img = generated_image.crop(crop_box)
+      png_bytes = image_to_png_bytes(quad_img)
+
+      # Only save primary quadrants (not padding)
+      if (qx, qy) in primary_quadrants or (qx, qy) in [
+        (q[0], q[1]) for q in primary_quadrants
+      ]:
+        if save_quadrant_generation(conn, config, qx, qy, png_bytes):
+          print(f"   ✓ Saved generation for ({qx}, {qy})")
+          saved_count += 1
+        else:
+          print(f"   ⚠️ Failed to save generation for ({qx}, {qy})")
+      else:
+        print(f"   ⏭️ Skipped padding quadrant ({qx}, {qy})")
+
+    update_status("complete", f"Generated {saved_count} quadrant(s)")
+    return {
+      "success": True,
+      "message": f"Generated {saved_count} quadrant{'s' if saved_count != 1 else ''}",
+      "quadrants": list(primary_quadrants),
+    }
+
+  finally:
+    # Clean up temp file if it was created (only for Oxen API path)
+    if template_path is not None:
+      template_path.unlink(missing_ok=True)
+
+```
+
+Now let me update the app_config.json to use base64 for the local model (it's faster):
+
+```json
+{
+  "models": [
+    {
+      "name": "Local",
+      "model_id": "local",
+      "endpoint": "http://localhost:8888/edit-b64",
+      "num_inference_steps": 15,
+      "model_type": "local",
+      "use_base64": true
+    },
+    {
+      "name": "Omni v1",
+      "model_id": "cannoneyed-quiet-green-lamprey",
+      "api_key_env": "OXEN_OMNI_v04_WATER_API_KEY",
+      "endpoint": "https://hub.oxen.ai/api/images/edit",
+      "num_inference_steps": 28,
+      "model_type": "oxen"
+    },
+    {
+      "name": "Omni v2",
+      "model_id": "cannoneyed-rural-rose-dingo",
+      "api_key_env": "OXEN_OMNI_v04_WATER_V2_API_KEY",
+      "endpoint": "https://hub.oxen.ai/api/images/edit",
+      "num_inference_steps": 28,
+      "model_type": "oxen"
+    },
+    {
+      "name": "Omni (Original)",
+      "model_id": "cannoneyed-gentle-gold-antlion",
+      "api_key_env": "OXEN_OMNI_v04_API_KEY",
+      "endpoint": "https://hub.oxen.ai/api/images/edit",
+      "num_inference_steps": 28,
+      "model_type": "oxen"
+    }
+  ],
+  "default_model_id": "local"
+}
+
+```
+
+Let me check for any linting errors:
+
+Done! Here's a summary of the changes:
+
+### 1. `model_config.py`
+- Added `use_base64: bool = False` field to `ModelConfig`
+- Updated serialization/deserialization to handle the new field
+
+### 2. `generate_omni.py`
+- Added new `call_local_api_b64()` function that:
+  - Encodes the PIL Image to base64
+  - Sends a JSON payload to the `/edit-b64` endpoint
+  - Decodes the base64 response back to a PIL Image
+- Updated dispatch logic to choose between `call_local_api()` (multipart) and `call_local_api_b64()` (base64) based on the `use_base64` config flag
+
+### 3. `app_config.json`
+- Updated the "Local" model to use:
+  - `endpoint`: `"http://localhost:8888/edit-b64"` 
+  - `use_base64`: `true`
+
+### Usage
+The local model now uses the faster base64 endpoint by default. If you ever want to use the multipart form-data endpoint instead, you can either:
+1. Set `"use_base64": false` in the config
+2. Change the endpoint back to `"http://localhost:8888/edit"`
+
+Both approaches will work - the config just needs to match what your server supports.
+
+---
+
+**User**
+
+Can you add logging for the total amount of time the generation took?
+
+---
+
+**Cursor**
+
+I'll add timing logs to both local API functions:
+
+```python
+"""
+Reusable library for generating pixel art using the Oxen.ai model.
+
+This module provides the core generation logic that can be used by:
+- view_generations.py (Flask web server)
+- generate_tiles_omni.py (command-line script)
+- automatic_generation.py (automated generation)
+
+The main entry point is `run_generation_for_quadrants()` which handles:
+1. Validating the quadrant selection
+2. Rendering any missing quadrants
+3. Building the template image
+4. Uploading to GCS and calling the Oxen API
+5. Saving the generated quadrants to the database
+"""
+
+import os
+import re
+import sqlite3
+import tempfile
+from io import BytesIO
+from pathlib import Path
+from typing import Callable
+from urllib.parse import urlencode
+
+import requests
+from dotenv import load_dotenv
+from PIL import Image
+from playwright.sync_api import sync_playwright
+
+from isometric_nyc.e2e_generation.infill_template import (
+  QUADRANT_SIZE,
+  InfillRegion,
+  TemplateBuilder,
+  validate_quadrant_selection,
+)
+from isometric_nyc.e2e_generation.shared import (
+  DEFAULT_WEB_PORT,
+  ensure_quadrant_exists,
+  image_to_png_bytes,
+  png_bytes_to_image,
+  save_quadrant_generation,
+  save_quadrant_render,
+  split_tile_into_quadrants,
+  upload_to_gcs,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_generation as shared_get_quadrant_generation,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_render as shared_get_quadrant_render,
+)
+
+# Load environment variables
+load_dotenv()
+
+# Oxen API configuration
+OMNI_MODEL_ID = "cannoneyed-gentle-gold-antlion"
+OMNI_WATER_MODEL_ID = "cannoneyed-quiet-green-lamprey"
+OMNI_WATER_V2_MODEL_ID = "cannoneyed-rural-rose-dingo"
+
+GCS_BUCKET_NAME = "isometric-nyc-infills"
+
+
+# =============================================================================
+# Quadrant Parsing Utilities
+# =============================================================================
+
+
+def parse_quadrant_tuple(s: str) -> tuple[int, int]:
+  """
+  Parse a quadrant tuple string like "(0,1)" or "0,1" into a tuple.
+
+  Args:
+      s: String in format "(x,y)" or "x,y"
+
+  Returns:
+      Tuple of (x, y) coordinates
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  s = s.strip()
+  # Remove optional parentheses
+  if s.startswith("(") and s.endswith(")"):
+    s = s[1:-1]
+  parts = s.split(",")
+  if len(parts) != 2:
+    raise ValueError(f"Invalid quadrant tuple format: {s}")
+  return (int(parts[0].strip()), int(parts[1].strip()))
+
+
+def parse_quadrant_list(s: str) -> list[tuple[int, int]]:
+  """
+  Parse a comma-separated list of quadrant tuples.
+
+  Args:
+      s: String like "(0,1),(0,2)" or "(0,1), (0,2)"
+
+  Returns:
+      List of (x, y) coordinate tuples
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  # Use regex to find all (x,y) patterns
+  pattern = r"\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)"
+  matches = re.findall(pattern, s)
+  if not matches:
+    raise ValueError(f"No valid quadrant tuples found in: {s}")
+  return [(int(x), int(y)) for x, y in matches]
+
+
+# =============================================================================
+# Local Inference API Functions
+# =============================================================================
+
+
+def call_local_api_b64(
+  image: "Image.Image",
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> "Image.Image":
+  """
+  Call the local inference API using base64 encoding (faster than multipart).
+
+  The local API expects JSON with:
+    - image_b64: Base64-encoded input image
+    - prompt: The generation prompt
+    - steps: Number of inference steps
+
+  Args:
+      image: PIL Image of the input template
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      PIL Image of the generated result
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  import base64
+  import time
+  from io import BytesIO
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "http://localhost:8888/edit-b64"
+    num_inference_steps = 15
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  # Convert PIL image to base64
+  img_buffer = BytesIO()
+  image.save(img_buffer, format="PNG")
+  image_b64 = base64.b64encode(img_buffer.getvalue()).decode()
+
+  # Prepare JSON payload
+  payload = {
+    "image_b64": image_b64,
+    "prompt": prompt,
+    "steps": num_inference_steps,
+  }
+
+  print(f"   🏠 Calling local API (base64) at {endpoint}...")
+  print(f"   📊 Steps: {num_inference_steps}")
+  print(f"   📦 Image size: {len(image_b64)} bytes (base64)")
+
+  start_time = time.time()
+  response = requests.post(
+    endpoint,
+    json=payload,
+    headers={"Content-Type": "application/json"},
+    timeout=600,  # 10 minute timeout for local inference
+  )
+  response.raise_for_status()
+  elapsed_time = time.time() - start_time
+
+  # Parse JSON response
+  result = response.json()
+
+  if "image_b64" not in result:
+    raise ValueError(f"Expected 'image_b64' in response, got keys: {list(result.keys())}")
+
+  result_b64 = result["image_b64"]
+  print(f"   ✓ Received {len(result_b64)} bytes (base64) from local API")
+  print(f"   ⏱️  Generation took {elapsed_time:.1f}s")
+
+  # Decode base64 to PIL Image
+  return Image.open(BytesIO(base64.b64decode(result_b64)))
+
+
+def call_local_api(
+  image: "Image.Image",
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> "Image.Image":
+  """
+  Call the local inference API to generate pixel art.
+
+  The local API expects multipart/form-data with:
+    - file: The input image as PNG
+    - prompt: The generation prompt
+    - steps: Number of inference steps
+
+  Args:
+      image: PIL Image of the input template
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      PIL Image of the generated result
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  from io import BytesIO
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "http://localhost:8888/edit"
+    num_inference_steps = 15
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  # Convert PIL image to bytes
+  img_buffer = BytesIO()
+  image.save(img_buffer, format="PNG")
+  img_buffer.seek(0)
+
+  # Prepare multipart form data
+  files = {
+    "file": ("input.png", img_buffer, "image/png"),
+  }
+  data = {
+    "prompt": prompt,
+    "steps": str(num_inference_steps),
+  }
+
+  print(f"   🏠 Calling local API at {endpoint}...")
+  print(f"   📊 Steps: {num_inference_steps}")
+
+  response = requests.post(
+    endpoint,
+    files=files,
+    data=data,
+    headers={"accept": "image/png"},
+    timeout=600,  # 10 minute timeout for local inference
+  )
+  response.raise_for_status()
+
+  # Check content type
+  content_type = response.headers.get("content-type", "")
+  if "image" not in content_type:
+    raise ValueError(f"Expected image response, got content-type: {content_type}")
+
+  print(f"   ✓ Received {len(response.content)} bytes from local API")
+
+  # Parse the response as an image
+  return Image.open(BytesIO(response.content))
+
+
+# =============================================================================
+# Oxen API Functions
+# =============================================================================
+
+
+def call_oxen_api(
+  image_url: str,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> str:
+  """
+  Call the Oxen API to generate pixel art.
+
+  Args:
+      image_url: Public URL of the input template image
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      URL of the generated image
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    model_id = model_config.model_id
+    api_key = model_config.api_key
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "https://hub.oxen.ai/api/images/edit"
+    model_id = OMNI_WATER_MODEL_ID
+    api_key = os.getenv("OXEN_OMNI_v04_WATER_API_KEY")
+    num_inference_steps = 28
+
+  if not api_key:
+    raise ValueError(f"API key not found for model {model_id}")
+
+  headers = {
+    "Authorization": f"Bearer {api_key}",
+    "Content-Type": "application/json",
+  }
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  payload = {
+    "model": model_id,
+    "input_image": image_url,
+    "prompt": prompt,
+    "num_inference_steps": num_inference_steps,
+  }
+
+  print(f"   🤖 Calling Oxen API with model {model_id}...")
+  response = requests.post(endpoint, headers=headers, json=payload, timeout=300)
+  response.raise_for_status()
+
+  result = response.json()
+
+  # Log the response structure for debugging
+  print(f"   📥 API response keys: {list(result.keys())}")
+
+  # Try various response formats
+  if "images" in result and len(result["images"]) > 0:
+    image_data = result["images"][0]
+    print(
+      f"   📥 Image data keys: {list(image_data.keys()) if isinstance(image_data, dict) else type(image_data)}"
+    )
+
+    # Try different possible keys for the image URL
+    if isinstance(image_data, dict):
+      if "url" in image_data:
+        return image_data["url"]
+      elif "image_url" in image_data:
+        return image_data["image_url"]
+      elif "data" in image_data:
+        # Some APIs return base64 data - we'd need to handle this differently
+        raise ValueError(
+          f"API returned base64 data instead of URL: {list(image_data.keys())}"
+        )
+      else:
+        raise ValueError(
+          f"Image data missing 'url' key. Available keys: {list(image_data.keys())}"
+        )
+    elif isinstance(image_data, str):
+      # Direct URL string
+      return image_data
+    else:
+      raise ValueError(f"Unexpected image data type: {type(image_data)}")
+  elif "url" in result:
+    return result["url"]
+  elif "image_url" in result:
+    return result["image_url"]
+  elif "output" in result:
+    return result["output"]
+  elif "error" in result:
+    raise ValueError(f"API returned error: {result['error']}")
+  elif "message" in result:
+    raise ValueError(f"API returned message: {result['message']}")
+  else:
+    raise ValueError(
+      f"Unexpected API response format. Keys: {list(result.keys())}, Full response: {result}"
+    )
+
+
+def download_image_to_pil(
+  url: str,
+  max_retries: int = 3,
+  retry_delay: float = 10.0,
+) -> Image.Image:
+  """
+  Download an image from a URL and return as PIL Image.
+
+  Includes retry logic for transient errors (e.g., 403 Forbidden when
+  the image is not yet available).
+
+  Args:
+      url: URL of the image to download
+      max_retries: Maximum number of retry attempts (default: 3)
+      retry_delay: Seconds to wait between retries (default: 10.0)
+
+  Returns:
+      PIL Image object
+
+  Raises:
+      requests.HTTPError: If all retry attempts fail
+  """
+  import time
+
+  last_error = None
+
+  for attempt in range(1, max_retries + 1):
+    try:
+      response = requests.get(url, timeout=120)
+      response.raise_for_status()
+      return Image.open(BytesIO(response.content))
+    except requests.exceptions.HTTPError as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download failed (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+    except requests.exceptions.RequestException as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download error (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+
+  # If we get here, all retries failed
+  if last_error:
+    raise last_error
+  raise RuntimeError("Download failed with no error captured")
+
+
+# =============================================================================
+# Rendering Functions
+# =============================================================================
+
+
+def render_quadrant(
+  conn: sqlite3.Connection,
+  config: dict,
+  x: int,
+  y: int,
+  port: int,
+) -> bytes | None:
+  """
+  Render a quadrant and save to database.
+
+  This renders the tile containing the quadrant and saves all 4 quadrants.
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      x: Quadrant x coordinate
+      y: Quadrant y coordinate
+      port: Web server port for rendering
+
+  Returns:
+      PNG bytes of the rendered quadrant, or None if failed
+  """
+  # Ensure the quadrant exists in the database
+  quadrant = ensure_quadrant_exists(conn, config, x, y)
+
+  print(f"   🎨 Rendering tile for quadrant ({x}, {y})...")
+
+  # Build URL for rendering
+  params = {
+    "export": "true",
+    "lat": quadrant["lat"],
+    "lon": quadrant["lng"],
+    "width": config["width_px"],
+    "height": config["height_px"],
+    "azimuth": config["camera_azimuth_degrees"],
+    "elevation": config["camera_elevation_degrees"],
+    "view_height": config.get("view_height_meters", 200),
+  }
+  query_string = urlencode(params)
+  url = f"http://localhost:{port}/?{query_string}"
+
+  # Render using Playwright
+  with sync_playwright() as p:
+    browser = p.chromium.launch(
+      headless=True,
+      args=[
+        "--enable-webgl",
+        "--use-gl=angle",
+        "--ignore-gpu-blocklist",
+      ],
+    )
+
+    context = browser.new_context(
+      viewport={"width": config["width_px"], "height": config["height_px"]},
+      device_scale_factor=1,
+    )
+    page = context.new_page()
+
+    page.goto(url, wait_until="networkidle")
+
+    try:
+      page.wait_for_function("window.TILES_LOADED === true", timeout=60000)
+    except Exception:
+      print("      ⚠️  Timeout waiting for tiles, continuing anyway...")
+
+    # Get screenshot as bytes
+    screenshot_bytes = page.screenshot(type="png")
+
+    page.close()
+    context.close()
+    browser.close()
+
+  # Open as PIL image and split into quadrants
+  full_tile = Image.open(BytesIO(screenshot_bytes))
+  quadrant_images = split_tile_into_quadrants(full_tile)
+
+  # Save all quadrants to database
+  result_bytes = None
+  for (dx, dy), quad_img in quadrant_images.items():
+    qx, qy = x + dx, y + dy
+    png_bytes = image_to_png_bytes(quad_img)
+    save_quadrant_render(conn, config, qx, qy, png_bytes)
+    print(f"      ✓ Saved render for ({qx}, {qy})")
+
+    # Return the specific quadrant we were asked for
+    if qx == x and qy == y:
+      result_bytes = png_bytes
+
+  return result_bytes
+
+
+# =============================================================================
+# Core Generation Logic
+# =============================================================================
+
+
+def run_generation_for_quadrants(
+  conn: sqlite3.Connection,
+  config: dict,
+  selected_quadrants: list[tuple[int, int]],
+  port: int = DEFAULT_WEB_PORT,
+  bucket_name: str = GCS_BUCKET_NAME,
+  status_callback: Callable[[str, str], None] | None = None,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  context_quadrants: list[tuple[int, int]] | None = None,
+  prompt: str | None = None,
+) -> dict:
+  """
+  Run the full generation pipeline for selected quadrants.
+
+  This is the main entry point for generation. It:
+  1. Validates the quadrant selection
+  2. Renders any missing quadrants
+  3. Builds the template image with appropriate borders
+  4. Uploads to GCS and calls the Oxen API
+  5. Saves the generated quadrants to the database
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      selected_quadrants: List of (x, y) quadrant coordinates to generate
+      port: Web server port for rendering (default: 5173)
+      bucket_name: GCS bucket name for uploads
+      status_callback: Optional callback(status, message) for progress updates
+      model_config: Optional model configuration for the Oxen API (ModelConfig from model_config.py)
+      context_quadrants: Optional list of (x, y) quadrant coordinates to use as
+        context. These quadrants provide surrounding pixel art context for the
+        generation. If a context quadrant has a generation, that will be used;
+        otherwise the render will be used.
+      prompt: Optional additional prompt text for generation
+
+  Returns:
+      Dict with:
+          - success: bool
+          - message: str (on success)
+          - error: str (on failure)
+          - quadrants: list of generated quadrant coords (on success)
+  """
+  # Convert context quadrants to a set for fast lookup
+  context_set: set[tuple[int, int]] = (
+    set(context_quadrants) if context_quadrants else set()
+  )
+  if context_set:
+    print(f"   📋 Using {len(context_set)} context quadrant(s): {list(context_set)}")
+  if prompt:
+    print(f"   📝 Additional prompt: {prompt}")
+
+  def update_status(status: str, message: str = "") -> None:
+    if status_callback:
+      status_callback(status, message)
+
+  update_status("validating", "Checking API key...")
+
+  # Create helper functions for validation
+  # These are modified to treat context quadrants as "generated" if they have
+  # either a generation or a render
+  def has_generation_in_db(qx: int, qy: int) -> bool:
+    # Check if this quadrant has an actual generation
+    gen = shared_get_quadrant_generation(conn, qx, qy)
+    if gen is not None:
+      return True
+
+    # For context quadrants, treat them as "generated" if they have a render
+    # This allows context quadrants to provide surrounding content even if
+    # they don't have generations yet
+    if (qx, qy) in context_set:
+      render = shared_get_quadrant_render(conn, qx, qy)
+      return render is not None
+
+    return False
+
+  def get_render_from_db_with_render(qx: int, qy: int) -> Image.Image | None:
+    """Get render, rendering if it doesn't exist yet."""
+    render_bytes = shared_get_quadrant_render(conn, qx, qy)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+
+    # Need to render
+    update_status("rendering", f"Rendering quadrant ({qx}, {qy})...")
+    print(f"   📦 Rendering quadrant ({qx}, {qy})...")
+    render_bytes = render_quadrant(conn, config, qx, qy, port)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+    return None
+
+  def get_generation_from_db(qx: int, qy: int) -> Image.Image | None:
+    """Get generation, falling back to render for context quadrants."""
+    gen_bytes = shared_get_quadrant_generation(conn, qx, qy)
+    if gen_bytes:
+      return png_bytes_to_image(gen_bytes)
+
+    # For context quadrants, fall back to render if no generation exists
+    # This allows context quadrants to provide surrounding pixel art context
+    # even if they only have renders
+    if (qx, qy) in context_set:
+      render_bytes = shared_get_quadrant_render(conn, qx, qy)
+      if render_bytes:
+        print(f"   📋 Using render as context for ({qx}, {qy})")
+        return png_bytes_to_image(render_bytes)
+
+    return None
+
+  update_status("validating", "Validating quadrant selection...")
+
+  # Validate selection with auto-expansion
+  is_valid, msg, placement = validate_quadrant_selection(
+    selected_quadrants, has_generation_in_db, allow_expansion=True
+  )
+
+  if not is_valid:
+    update_status("error", msg)
+    return {"success": False, "error": msg}
+
+  print(f"✅ Validation: {msg}")
+
+  # Get primary quadrants (the ones user selected, not padding)
+  primary_quadrants = (
+    placement.primary_quadrants if placement.primary_quadrants else selected_quadrants
+  )
+  padding_quadrants = placement.padding_quadrants if placement else []
+
+  if padding_quadrants:
+    print(f"   📦 Padding quadrants: {padding_quadrants}")
+
+  # Create the infill region (may be expanded)
+  if placement._expanded_region is not None:
+    region = placement._expanded_region
+  else:
+    region = InfillRegion.from_quadrants(selected_quadrants)
+
+  # Build the template
+  update_status("rendering", "Building template image...")
+  builder = TemplateBuilder(
+    region, has_generation_in_db, get_render_from_db_with_render, get_generation_from_db
+  )
+
+  print("📋 Building template...")
+  result = builder.build(border_width=2, allow_expansion=True)
+
+  if result is None:
+    error_msg = builder._last_validation_error or "Failed to build template"
+    update_status("error", error_msg)
+    return {
+      "success": False,
+      "error": error_msg,
+    }
+
+  template_image, placement = result
+
+  # Check if we're using local or Oxen API
+  is_local = model_config is not None and model_config.is_local
+  use_base64 = model_config is not None and model_config.use_base64
+
+  template_path = None
+  try:
+    if is_local:
+      # Local inference - no GCS upload needed
+      print(f"📋 Template size: {template_image.size[0]}x{template_image.size[1]}")
+
+      update_status("generating", "Calling local model (this may take a minute)...")
+      if use_base64:
+        print("🏠 Using local inference (base64 mode)...")
+        generated_image = call_local_api_b64(template_image, model_config, prompt)
+      else:
+        print("🏠 Using local inference (multipart mode)...")
+        generated_image = call_local_api(template_image, model_config, prompt)
+      print("   ✓ Local inference complete")
+    else:
+      # Oxen API - upload to GCS first
+      with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        template_path = Path(tmp.name)
+        template_image.save(template_path)
+
+      update_status("uploading", "Uploading template to cloud...")
+      print("📤 Uploading template to GCS...")
+      print(f"   Template path: {template_path}")
+      print(f"   Template size: {template_image.size[0]}x{template_image.size[1]}")
+      image_url = upload_to_gcs(template_path, bucket_name)
+      print(f"   Uploaded URL: {image_url}")
+
+      update_status("generating", "Calling AI model (this may take a minute)...")
+      print("🤖 Calling Oxen API...")
+      generated_url = call_oxen_api(image_url, model_config, prompt)
+
+      update_status("saving", "Downloading and saving results...")
+      print("📥 Downloading generated image...")
+      print(f"   Generated URL: {generated_url}")
+      generated_image = download_image_to_pil(generated_url)
+
+    # For local inference, update status to saving now
+    if is_local:
+      update_status("saving", "Saving results...")
+
+    # Extract quadrants from generated image and save to database
+    print("💾 Saving generated quadrants to database...")
+
+    # Figure out what quadrants are in the infill region
+    all_infill_quadrants = (
+      placement.all_infill_quadrants
+      if placement.all_infill_quadrants
+      else region.overlapping_quadrants()
+    )
+
+    # For each infill quadrant, extract pixels from the generated image
+    saved_count = 0
+    for qx, qy in all_infill_quadrants:
+      # Calculate position in the generated image
+      quad_world_x = qx * QUADRANT_SIZE
+      quad_world_y = qy * QUADRANT_SIZE
+
+      template_x = quad_world_x - placement.world_offset_x
+      template_y = quad_world_y - placement.world_offset_y
+
+      # Crop this quadrant from the generated image
+      crop_box = (
+        template_x,
+        template_y,
+        template_x + QUADRANT_SIZE,
+        template_y + QUADRANT_SIZE,
+      )
+      quad_img = generated_image.crop(crop_box)
+      png_bytes = image_to_png_bytes(quad_img)
+
+      # Only save primary quadrants (not padding)
+      if (qx, qy) in primary_quadrants or (qx, qy) in [
+        (q[0], q[1]) for q in primary_quadrants
+      ]:
+        if save_quadrant_generation(conn, config, qx, qy, png_bytes):
+          print(f"   ✓ Saved generation for ({qx}, {qy})")
+          saved_count += 1
+        else:
+          print(f"   ⚠️ Failed to save generation for ({qx}, {qy})")
+      else:
+        print(f"   ⏭️ Skipped padding quadrant ({qx}, {qy})")
+
+    update_status("complete", f"Generated {saved_count} quadrant(s)")
+    return {
+      "success": True,
+      "message": f"Generated {saved_count} quadrant{'s' if saved_count != 1 else ''}",
+      "quadrants": list(primary_quadrants),
+    }
+
+  finally:
+    # Clean up temp file if it was created (only for Oxen API path)
+    if template_path is not None:
+      template_path.unlink(missing_ok=True)
+
+```
+
+```python
+"""
+Reusable library for generating pixel art using the Oxen.ai model.
+
+This module provides the core generation logic that can be used by:
+- view_generations.py (Flask web server)
+- generate_tiles_omni.py (command-line script)
+- automatic_generation.py (automated generation)
+
+The main entry point is `run_generation_for_quadrants()` which handles:
+1. Validating the quadrant selection
+2. Rendering any missing quadrants
+3. Building the template image
+4. Uploading to GCS and calling the Oxen API
+5. Saving the generated quadrants to the database
+"""
+
+import os
+import re
+import sqlite3
+import tempfile
+from io import BytesIO
+from pathlib import Path
+from typing import Callable
+from urllib.parse import urlencode
+
+import requests
+from dotenv import load_dotenv
+from PIL import Image
+from playwright.sync_api import sync_playwright
+
+from isometric_nyc.e2e_generation.infill_template import (
+  QUADRANT_SIZE,
+  InfillRegion,
+  TemplateBuilder,
+  validate_quadrant_selection,
+)
+from isometric_nyc.e2e_generation.shared import (
+  DEFAULT_WEB_PORT,
+  ensure_quadrant_exists,
+  image_to_png_bytes,
+  png_bytes_to_image,
+  save_quadrant_generation,
+  save_quadrant_render,
+  split_tile_into_quadrants,
+  upload_to_gcs,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_generation as shared_get_quadrant_generation,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_render as shared_get_quadrant_render,
+)
+
+# Load environment variables
+load_dotenv()
+
+# Oxen API configuration
+OMNI_MODEL_ID = "cannoneyed-gentle-gold-antlion"
+OMNI_WATER_MODEL_ID = "cannoneyed-quiet-green-lamprey"
+OMNI_WATER_V2_MODEL_ID = "cannoneyed-rural-rose-dingo"
+
+GCS_BUCKET_NAME = "isometric-nyc-infills"
+
+
+# =============================================================================
+# Quadrant Parsing Utilities
+# =============================================================================
+
+
+def parse_quadrant_tuple(s: str) -> tuple[int, int]:
+  """
+  Parse a quadrant tuple string like "(0,1)" or "0,1" into a tuple.
+
+  Args:
+      s: String in format "(x,y)" or "x,y"
+
+  Returns:
+      Tuple of (x, y) coordinates
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  s = s.strip()
+  # Remove optional parentheses
+  if s.startswith("(") and s.endswith(")"):
+    s = s[1:-1]
+  parts = s.split(",")
+  if len(parts) != 2:
+    raise ValueError(f"Invalid quadrant tuple format: {s}")
+  return (int(parts[0].strip()), int(parts[1].strip()))
+
+
+def parse_quadrant_list(s: str) -> list[tuple[int, int]]:
+  """
+  Parse a comma-separated list of quadrant tuples.
+
+  Args:
+      s: String like "(0,1),(0,2)" or "(0,1), (0,2)"
+
+  Returns:
+      List of (x, y) coordinate tuples
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  # Use regex to find all (x,y) patterns
+  pattern = r"\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)"
+  matches = re.findall(pattern, s)
+  if not matches:
+    raise ValueError(f"No valid quadrant tuples found in: {s}")
+  return [(int(x), int(y)) for x, y in matches]
+
+
+# =============================================================================
+# Local Inference API Functions
+# =============================================================================
+
+
+def call_local_api_b64(
+  image: "Image.Image",
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> "Image.Image":
+  """
+  Call the local inference API using base64 encoding (faster than multipart).
+
+  The local API expects JSON with:
+    - image_b64: Base64-encoded input image
+    - prompt: The generation prompt
+    - steps: Number of inference steps
+
+  Args:
+      image: PIL Image of the input template
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      PIL Image of the generated result
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  import base64
+  import time
+  from io import BytesIO
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "http://localhost:8888/edit-b64"
+    num_inference_steps = 15
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  # Convert PIL image to base64
+  img_buffer = BytesIO()
+  image.save(img_buffer, format="PNG")
+  image_b64 = base64.b64encode(img_buffer.getvalue()).decode()
+
+  # Prepare JSON payload
+  payload = {
+    "image_b64": image_b64,
+    "prompt": prompt,
+    "steps": num_inference_steps,
+  }
+
+  print(f"   🏠 Calling local API (base64) at {endpoint}...")
+  print(f"   📊 Steps: {num_inference_steps}")
+  print(f"   📦 Image size: {len(image_b64)} bytes (base64)")
+
+  start_time = time.time()
+  response = requests.post(
+    endpoint,
+    json=payload,
+    headers={"Content-Type": "application/json"},
+    timeout=600,  # 10 minute timeout for local inference
+  )
+  response.raise_for_status()
+  elapsed_time = time.time() - start_time
+
+  # Parse JSON response
+  result = response.json()
+
+  if "image_b64" not in result:
+    raise ValueError(f"Expected 'image_b64' in response, got keys: {list(result.keys())}")
+
+  result_b64 = result["image_b64"]
+  print(f"   ✓ Received {len(result_b64)} bytes (base64) from local API")
+  print(f"   ⏱️  Generation took {elapsed_time:.1f}s")
+
+  # Decode base64 to PIL Image
+  return Image.open(BytesIO(base64.b64decode(result_b64)))
+
+
+def call_local_api(
+  image: "Image.Image",
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> "Image.Image":
+  """
+  Call the local inference API to generate pixel art.
+
+  The local API expects multipart/form-data with:
+    - file: The input image as PNG
+    - prompt: The generation prompt
+    - steps: Number of inference steps
+
+  Args:
+      image: PIL Image of the input template
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      PIL Image of the generated result
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  import time
+  from io import BytesIO
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "http://localhost:8888/edit"
+    num_inference_steps = 15
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  # Convert PIL image to bytes
+  img_buffer = BytesIO()
+  image.save(img_buffer, format="PNG")
+  img_buffer.seek(0)
+
+  # Prepare multipart form data
+  files = {
+    "file": ("input.png", img_buffer, "image/png"),
+  }
+  data = {
+    "prompt": prompt,
+    "steps": str(num_inference_steps),
+  }
+
+  print(f"   🏠 Calling local API at {endpoint}...")
+  print(f"   📊 Steps: {num_inference_steps}")
+
+  start_time = time.time()
+  response = requests.post(
+    endpoint,
+    files=files,
+    data=data,
+    headers={"accept": "image/png"},
+    timeout=600,  # 10 minute timeout for local inference
+  )
+  response.raise_for_status()
+  elapsed_time = time.time() - start_time
+
+  # Check content type
+  content_type = response.headers.get("content-type", "")
+  if "image" not in content_type:
+    raise ValueError(f"Expected image response, got content-type: {content_type}")
+
+  print(f"   ✓ Received {len(response.content)} bytes from local API")
+  print(f"   ⏱️  Generation took {elapsed_time:.1f}s")
+
+  # Parse the response as an image
+  return Image.open(BytesIO(response.content))
+
+
+# =============================================================================
+# Oxen API Functions
+# =============================================================================
+
+
+def call_oxen_api(
+  image_url: str,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> str:
+  """
+  Call the Oxen API to generate pixel art.
+
+  Args:
+      image_url: Public URL of the input template image
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      URL of the generated image
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    model_id = model_config.model_id
+    api_key = model_config.api_key
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "https://hub.oxen.ai/api/images/edit"
+    model_id = OMNI_WATER_MODEL_ID
+    api_key = os.getenv("OXEN_OMNI_v04_WATER_API_KEY")
+    num_inference_steps = 28
+
+  if not api_key:
+    raise ValueError(f"API key not found for model {model_id}")
+
+  headers = {
+    "Authorization": f"Bearer {api_key}",
+    "Content-Type": "application/json",
+  }
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  payload = {
+    "model": model_id,
+    "input_image": image_url,
+    "prompt": prompt,
+    "num_inference_steps": num_inference_steps,
+  }
+
+  print(f"   🤖 Calling Oxen API with model {model_id}...")
+  response = requests.post(endpoint, headers=headers, json=payload, timeout=300)
+  response.raise_for_status()
+
+  result = response.json()
+
+  # Log the response structure for debugging
+  print(f"   📥 API response keys: {list(result.keys())}")
+
+  # Try various response formats
+  if "images" in result and len(result["images"]) > 0:
+    image_data = result["images"][0]
+    print(
+      f"   📥 Image data keys: {list(image_data.keys()) if isinstance(image_data, dict) else type(image_data)}"
+    )
+
+    # Try different possible keys for the image URL
+    if isinstance(image_data, dict):
+      if "url" in image_data:
+        return image_data["url"]
+      elif "image_url" in image_data:
+        return image_data["image_url"]
+      elif "data" in image_data:
+        # Some APIs return base64 data - we'd need to handle this differently
+        raise ValueError(
+          f"API returned base64 data instead of URL: {list(image_data.keys())}"
+        )
+      else:
+        raise ValueError(
+          f"Image data missing 'url' key. Available keys: {list(image_data.keys())}"
+        )
+    elif isinstance(image_data, str):
+      # Direct URL string
+      return image_data
+    else:
+      raise ValueError(f"Unexpected image data type: {type(image_data)}")
+  elif "url" in result:
+    return result["url"]
+  elif "image_url" in result:
+    return result["image_url"]
+  elif "output" in result:
+    return result["output"]
+  elif "error" in result:
+    raise ValueError(f"API returned error: {result['error']}")
+  elif "message" in result:
+    raise ValueError(f"API returned message: {result['message']}")
+  else:
+    raise ValueError(
+      f"Unexpected API response format. Keys: {list(result.keys())}, Full response: {result}"
+    )
+
+
+def download_image_to_pil(
+  url: str,
+  max_retries: int = 3,
+  retry_delay: float = 10.0,
+) -> Image.Image:
+  """
+  Download an image from a URL and return as PIL Image.
+
+  Includes retry logic for transient errors (e.g., 403 Forbidden when
+  the image is not yet available).
+
+  Args:
+      url: URL of the image to download
+      max_retries: Maximum number of retry attempts (default: 3)
+      retry_delay: Seconds to wait between retries (default: 10.0)
+
+  Returns:
+      PIL Image object
+
+  Raises:
+      requests.HTTPError: If all retry attempts fail
+  """
+  import time
+
+  last_error = None
+
+  for attempt in range(1, max_retries + 1):
+    try:
+      response = requests.get(url, timeout=120)
+      response.raise_for_status()
+      return Image.open(BytesIO(response.content))
+    except requests.exceptions.HTTPError as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download failed (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+    except requests.exceptions.RequestException as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download error (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+
+  # If we get here, all retries failed
+  if last_error:
+    raise last_error
+  raise RuntimeError("Download failed with no error captured")
+
+
+# =============================================================================
+# Rendering Functions
+# =============================================================================
+
+
+def render_quadrant(
+  conn: sqlite3.Connection,
+  config: dict,
+  x: int,
+  y: int,
+  port: int,
+) -> bytes | None:
+  """
+  Render a quadrant and save to database.
+
+  This renders the tile containing the quadrant and saves all 4 quadrants.
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      x: Quadrant x coordinate
+      y: Quadrant y coordinate
+      port: Web server port for rendering
+
+  Returns:
+      PNG bytes of the rendered quadrant, or None if failed
+  """
+  # Ensure the quadrant exists in the database
+  quadrant = ensure_quadrant_exists(conn, config, x, y)
+
+  print(f"   🎨 Rendering tile for quadrant ({x}, {y})...")
+
+  # Build URL for rendering
+  params = {
+    "export": "true",
+    "lat": quadrant["lat"],
+    "lon": quadrant["lng"],
+    "width": config["width_px"],
+    "height": config["height_px"],
+    "azimuth": config["camera_azimuth_degrees"],
+    "elevation": config["camera_elevation_degrees"],
+    "view_height": config.get("view_height_meters", 200),
+  }
+  query_string = urlencode(params)
+  url = f"http://localhost:{port}/?{query_string}"
+
+  # Render using Playwright
+  with sync_playwright() as p:
+    browser = p.chromium.launch(
+      headless=True,
+      args=[
+        "--enable-webgl",
+        "--use-gl=angle",
+        "--ignore-gpu-blocklist",
+      ],
+    )
+
+    context = browser.new_context(
+      viewport={"width": config["width_px"], "height": config["height_px"]},
+      device_scale_factor=1,
+    )
+    page = context.new_page()
+
+    page.goto(url, wait_until="networkidle")
+
+    try:
+      page.wait_for_function("window.TILES_LOADED === true", timeout=60000)
+    except Exception:
+      print("      ⚠️  Timeout waiting for tiles, continuing anyway...")
+
+    # Get screenshot as bytes
+    screenshot_bytes = page.screenshot(type="png")
+
+    page.close()
+    context.close()
+    browser.close()
+
+  # Open as PIL image and split into quadrants
+  full_tile = Image.open(BytesIO(screenshot_bytes))
+  quadrant_images = split_tile_into_quadrants(full_tile)
+
+  # Save all quadrants to database
+  result_bytes = None
+  for (dx, dy), quad_img in quadrant_images.items():
+    qx, qy = x + dx, y + dy
+    png_bytes = image_to_png_bytes(quad_img)
+    save_quadrant_render(conn, config, qx, qy, png_bytes)
+    print(f"      ✓ Saved render for ({qx}, {qy})")
+
+    # Return the specific quadrant we were asked for
+    if qx == x and qy == y:
+      result_bytes = png_bytes
+
+  return result_bytes
+
+
+# =============================================================================
+# Core Generation Logic
+# =============================================================================
+
+
+def run_generation_for_quadrants(
+  conn: sqlite3.Connection,
+  config: dict,
+  selected_quadrants: list[tuple[int, int]],
+  port: int = DEFAULT_WEB_PORT,
+  bucket_name: str = GCS_BUCKET_NAME,
+  status_callback: Callable[[str, str], None] | None = None,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  context_quadrants: list[tuple[int, int]] | None = None,
+  prompt: str | None = None,
+) -> dict:
+  """
+  Run the full generation pipeline for selected quadrants.
+
+  This is the main entry point for generation. It:
+  1. Validates the quadrant selection
+  2. Renders any missing quadrants
+  3. Builds the template image with appropriate borders
+  4. Uploads to GCS and calls the Oxen API
+  5. Saves the generated quadrants to the database
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      selected_quadrants: List of (x, y) quadrant coordinates to generate
+      port: Web server port for rendering (default: 5173)
+      bucket_name: GCS bucket name for uploads
+      status_callback: Optional callback(status, message) for progress updates
+      model_config: Optional model configuration for the Oxen API (ModelConfig from model_config.py)
+      context_quadrants: Optional list of (x, y) quadrant coordinates to use as
+        context. These quadrants provide surrounding pixel art context for the
+        generation. If a context quadrant has a generation, that will be used;
+        otherwise the render will be used.
+      prompt: Optional additional prompt text for generation
+
+  Returns:
+      Dict with:
+          - success: bool
+          - message: str (on success)
+          - error: str (on failure)
+          - quadrants: list of generated quadrant coords (on success)
+  """
+  # Convert context quadrants to a set for fast lookup
+  context_set: set[tuple[int, int]] = (
+    set(context_quadrants) if context_quadrants else set()
+  )
+  if context_set:
+    print(f"   📋 Using {len(context_set)} context quadrant(s): {list(context_set)}")
+  if prompt:
+    print(f"   📝 Additional prompt: {prompt}")
+
+  def update_status(status: str, message: str = "") -> None:
+    if status_callback:
+      status_callback(status, message)
+
+  update_status("validating", "Checking API key...")
+
+  # Create helper functions for validation
+  # These are modified to treat context quadrants as "generated" if they have
+  # either a generation or a render
+  def has_generation_in_db(qx: int, qy: int) -> bool:
+    # Check if this quadrant has an actual generation
+    gen = shared_get_quadrant_generation(conn, qx, qy)
+    if gen is not None:
+      return True
+
+    # For context quadrants, treat them as "generated" if they have a render
+    # This allows context quadrants to provide surrounding content even if
+    # they don't have generations yet
+    if (qx, qy) in context_set:
+      render = shared_get_quadrant_render(conn, qx, qy)
+      return render is not None
+
+    return False
+
+  def get_render_from_db_with_render(qx: int, qy: int) -> Image.Image | None:
+    """Get render, rendering if it doesn't exist yet."""
+    render_bytes = shared_get_quadrant_render(conn, qx, qy)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+
+    # Need to render
+    update_status("rendering", f"Rendering quadrant ({qx}, {qy})...")
+    print(f"   📦 Rendering quadrant ({qx}, {qy})...")
+    render_bytes = render_quadrant(conn, config, qx, qy, port)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+    return None
+
+  def get_generation_from_db(qx: int, qy: int) -> Image.Image | None:
+    """Get generation, falling back to render for context quadrants."""
+    gen_bytes = shared_get_quadrant_generation(conn, qx, qy)
+    if gen_bytes:
+      return png_bytes_to_image(gen_bytes)
+
+    # For context quadrants, fall back to render if no generation exists
+    # This allows context quadrants to provide surrounding pixel art context
+    # even if they only have renders
+    if (qx, qy) in context_set:
+      render_bytes = shared_get_quadrant_render(conn, qx, qy)
+      if render_bytes:
+        print(f"   📋 Using render as context for ({qx}, {qy})")
+        return png_bytes_to_image(render_bytes)
+
+    return None
+
+  update_status("validating", "Validating quadrant selection...")
+
+  # Validate selection with auto-expansion
+  is_valid, msg, placement = validate_quadrant_selection(
+    selected_quadrants, has_generation_in_db, allow_expansion=True
+  )
+
+  if not is_valid:
+    update_status("error", msg)
+    return {"success": False, "error": msg}
+
+  print(f"✅ Validation: {msg}")
+
+  # Get primary quadrants (the ones user selected, not padding)
+  primary_quadrants = (
+    placement.primary_quadrants if placement.primary_quadrants else selected_quadrants
+  )
+  padding_quadrants = placement.padding_quadrants if placement else []
+
+  if padding_quadrants:
+    print(f"   📦 Padding quadrants: {padding_quadrants}")
+
+  # Create the infill region (may be expanded)
+  if placement._expanded_region is not None:
+    region = placement._expanded_region
+  else:
+    region = InfillRegion.from_quadrants(selected_quadrants)
+
+  # Build the template
+  update_status("rendering", "Building template image...")
+  builder = TemplateBuilder(
+    region, has_generation_in_db, get_render_from_db_with_render, get_generation_from_db
+  )
+
+  print("📋 Building template...")
+  result = builder.build(border_width=2, allow_expansion=True)
+
+  if result is None:
+    error_msg = builder._last_validation_error or "Failed to build template"
+    update_status("error", error_msg)
+    return {
+      "success": False,
+      "error": error_msg,
+    }
+
+  template_image, placement = result
+
+  # Check if we're using local or Oxen API
+  is_local = model_config is not None and model_config.is_local
+  use_base64 = model_config is not None and model_config.use_base64
+
+  template_path = None
+  try:
+    if is_local:
+      # Local inference - no GCS upload needed
+      print(f"📋 Template size: {template_image.size[0]}x{template_image.size[1]}")
+
+      update_status("generating", "Calling local model (this may take a minute)...")
+      if use_base64:
+        print("🏠 Using local inference (base64 mode)...")
+        generated_image = call_local_api_b64(template_image, model_config, prompt)
+      else:
+        print("🏠 Using local inference (multipart mode)...")
+        generated_image = call_local_api(template_image, model_config, prompt)
+      print("   ✓ Local inference complete")
+    else:
+      # Oxen API - upload to GCS first
+      with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        template_path = Path(tmp.name)
+        template_image.save(template_path)
+
+      update_status("uploading", "Uploading template to cloud...")
+      print("📤 Uploading template to GCS...")
+      print(f"   Template path: {template_path}")
+      print(f"   Template size: {template_image.size[0]}x{template_image.size[1]}")
+      image_url = upload_to_gcs(template_path, bucket_name)
+      print(f"   Uploaded URL: {image_url}")
+
+      update_status("generating", "Calling AI model (this may take a minute)...")
+      print("🤖 Calling Oxen API...")
+      generated_url = call_oxen_api(image_url, model_config, prompt)
+
+      update_status("saving", "Downloading and saving results...")
+      print("📥 Downloading generated image...")
+      print(f"   Generated URL: {generated_url}")
+      generated_image = download_image_to_pil(generated_url)
+
+    # For local inference, update status to saving now
+    if is_local:
+      update_status("saving", "Saving results...")
+
+    # Extract quadrants from generated image and save to database
+    print("💾 Saving generated quadrants to database...")
+
+    # Figure out what quadrants are in the infill region
+    all_infill_quadrants = (
+      placement.all_infill_quadrants
+      if placement.all_infill_quadrants
+      else region.overlapping_quadrants()
+    )
+
+    # For each infill quadrant, extract pixels from the generated image
+    saved_count = 0
+    for qx, qy in all_infill_quadrants:
+      # Calculate position in the generated image
+      quad_world_x = qx * QUADRANT_SIZE
+      quad_world_y = qy * QUADRANT_SIZE
+
+      template_x = quad_world_x - placement.world_offset_x
+      template_y = quad_world_y - placement.world_offset_y
+
+      # Crop this quadrant from the generated image
+      crop_box = (
+        template_x,
+        template_y,
+        template_x + QUADRANT_SIZE,
+        template_y + QUADRANT_SIZE,
+      )
+      quad_img = generated_image.crop(crop_box)
+      png_bytes = image_to_png_bytes(quad_img)
+
+      # Only save primary quadrants (not padding)
+      if (qx, qy) in primary_quadrants or (qx, qy) in [
+        (q[0], q[1]) for q in primary_quadrants
+      ]:
+        if save_quadrant_generation(conn, config, qx, qy, png_bytes):
+          print(f"   ✓ Saved generation for ({qx}, {qy})")
+          saved_count += 1
+        else:
+          print(f"   ⚠️ Failed to save generation for ({qx}, {qy})")
+      else:
+        print(f"   ⏭️ Skipped padding quadrant ({qx}, {qy})")
+
+    update_status("complete", f"Generated {saved_count} quadrant(s)")
+    return {
+      "success": True,
+      "message": f"Generated {saved_count} quadrant{'s' if saved_count != 1 else ''}",
+      "quadrants": list(primary_quadrants),
+    }
+
+  finally:
+    # Clean up temp file if it was created (only for Oxen API path)
+    if template_path is not None:
+      template_path.unlink(missing_ok=True)
+
+```
+
+Done! Both local API functions now log the generation time:
+
+```
+   ⏱️  Generation took 12.3s
+```
+
+The timing measures the actual API call duration (from request to response). It will appear in the logs right after the response is received.
+
+```plaintext
+   ⏱️  Generation took 12.3s
+```
+
+---
+
+**User**
+
+can you add it to *all* generation (local + oxen)?
+
+---
+
+**Cursor**
+
+```python
+"""
+Reusable library for generating pixel art using the Oxen.ai model.
+
+This module provides the core generation logic that can be used by:
+- view_generations.py (Flask web server)
+- generate_tiles_omni.py (command-line script)
+- automatic_generation.py (automated generation)
+
+The main entry point is `run_generation_for_quadrants()` which handles:
+1. Validating the quadrant selection
+2. Rendering any missing quadrants
+3. Building the template image
+4. Uploading to GCS and calling the Oxen API
+5. Saving the generated quadrants to the database
+"""
+
+import os
+import re
+import sqlite3
+import tempfile
+from io import BytesIO
+from pathlib import Path
+from typing import Callable
+from urllib.parse import urlencode
+
+import requests
+from dotenv import load_dotenv
+from PIL import Image
+from playwright.sync_api import sync_playwright
+
+from isometric_nyc.e2e_generation.infill_template import (
+  QUADRANT_SIZE,
+  InfillRegion,
+  TemplateBuilder,
+  validate_quadrant_selection,
+)
+from isometric_nyc.e2e_generation.shared import (
+  DEFAULT_WEB_PORT,
+  ensure_quadrant_exists,
+  image_to_png_bytes,
+  png_bytes_to_image,
+  save_quadrant_generation,
+  save_quadrant_render,
+  split_tile_into_quadrants,
+  upload_to_gcs,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_generation as shared_get_quadrant_generation,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_render as shared_get_quadrant_render,
+)
+
+# Load environment variables
+load_dotenv()
+
+# Oxen API configuration
+OMNI_MODEL_ID = "cannoneyed-gentle-gold-antlion"
+OMNI_WATER_MODEL_ID = "cannoneyed-quiet-green-lamprey"
+OMNI_WATER_V2_MODEL_ID = "cannoneyed-rural-rose-dingo"
+
+GCS_BUCKET_NAME = "isometric-nyc-infills"
+
+
+# =============================================================================
+# Quadrant Parsing Utilities
+# =============================================================================
+
+
+def parse_quadrant_tuple(s: str) -> tuple[int, int]:
+  """
+  Parse a quadrant tuple string like "(0,1)" or "0,1" into a tuple.
+
+  Args:
+      s: String in format "(x,y)" or "x,y"
+
+  Returns:
+      Tuple of (x, y) coordinates
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  s = s.strip()
+  # Remove optional parentheses
+  if s.startswith("(") and s.endswith(")"):
+    s = s[1:-1]
+  parts = s.split(",")
+  if len(parts) != 2:
+    raise ValueError(f"Invalid quadrant tuple format: {s}")
+  return (int(parts[0].strip()), int(parts[1].strip()))
+
+
+def parse_quadrant_list(s: str) -> list[tuple[int, int]]:
+  """
+  Parse a comma-separated list of quadrant tuples.
+
+  Args:
+      s: String like "(0,1),(0,2)" or "(0,1), (0,2)"
+
+  Returns:
+      List of (x, y) coordinate tuples
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  # Use regex to find all (x,y) patterns
+  pattern = r"\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)"
+  matches = re.findall(pattern, s)
+  if not matches:
+    raise ValueError(f"No valid quadrant tuples found in: {s}")
+  return [(int(x), int(y)) for x, y in matches]
+
+
+# =============================================================================
+# Local Inference API Functions
+# =============================================================================
+
+
+def call_local_api_b64(
+  image: "Image.Image",
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> "Image.Image":
+  """
+  Call the local inference API using base64 encoding (faster than multipart).
+
+  The local API expects JSON with:
+    - image_b64: Base64-encoded input image
+    - prompt: The generation prompt
+    - steps: Number of inference steps
+
+  Args:
+      image: PIL Image of the input template
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      PIL Image of the generated result
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  import base64
+  import time
+  from io import BytesIO
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "http://localhost:8888/edit-b64"
+    num_inference_steps = 15
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  # Convert PIL image to base64
+  img_buffer = BytesIO()
+  image.save(img_buffer, format="PNG")
+  image_b64 = base64.b64encode(img_buffer.getvalue()).decode()
+
+  # Prepare JSON payload
+  payload = {
+    "image_b64": image_b64,
+    "prompt": prompt,
+    "steps": num_inference_steps,
+  }
+
+  print(f"   🏠 Calling local API (base64) at {endpoint}...")
+  print(f"   📊 Steps: {num_inference_steps}")
+  print(f"   📦 Image size: {len(image_b64)} bytes (base64)")
+
+  start_time = time.time()
+  response = requests.post(
+    endpoint,
+    json=payload,
+    headers={"Content-Type": "application/json"},
+    timeout=600,  # 10 minute timeout for local inference
+  )
+  response.raise_for_status()
+  elapsed_time = time.time() - start_time
+
+  # Parse JSON response
+  result = response.json()
+
+  if "image_b64" not in result:
+    raise ValueError(f"Expected 'image_b64' in response, got keys: {list(result.keys())}")
+
+  result_b64 = result["image_b64"]
+  print(f"   ✓ Received {len(result_b64)} bytes (base64) from local API")
+  print(f"   ⏱️  Generation took {elapsed_time:.1f}s")
+
+  # Decode base64 to PIL Image
+  return Image.open(BytesIO(base64.b64decode(result_b64)))
+
+
+def call_local_api(
+  image: "Image.Image",
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> "Image.Image":
+  """
+  Call the local inference API to generate pixel art.
+
+  The local API expects multipart/form-data with:
+    - file: The input image as PNG
+    - prompt: The generation prompt
+    - steps: Number of inference steps
+
+  Args:
+      image: PIL Image of the input template
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      PIL Image of the generated result
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  import time
+  from io import BytesIO
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "http://localhost:8888/edit"
+    num_inference_steps = 15
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  # Convert PIL image to bytes
+  img_buffer = BytesIO()
+  image.save(img_buffer, format="PNG")
+  img_buffer.seek(0)
+
+  # Prepare multipart form data
+  files = {
+    "file": ("input.png", img_buffer, "image/png"),
+  }
+  data = {
+    "prompt": prompt,
+    "steps": str(num_inference_steps),
+  }
+
+  print(f"   🏠 Calling local API at {endpoint}...")
+  print(f"   📊 Steps: {num_inference_steps}")
+
+  start_time = time.time()
+  response = requests.post(
+    endpoint,
+    files=files,
+    data=data,
+    headers={"accept": "image/png"},
+    timeout=600,  # 10 minute timeout for local inference
+  )
+  response.raise_for_status()
+  elapsed_time = time.time() - start_time
+
+  # Check content type
+  content_type = response.headers.get("content-type", "")
+  if "image" not in content_type:
+    raise ValueError(f"Expected image response, got content-type: {content_type}")
+
+  print(f"   ✓ Received {len(response.content)} bytes from local API")
+  print(f"   ⏱️  Generation took {elapsed_time:.1f}s")
+
+  # Parse the response as an image
+  return Image.open(BytesIO(response.content))
+
+
+# =============================================================================
+# Oxen API Functions
+# =============================================================================
+
+
+def call_oxen_api(
+  image_url: str,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> str:
+  """
+  Call the Oxen API to generate pixel art.
+
+  Args:
+      image_url: Public URL of the input template image
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      URL of the generated image
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  import time
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    model_id = model_config.model_id
+    api_key = model_config.api_key
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "https://hub.oxen.ai/api/images/edit"
+    model_id = OMNI_WATER_MODEL_ID
+    api_key = os.getenv("OXEN_OMNI_v04_WATER_API_KEY")
+    num_inference_steps = 28
+
+  if not api_key:
+    raise ValueError(f"API key not found for model {model_id}")
+
+  headers = {
+    "Authorization": f"Bearer {api_key}",
+    "Content-Type": "application/json",
+  }
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  payload = {
+    "model": model_id,
+    "input_image": image_url,
+    "prompt": prompt,
+    "num_inference_steps": num_inference_steps,
+  }
+
+  print(f"   🤖 Calling Oxen API with model {model_id}...")
+  start_time = time.time()
+  response = requests.post(endpoint, headers=headers, json=payload, timeout=300)
+  response.raise_for_status()
+  elapsed_time = time.time() - start_time
+
+  result = response.json()
+  print(f"   ⏱️  Oxen API call took {elapsed_time:.1f}s")
+
+  # Log the response structure for debugging
+  print(f"   📥 API response keys: {list(result.keys())}")
+
+  # Try various response formats
+  if "images" in result and len(result["images"]) > 0:
+    image_data = result["images"][0]
+    print(
+      f"   📥 Image data keys: {list(image_data.keys()) if isinstance(image_data, dict) else type(image_data)}"
+    )
+
+    # Try different possible keys for the image URL
+    if isinstance(image_data, dict):
+      if "url" in image_data:
+        return image_data["url"]
+      elif "image_url" in image_data:
+        return image_data["image_url"]
+      elif "data" in image_data:
+        # Some APIs return base64 data - we'd need to handle this differently
+        raise ValueError(
+          f"API returned base64 data instead of URL: {list(image_data.keys())}"
+        )
+      else:
+        raise ValueError(
+          f"Image data missing 'url' key. Available keys: {list(image_data.keys())}"
+        )
+    elif isinstance(image_data, str):
+      # Direct URL string
+      return image_data
+    else:
+      raise ValueError(f"Unexpected image data type: {type(image_data)}")
+  elif "url" in result:
+    return result["url"]
+  elif "image_url" in result:
+    return result["image_url"]
+  elif "output" in result:
+    return result["output"]
+  elif "error" in result:
+    raise ValueError(f"API returned error: {result['error']}")
+  elif "message" in result:
+    raise ValueError(f"API returned message: {result['message']}")
+  else:
+    raise ValueError(
+      f"Unexpected API response format. Keys: {list(result.keys())}, Full response: {result}"
+    )
+
+
+def download_image_to_pil(
+  url: str,
+  max_retries: int = 3,
+  retry_delay: float = 10.0,
+) -> Image.Image:
+  """
+  Download an image from a URL and return as PIL Image.
+
+  Includes retry logic for transient errors (e.g., 403 Forbidden when
+  the image is not yet available).
+
+  Args:
+      url: URL of the image to download
+      max_retries: Maximum number of retry attempts (default: 3)
+      retry_delay: Seconds to wait between retries (default: 10.0)
+
+  Returns:
+      PIL Image object
+
+  Raises:
+      requests.HTTPError: If all retry attempts fail
+  """
+  import time
+
+  last_error = None
+
+  for attempt in range(1, max_retries + 1):
+    try:
+      response = requests.get(url, timeout=120)
+      response.raise_for_status()
+      return Image.open(BytesIO(response.content))
+    except requests.exceptions.HTTPError as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download failed (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+    except requests.exceptions.RequestException as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download error (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+
+  # If we get here, all retries failed
+  if last_error:
+    raise last_error
+  raise RuntimeError("Download failed with no error captured")
+
+
+# =============================================================================
+# Rendering Functions
+# =============================================================================
+
+
+def render_quadrant(
+  conn: sqlite3.Connection,
+  config: dict,
+  x: int,
+  y: int,
+  port: int,
+) -> bytes | None:
+  """
+  Render a quadrant and save to database.
+
+  This renders the tile containing the quadrant and saves all 4 quadrants.
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      x: Quadrant x coordinate
+      y: Quadrant y coordinate
+      port: Web server port for rendering
+
+  Returns:
+      PNG bytes of the rendered quadrant, or None if failed
+  """
+  # Ensure the quadrant exists in the database
+  quadrant = ensure_quadrant_exists(conn, config, x, y)
+
+  print(f"   🎨 Rendering tile for quadrant ({x}, {y})...")
+
+  # Build URL for rendering
+  params = {
+    "export": "true",
+    "lat": quadrant["lat"],
+    "lon": quadrant["lng"],
+    "width": config["width_px"],
+    "height": config["height_px"],
+    "azimuth": config["camera_azimuth_degrees"],
+    "elevation": config["camera_elevation_degrees"],
+    "view_height": config.get("view_height_meters", 200),
+  }
+  query_string = urlencode(params)
+  url = f"http://localhost:{port}/?{query_string}"
+
+  # Render using Playwright
+  with sync_playwright() as p:
+    browser = p.chromium.launch(
+      headless=True,
+      args=[
+        "--enable-webgl",
+        "--use-gl=angle",
+        "--ignore-gpu-blocklist",
+      ],
+    )
+
+    context = browser.new_context(
+      viewport={"width": config["width_px"], "height": config["height_px"]},
+      device_scale_factor=1,
+    )
+    page = context.new_page()
+
+    page.goto(url, wait_until="networkidle")
+
+    try:
+      page.wait_for_function("window.TILES_LOADED === true", timeout=60000)
+    except Exception:
+      print("      ⚠️  Timeout waiting for tiles, continuing anyway...")
+
+    # Get screenshot as bytes
+    screenshot_bytes = page.screenshot(type="png")
+
+    page.close()
+    context.close()
+    browser.close()
+
+  # Open as PIL image and split into quadrants
+  full_tile = Image.open(BytesIO(screenshot_bytes))
+  quadrant_images = split_tile_into_quadrants(full_tile)
+
+  # Save all quadrants to database
+  result_bytes = None
+  for (dx, dy), quad_img in quadrant_images.items():
+    qx, qy = x + dx, y + dy
+    png_bytes = image_to_png_bytes(quad_img)
+    save_quadrant_render(conn, config, qx, qy, png_bytes)
+    print(f"      ✓ Saved render for ({qx}, {qy})")
+
+    # Return the specific quadrant we were asked for
+    if qx == x and qy == y:
+      result_bytes = png_bytes
+
+  return result_bytes
+
+
+# =============================================================================
+# Core Generation Logic
+# =============================================================================
+
+
+def run_generation_for_quadrants(
+  conn: sqlite3.Connection,
+  config: dict,
+  selected_quadrants: list[tuple[int, int]],
+  port: int = DEFAULT_WEB_PORT,
+  bucket_name: str = GCS_BUCKET_NAME,
+  status_callback: Callable[[str, str], None] | None = None,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  context_quadrants: list[tuple[int, int]] | None = None,
+  prompt: str | None = None,
+) -> dict:
+  """
+  Run the full generation pipeline for selected quadrants.
+
+  This is the main entry point for generation. It:
+  1. Validates the quadrant selection
+  2. Renders any missing quadrants
+  3. Builds the template image with appropriate borders
+  4. Uploads to GCS and calls the Oxen API
+  5. Saves the generated quadrants to the database
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      selected_quadrants: List of (x, y) quadrant coordinates to generate
+      port: Web server port for rendering (default: 5173)
+      bucket_name: GCS bucket name for uploads
+      status_callback: Optional callback(status, message) for progress updates
+      model_config: Optional model configuration for the Oxen API (ModelConfig from model_config.py)
+      context_quadrants: Optional list of (x, y) quadrant coordinates to use as
+        context. These quadrants provide surrounding pixel art context for the
+        generation. If a context quadrant has a generation, that will be used;
+        otherwise the render will be used.
+      prompt: Optional additional prompt text for generation
+
+  Returns:
+      Dict with:
+          - success: bool
+          - message: str (on success)
+          - error: str (on failure)
+          - quadrants: list of generated quadrant coords (on success)
+  """
+  # Convert context quadrants to a set for fast lookup
+  context_set: set[tuple[int, int]] = (
+    set(context_quadrants) if context_quadrants else set()
+  )
+  if context_set:
+    print(f"   📋 Using {len(context_set)} context quadrant(s): {list(context_set)}")
+  if prompt:
+    print(f"   📝 Additional prompt: {prompt}")
+
+  def update_status(status: str, message: str = "") -> None:
+    if status_callback:
+      status_callback(status, message)
+
+  update_status("validating", "Checking API key...")
+
+  # Create helper functions for validation
+  # These are modified to treat context quadrants as "generated" if they have
+  # either a generation or a render
+  def has_generation_in_db(qx: int, qy: int) -> bool:
+    # Check if this quadrant has an actual generation
+    gen = shared_get_quadrant_generation(conn, qx, qy)
+    if gen is not None:
+      return True
+
+    # For context quadrants, treat them as "generated" if they have a render
+    # This allows context quadrants to provide surrounding content even if
+    # they don't have generations yet
+    if (qx, qy) in context_set:
+      render = shared_get_quadrant_render(conn, qx, qy)
+      return render is not None
+
+    return False
+
+  def get_render_from_db_with_render(qx: int, qy: int) -> Image.Image | None:
+    """Get render, rendering if it doesn't exist yet."""
+    render_bytes = shared_get_quadrant_render(conn, qx, qy)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+
+    # Need to render
+    update_status("rendering", f"Rendering quadrant ({qx}, {qy})...")
+    print(f"   📦 Rendering quadrant ({qx}, {qy})...")
+    render_bytes = render_quadrant(conn, config, qx, qy, port)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+    return None
+
+  def get_generation_from_db(qx: int, qy: int) -> Image.Image | None:
+    """Get generation, falling back to render for context quadrants."""
+    gen_bytes = shared_get_quadrant_generation(conn, qx, qy)
+    if gen_bytes:
+      return png_bytes_to_image(gen_bytes)
+
+    # For context quadrants, fall back to render if no generation exists
+    # This allows context quadrants to provide surrounding pixel art context
+    # even if they only have renders
+    if (qx, qy) in context_set:
+      render_bytes = shared_get_quadrant_render(conn, qx, qy)
+      if render_bytes:
+        print(f"   📋 Using render as context for ({qx}, {qy})")
+        return png_bytes_to_image(render_bytes)
+
+    return None
+
+  update_status("validating", "Validating quadrant selection...")
+
+  # Validate selection with auto-expansion
+  is_valid, msg, placement = validate_quadrant_selection(
+    selected_quadrants, has_generation_in_db, allow_expansion=True
+  )
+
+  if not is_valid:
+    update_status("error", msg)
+    return {"success": False, "error": msg}
+
+  print(f"✅ Validation: {msg}")
+
+  # Get primary quadrants (the ones user selected, not padding)
+  primary_quadrants = (
+    placement.primary_quadrants if placement.primary_quadrants else selected_quadrants
+  )
+  padding_quadrants = placement.padding_quadrants if placement else []
+
+  if padding_quadrants:
+    print(f"   📦 Padding quadrants: {padding_quadrants}")
+
+  # Create the infill region (may be expanded)
+  if placement._expanded_region is not None:
+    region = placement._expanded_region
+  else:
+    region = InfillRegion.from_quadrants(selected_quadrants)
+
+  # Build the template
+  update_status("rendering", "Building template image...")
+  builder = TemplateBuilder(
+    region, has_generation_in_db, get_render_from_db_with_render, get_generation_from_db
+  )
+
+  print("📋 Building template...")
+  result = builder.build(border_width=2, allow_expansion=True)
+
+  if result is None:
+    error_msg = builder._last_validation_error or "Failed to build template"
+    update_status("error", error_msg)
+    return {
+      "success": False,
+      "error": error_msg,
+    }
+
+  template_image, placement = result
+
+  # Check if we're using local or Oxen API
+  is_local = model_config is not None and model_config.is_local
+  use_base64 = model_config is not None and model_config.use_base64
+
+  template_path = None
+  try:
+    if is_local:
+      # Local inference - no GCS upload needed
+      print(f"📋 Template size: {template_image.size[0]}x{template_image.size[1]}")
+
+      update_status("generating", "Calling local model (this may take a minute)...")
+      if use_base64:
+        print("🏠 Using local inference (base64 mode)...")
+        generated_image = call_local_api_b64(template_image, model_config, prompt)
+      else:
+        print("🏠 Using local inference (multipart mode)...")
+        generated_image = call_local_api(template_image, model_config, prompt)
+      print("   ✓ Local inference complete")
+    else:
+      # Oxen API - upload to GCS first
+      with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        template_path = Path(tmp.name)
+        template_image.save(template_path)
+
+      update_status("uploading", "Uploading template to cloud...")
+      print("📤 Uploading template to GCS...")
+      print(f"   Template path: {template_path}")
+      print(f"   Template size: {template_image.size[0]}x{template_image.size[1]}")
+      image_url = upload_to_gcs(template_path, bucket_name)
+      print(f"   Uploaded URL: {image_url}")
+
+      update_status("generating", "Calling AI model (this may take a minute)...")
+      print("🤖 Calling Oxen API...")
+      generated_url = call_oxen_api(image_url, model_config, prompt)
+
+      update_status("saving", "Downloading and saving results...")
+      print("📥 Downloading generated image...")
+      print(f"   Generated URL: {generated_url}")
+      generated_image = download_image_to_pil(generated_url)
+
+    # For local inference, update status to saving now
+    if is_local:
+      update_status("saving", "Saving results...")
+
+    # Extract quadrants from generated image and save to database
+    print("💾 Saving generated quadrants to database...")
+
+    # Figure out what quadrants are in the infill region
+    all_infill_quadrants = (
+      placement.all_infill_quadrants
+      if placement.all_infill_quadrants
+      else region.overlapping_quadrants()
+    )
+
+    # For each infill quadrant, extract pixels from the generated image
+    saved_count = 0
+    for qx, qy in all_infill_quadrants:
+      # Calculate position in the generated image
+      quad_world_x = qx * QUADRANT_SIZE
+      quad_world_y = qy * QUADRANT_SIZE
+
+      template_x = quad_world_x - placement.world_offset_x
+      template_y = quad_world_y - placement.world_offset_y
+
+      # Crop this quadrant from the generated image
+      crop_box = (
+        template_x,
+        template_y,
+        template_x + QUADRANT_SIZE,
+        template_y + QUADRANT_SIZE,
+      )
+      quad_img = generated_image.crop(crop_box)
+      png_bytes = image_to_png_bytes(quad_img)
+
+      # Only save primary quadrants (not padding)
+      if (qx, qy) in primary_quadrants or (qx, qy) in [
+        (q[0], q[1]) for q in primary_quadrants
+      ]:
+        if save_quadrant_generation(conn, config, qx, qy, png_bytes):
+          print(f"   ✓ Saved generation for ({qx}, {qy})")
+          saved_count += 1
+        else:
+          print(f"   ⚠️ Failed to save generation for ({qx}, {qy})")
+      else:
+        print(f"   ⏭️ Skipped padding quadrant ({qx}, {qy})")
+
+    update_status("complete", f"Generated {saved_count} quadrant(s)")
+    return {
+      "success": True,
+      "message": f"Generated {saved_count} quadrant{'s' if saved_count != 1 else ''}",
+      "quadrants": list(primary_quadrants),
+    }
+
+  finally:
+    # Clean up temp file if it was created (only for Oxen API path)
+    if template_path is not None:
+      template_path.unlink(missing_ok=True)
+
+```
+
+Done! Now all generation methods have timing logs:
+
+- **Local (base64)**: `⏱️  Generation took 12.3s`
+- **Local (multipart)**: `⏱️  Generation took 12.3s`
+- **Oxen API**: `⏱️  Oxen API call took 45.2s`
+
+---
+
+**User**
+
+I'm uploading 1024x1024 png images... can/should I compress them first?
+
+---
+
+**Cursor**
+
+```python
+image.save(img_buffer, format="PNG")
+```
+
+Good question! Currently the code sends uncompressed PNG which can be quite large. For a 1024x1024 image:
+- **PNG**: ~1-4 MB (lossless)
+- **JPEG (quality=90)**: ~100-300 KB (lossy but visually similar)
+
+For AI inference inputs, JPEG compression is usually fine since the model generates new pixels anyway. Let me add a compression option:
+
+```python
+"""
+Reusable library for generating pixel art using the Oxen.ai model.
+
+This module provides the core generation logic that can be used by:
+- view_generations.py (Flask web server)
+- generate_tiles_omni.py (command-line script)
+- automatic_generation.py (automated generation)
+
+The main entry point is `run_generation_for_quadrants()` which handles:
+1. Validating the quadrant selection
+2. Rendering any missing quadrants
+3. Building the template image
+4. Uploading to GCS and calling the Oxen API
+5. Saving the generated quadrants to the database
+"""
+
+import os
+import re
+import sqlite3
+import tempfile
+from io import BytesIO
+from pathlib import Path
+from typing import Callable
+from urllib.parse import urlencode
+
+import requests
+from dotenv import load_dotenv
+from PIL import Image
+from playwright.sync_api import sync_playwright
+
+from isometric_nyc.e2e_generation.infill_template import (
+  QUADRANT_SIZE,
+  InfillRegion,
+  TemplateBuilder,
+  validate_quadrant_selection,
+)
+from isometric_nyc.e2e_generation.shared import (
+  DEFAULT_WEB_PORT,
+  ensure_quadrant_exists,
+  image_to_png_bytes,
+  png_bytes_to_image,
+  save_quadrant_generation,
+  save_quadrant_render,
+  split_tile_into_quadrants,
+  upload_to_gcs,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_generation as shared_get_quadrant_generation,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_render as shared_get_quadrant_render,
+)
+
+# Load environment variables
+load_dotenv()
+
+# Oxen API configuration
+OMNI_MODEL_ID = "cannoneyed-gentle-gold-antlion"
+OMNI_WATER_MODEL_ID = "cannoneyed-quiet-green-lamprey"
+OMNI_WATER_V2_MODEL_ID = "cannoneyed-rural-rose-dingo"
+
+GCS_BUCKET_NAME = "isometric-nyc-infills"
+
+
+# =============================================================================
+# Quadrant Parsing Utilities
+# =============================================================================
+
+
+def parse_quadrant_tuple(s: str) -> tuple[int, int]:
+  """
+  Parse a quadrant tuple string like "(0,1)" or "0,1" into a tuple.
+
+  Args:
+      s: String in format "(x,y)" or "x,y"
+
+  Returns:
+      Tuple of (x, y) coordinates
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  s = s.strip()
+  # Remove optional parentheses
+  if s.startswith("(") and s.endswith(")"):
+    s = s[1:-1]
+  parts = s.split(",")
+  if len(parts) != 2:
+    raise ValueError(f"Invalid quadrant tuple format: {s}")
+  return (int(parts[0].strip()), int(parts[1].strip()))
+
+
+def parse_quadrant_list(s: str) -> list[tuple[int, int]]:
+  """
+  Parse a comma-separated list of quadrant tuples.
+
+  Args:
+      s: String like "(0,1),(0,2)" or "(0,1), (0,2)"
+
+  Returns:
+      List of (x, y) coordinate tuples
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  # Use regex to find all (x,y) patterns
+  pattern = r"\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)"
+  matches = re.findall(pattern, s)
+  if not matches:
+    raise ValueError(f"No valid quadrant tuples found in: {s}")
+  return [(int(x), int(y)) for x, y in matches]
+
+
+# =============================================================================
+# Local Inference API Functions
+# =============================================================================
+
+
+def call_local_api_b64(
+  image: "Image.Image",
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+  use_jpeg: bool = True,
+  jpeg_quality: int = 90,
+) -> "Image.Image":
+  """
+  Call the local inference API using base64 encoding (faster than multipart).
+
+  The local API expects JSON with:
+    - image_b64: Base64-encoded input image
+    - prompt: The generation prompt
+    - steps: Number of inference steps
+
+  Args:
+      image: PIL Image of the input template
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+      use_jpeg: If True, compress image as JPEG (much smaller). Default True.
+      jpeg_quality: JPEG quality 1-100 (default 90, good balance of size/quality)
+
+  Returns:
+      PIL Image of the generated result
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  import base64
+  import time
+  from io import BytesIO
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "http://localhost:8888/edit-b64"
+    num_inference_steps = 15
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  # Convert PIL image to base64 (use JPEG for compression if enabled)
+  img_buffer = BytesIO()
+  if use_jpeg:
+    # Convert to RGB if needed (JPEG doesn't support alpha)
+    if image.mode in ("RGBA", "LA", "P"):
+      rgb_image = Image.new("RGB", image.size, (255, 255, 255))
+      if image.mode == "P":
+        image = image.convert("RGBA")
+      rgb_image.paste(image, mask=image.split()[-1] if image.mode == "RGBA" else None)
+      image = rgb_image
+    image.save(img_buffer, format="JPEG", quality=jpeg_quality, optimize=True)
+    img_format = "JPEG"
+  else:
+    image.save(img_buffer, format="PNG")
+    img_format = "PNG"
+  image_b64 = base64.b64encode(img_buffer.getvalue()).decode()
+
+  # Prepare JSON payload
+  payload = {
+    "image_b64": image_b64,
+    "prompt": prompt,
+    "steps": num_inference_steps,
+  }
+
+  print(f"   🏠 Calling local API (base64) at {endpoint}...")
+  print(f"   📊 Steps: {num_inference_steps}")
+  print(f"   📦 Image size: {len(image_b64)} bytes (base64)")
+
+  start_time = time.time()
+  response = requests.post(
+    endpoint,
+    json=payload,
+    headers={"Content-Type": "application/json"},
+    timeout=600,  # 10 minute timeout for local inference
+  )
+  response.raise_for_status()
+  elapsed_time = time.time() - start_time
+
+  # Parse JSON response
+  result = response.json()
+
+  if "image_b64" not in result:
+    raise ValueError(f"Expected 'image_b64' in response, got keys: {list(result.keys())}")
+
+  result_b64 = result["image_b64"]
+  print(f"   ✓ Received {len(result_b64)} bytes (base64) from local API")
+  print(f"   ⏱️  Generation took {elapsed_time:.1f}s")
+
+  # Decode base64 to PIL Image
+  return Image.open(BytesIO(base64.b64decode(result_b64)))
+
+
+def call_local_api(
+  image: "Image.Image",
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> "Image.Image":
+  """
+  Call the local inference API to generate pixel art.
+
+  The local API expects multipart/form-data with:
+    - file: The input image as PNG
+    - prompt: The generation prompt
+    - steps: Number of inference steps
+
+  Args:
+      image: PIL Image of the input template
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      PIL Image of the generated result
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  import time
+  from io import BytesIO
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "http://localhost:8888/edit"
+    num_inference_steps = 15
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  # Convert PIL image to bytes
+  img_buffer = BytesIO()
+  image.save(img_buffer, format="PNG")
+  img_buffer.seek(0)
+
+  # Prepare multipart form data
+  files = {
+    "file": ("input.png", img_buffer, "image/png"),
+  }
+  data = {
+    "prompt": prompt,
+    "steps": str(num_inference_steps),
+  }
+
+  print(f"   🏠 Calling local API at {endpoint}...")
+  print(f"   📊 Steps: {num_inference_steps}")
+
+  start_time = time.time()
+  response = requests.post(
+    endpoint,
+    files=files,
+    data=data,
+    headers={"accept": "image/png"},
+    timeout=600,  # 10 minute timeout for local inference
+  )
+  response.raise_for_status()
+  elapsed_time = time.time() - start_time
+
+  # Check content type
+  content_type = response.headers.get("content-type", "")
+  if "image" not in content_type:
+    raise ValueError(f"Expected image response, got content-type: {content_type}")
+
+  print(f"   ✓ Received {len(response.content)} bytes from local API")
+  print(f"   ⏱️  Generation took {elapsed_time:.1f}s")
+
+  # Parse the response as an image
+  return Image.open(BytesIO(response.content))
+
+
+# =============================================================================
+# Oxen API Functions
+# =============================================================================
+
+
+def call_oxen_api(
+  image_url: str,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> str:
+  """
+  Call the Oxen API to generate pixel art.
+
+  Args:
+      image_url: Public URL of the input template image
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      URL of the generated image
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  import time
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    model_id = model_config.model_id
+    api_key = model_config.api_key
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "https://hub.oxen.ai/api/images/edit"
+    model_id = OMNI_WATER_MODEL_ID
+    api_key = os.getenv("OXEN_OMNI_v04_WATER_API_KEY")
+    num_inference_steps = 28
+
+  if not api_key:
+    raise ValueError(f"API key not found for model {model_id}")
+
+  headers = {
+    "Authorization": f"Bearer {api_key}",
+    "Content-Type": "application/json",
+  }
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  payload = {
+    "model": model_id,
+    "input_image": image_url,
+    "prompt": prompt,
+    "num_inference_steps": num_inference_steps,
+  }
+
+  print(f"   🤖 Calling Oxen API with model {model_id}...")
+  start_time = time.time()
+  response = requests.post(endpoint, headers=headers, json=payload, timeout=300)
+  response.raise_for_status()
+  elapsed_time = time.time() - start_time
+
+  result = response.json()
+  print(f"   ⏱️  Oxen API call took {elapsed_time:.1f}s")
+
+  # Log the response structure for debugging
+  print(f"   📥 API response keys: {list(result.keys())}")
+
+  # Try various response formats
+  if "images" in result and len(result["images"]) > 0:
+    image_data = result["images"][0]
+    print(
+      f"   📥 Image data keys: {list(image_data.keys()) if isinstance(image_data, dict) else type(image_data)}"
+    )
+
+    # Try different possible keys for the image URL
+    if isinstance(image_data, dict):
+      if "url" in image_data:
+        return image_data["url"]
+      elif "image_url" in image_data:
+        return image_data["image_url"]
+      elif "data" in image_data:
+        # Some APIs return base64 data - we'd need to handle this differently
+        raise ValueError(
+          f"API returned base64 data instead of URL: {list(image_data.keys())}"
+        )
+      else:
+        raise ValueError(
+          f"Image data missing 'url' key. Available keys: {list(image_data.keys())}"
+        )
+    elif isinstance(image_data, str):
+      # Direct URL string
+      return image_data
+    else:
+      raise ValueError(f"Unexpected image data type: {type(image_data)}")
+  elif "url" in result:
+    return result["url"]
+  elif "image_url" in result:
+    return result["image_url"]
+  elif "output" in result:
+    return result["output"]
+  elif "error" in result:
+    raise ValueError(f"API returned error: {result['error']}")
+  elif "message" in result:
+    raise ValueError(f"API returned message: {result['message']}")
+  else:
+    raise ValueError(
+      f"Unexpected API response format. Keys: {list(result.keys())}, Full response: {result}"
+    )
+
+
+def download_image_to_pil(
+  url: str,
+  max_retries: int = 3,
+  retry_delay: float = 10.0,
+) -> Image.Image:
+  """
+  Download an image from a URL and return as PIL Image.
+
+  Includes retry logic for transient errors (e.g., 403 Forbidden when
+  the image is not yet available).
+
+  Args:
+      url: URL of the image to download
+      max_retries: Maximum number of retry attempts (default: 3)
+      retry_delay: Seconds to wait between retries (default: 10.0)
+
+  Returns:
+      PIL Image object
+
+  Raises:
+      requests.HTTPError: If all retry attempts fail
+  """
+  import time
+
+  last_error = None
+
+  for attempt in range(1, max_retries + 1):
+    try:
+      response = requests.get(url, timeout=120)
+      response.raise_for_status()
+      return Image.open(BytesIO(response.content))
+    except requests.exceptions.HTTPError as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download failed (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+    except requests.exceptions.RequestException as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download error (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+
+  # If we get here, all retries failed
+  if last_error:
+    raise last_error
+  raise RuntimeError("Download failed with no error captured")
+
+
+# =============================================================================
+# Rendering Functions
+# =============================================================================
+
+
+def render_quadrant(
+  conn: sqlite3.Connection,
+  config: dict,
+  x: int,
+  y: int,
+  port: int,
+) -> bytes | None:
+  """
+  Render a quadrant and save to database.
+
+  This renders the tile containing the quadrant and saves all 4 quadrants.
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      x: Quadrant x coordinate
+      y: Quadrant y coordinate
+      port: Web server port for rendering
+
+  Returns:
+      PNG bytes of the rendered quadrant, or None if failed
+  """
+  # Ensure the quadrant exists in the database
+  quadrant = ensure_quadrant_exists(conn, config, x, y)
+
+  print(f"   🎨 Rendering tile for quadrant ({x}, {y})...")
+
+  # Build URL for rendering
+  params = {
+    "export": "true",
+    "lat": quadrant["lat"],
+    "lon": quadrant["lng"],
+    "width": config["width_px"],
+    "height": config["height_px"],
+    "azimuth": config["camera_azimuth_degrees"],
+    "elevation": config["camera_elevation_degrees"],
+    "view_height": config.get("view_height_meters", 200),
+  }
+  query_string = urlencode(params)
+  url = f"http://localhost:{port}/?{query_string}"
+
+  # Render using Playwright
+  with sync_playwright() as p:
+    browser = p.chromium.launch(
+      headless=True,
+      args=[
+        "--enable-webgl",
+        "--use-gl=angle",
+        "--ignore-gpu-blocklist",
+      ],
+    )
+
+    context = browser.new_context(
+      viewport={"width": config["width_px"], "height": config["height_px"]},
+      device_scale_factor=1,
+    )
+    page = context.new_page()
+
+    page.goto(url, wait_until="networkidle")
+
+    try:
+      page.wait_for_function("window.TILES_LOADED === true", timeout=60000)
+    except Exception:
+      print("      ⚠️  Timeout waiting for tiles, continuing anyway...")
+
+    # Get screenshot as bytes
+    screenshot_bytes = page.screenshot(type="png")
+
+    page.close()
+    context.close()
+    browser.close()
+
+  # Open as PIL image and split into quadrants
+  full_tile = Image.open(BytesIO(screenshot_bytes))
+  quadrant_images = split_tile_into_quadrants(full_tile)
+
+  # Save all quadrants to database
+  result_bytes = None
+  for (dx, dy), quad_img in quadrant_images.items():
+    qx, qy = x + dx, y + dy
+    png_bytes = image_to_png_bytes(quad_img)
+    save_quadrant_render(conn, config, qx, qy, png_bytes)
+    print(f"      ✓ Saved render for ({qx}, {qy})")
+
+    # Return the specific quadrant we were asked for
+    if qx == x and qy == y:
+      result_bytes = png_bytes
+
+  return result_bytes
+
+
+# =============================================================================
+# Core Generation Logic
+# =============================================================================
+
+
+def run_generation_for_quadrants(
+  conn: sqlite3.Connection,
+  config: dict,
+  selected_quadrants: list[tuple[int, int]],
+  port: int = DEFAULT_WEB_PORT,
+  bucket_name: str = GCS_BUCKET_NAME,
+  status_callback: Callable[[str, str], None] | None = None,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  context_quadrants: list[tuple[int, int]] | None = None,
+  prompt: str | None = None,
+) -> dict:
+  """
+  Run the full generation pipeline for selected quadrants.
+
+  This is the main entry point for generation. It:
+  1. Validates the quadrant selection
+  2. Renders any missing quadrants
+  3. Builds the template image with appropriate borders
+  4. Uploads to GCS and calls the Oxen API
+  5. Saves the generated quadrants to the database
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      selected_quadrants: List of (x, y) quadrant coordinates to generate
+      port: Web server port for rendering (default: 5173)
+      bucket_name: GCS bucket name for uploads
+      status_callback: Optional callback(status, message) for progress updates
+      model_config: Optional model configuration for the Oxen API (ModelConfig from model_config.py)
+      context_quadrants: Optional list of (x, y) quadrant coordinates to use as
+        context. These quadrants provide surrounding pixel art context for the
+        generation. If a context quadrant has a generation, that will be used;
+        otherwise the render will be used.
+      prompt: Optional additional prompt text for generation
+
+  Returns:
+      Dict with:
+          - success: bool
+          - message: str (on success)
+          - error: str (on failure)
+          - quadrants: list of generated quadrant coords (on success)
+  """
+  # Convert context quadrants to a set for fast lookup
+  context_set: set[tuple[int, int]] = (
+    set(context_quadrants) if context_quadrants else set()
+  )
+  if context_set:
+    print(f"   📋 Using {len(context_set)} context quadrant(s): {list(context_set)}")
+  if prompt:
+    print(f"   📝 Additional prompt: {prompt}")
+
+  def update_status(status: str, message: str = "") -> None:
+    if status_callback:
+      status_callback(status, message)
+
+  update_status("validating", "Checking API key...")
+
+  # Create helper functions for validation
+  # These are modified to treat context quadrants as "generated" if they have
+  # either a generation or a render
+  def has_generation_in_db(qx: int, qy: int) -> bool:
+    # Check if this quadrant has an actual generation
+    gen = shared_get_quadrant_generation(conn, qx, qy)
+    if gen is not None:
+      return True
+
+    # For context quadrants, treat them as "generated" if they have a render
+    # This allows context quadrants to provide surrounding content even if
+    # they don't have generations yet
+    if (qx, qy) in context_set:
+      render = shared_get_quadrant_render(conn, qx, qy)
+      return render is not None
+
+    return False
+
+  def get_render_from_db_with_render(qx: int, qy: int) -> Image.Image | None:
+    """Get render, rendering if it doesn't exist yet."""
+    render_bytes = shared_get_quadrant_render(conn, qx, qy)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+
+    # Need to render
+    update_status("rendering", f"Rendering quadrant ({qx}, {qy})...")
+    print(f"   📦 Rendering quadrant ({qx}, {qy})...")
+    render_bytes = render_quadrant(conn, config, qx, qy, port)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+    return None
+
+  def get_generation_from_db(qx: int, qy: int) -> Image.Image | None:
+    """Get generation, falling back to render for context quadrants."""
+    gen_bytes = shared_get_quadrant_generation(conn, qx, qy)
+    if gen_bytes:
+      return png_bytes_to_image(gen_bytes)
+
+    # For context quadrants, fall back to render if no generation exists
+    # This allows context quadrants to provide surrounding pixel art context
+    # even if they only have renders
+    if (qx, qy) in context_set:
+      render_bytes = shared_get_quadrant_render(conn, qx, qy)
+      if render_bytes:
+        print(f"   📋 Using render as context for ({qx}, {qy})")
+        return png_bytes_to_image(render_bytes)
+
+    return None
+
+  update_status("validating", "Validating quadrant selection...")
+
+  # Validate selection with auto-expansion
+  is_valid, msg, placement = validate_quadrant_selection(
+    selected_quadrants, has_generation_in_db, allow_expansion=True
+  )
+
+  if not is_valid:
+    update_status("error", msg)
+    return {"success": False, "error": msg}
+
+  print(f"✅ Validation: {msg}")
+
+  # Get primary quadrants (the ones user selected, not padding)
+  primary_quadrants = (
+    placement.primary_quadrants if placement.primary_quadrants else selected_quadrants
+  )
+  padding_quadrants = placement.padding_quadrants if placement else []
+
+  if padding_quadrants:
+    print(f"   📦 Padding quadrants: {padding_quadrants}")
+
+  # Create the infill region (may be expanded)
+  if placement._expanded_region is not None:
+    region = placement._expanded_region
+  else:
+    region = InfillRegion.from_quadrants(selected_quadrants)
+
+  # Build the template
+  update_status("rendering", "Building template image...")
+  builder = TemplateBuilder(
+    region, has_generation_in_db, get_render_from_db_with_render, get_generation_from_db
+  )
+
+  print("📋 Building template...")
+  result = builder.build(border_width=2, allow_expansion=True)
+
+  if result is None:
+    error_msg = builder._last_validation_error or "Failed to build template"
+    update_status("error", error_msg)
+    return {
+      "success": False,
+      "error": error_msg,
+    }
+
+  template_image, placement = result
+
+  # Check if we're using local or Oxen API
+  is_local = model_config is not None and model_config.is_local
+  use_base64 = model_config is not None and model_config.use_base64
+
+  template_path = None
+  try:
+    if is_local:
+      # Local inference - no GCS upload needed
+      print(f"📋 Template size: {template_image.size[0]}x{template_image.size[1]}")
+
+      update_status("generating", "Calling local model (this may take a minute)...")
+      if use_base64:
+        print("🏠 Using local inference (base64 mode)...")
+        generated_image = call_local_api_b64(template_image, model_config, prompt)
+      else:
+        print("🏠 Using local inference (multipart mode)...")
+        generated_image = call_local_api(template_image, model_config, prompt)
+      print("   ✓ Local inference complete")
+    else:
+      # Oxen API - upload to GCS first
+      with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        template_path = Path(tmp.name)
+        template_image.save(template_path)
+
+      update_status("uploading", "Uploading template to cloud...")
+      print("📤 Uploading template to GCS...")
+      print(f"   Template path: {template_path}")
+      print(f"   Template size: {template_image.size[0]}x{template_image.size[1]}")
+      image_url = upload_to_gcs(template_path, bucket_name)
+      print(f"   Uploaded URL: {image_url}")
+
+      update_status("generating", "Calling AI model (this may take a minute)...")
+      print("🤖 Calling Oxen API...")
+      generated_url = call_oxen_api(image_url, model_config, prompt)
+
+      update_status("saving", "Downloading and saving results...")
+      print("📥 Downloading generated image...")
+      print(f"   Generated URL: {generated_url}")
+      generated_image = download_image_to_pil(generated_url)
+
+    # For local inference, update status to saving now
+    if is_local:
+      update_status("saving", "Saving results...")
+
+    # Extract quadrants from generated image and save to database
+    print("💾 Saving generated quadrants to database...")
+
+    # Figure out what quadrants are in the infill region
+    all_infill_quadrants = (
+      placement.all_infill_quadrants
+      if placement.all_infill_quadrants
+      else region.overlapping_quadrants()
+    )
+
+    # For each infill quadrant, extract pixels from the generated image
+    saved_count = 0
+    for qx, qy in all_infill_quadrants:
+      # Calculate position in the generated image
+      quad_world_x = qx * QUADRANT_SIZE
+      quad_world_y = qy * QUADRANT_SIZE
+
+      template_x = quad_world_x - placement.world_offset_x
+      template_y = quad_world_y - placement.world_offset_y
+
+      # Crop this quadrant from the generated image
+      crop_box = (
+        template_x,
+        template_y,
+        template_x + QUADRANT_SIZE,
+        template_y + QUADRANT_SIZE,
+      )
+      quad_img = generated_image.crop(crop_box)
+      png_bytes = image_to_png_bytes(quad_img)
+
+      # Only save primary quadrants (not padding)
+      if (qx, qy) in primary_quadrants or (qx, qy) in [
+        (q[0], q[1]) for q in primary_quadrants
+      ]:
+        if save_quadrant_generation(conn, config, qx, qy, png_bytes):
+          print(f"   ✓ Saved generation for ({qx}, {qy})")
+          saved_count += 1
+        else:
+          print(f"   ⚠️ Failed to save generation for ({qx}, {qy})")
+      else:
+        print(f"   ⏭️ Skipped padding quadrant ({qx}, {qy})")
+
+    update_status("complete", f"Generated {saved_count} quadrant(s)")
+    return {
+      "success": True,
+      "message": f"Generated {saved_count} quadrant{'s' if saved_count != 1 else ''}",
+      "quadrants": list(primary_quadrants),
+    }
+
+  finally:
+    # Clean up temp file if it was created (only for Oxen API path)
+    if template_path is not None:
+      template_path.unlink(missing_ok=True)
+
+```
+
+```python
+"""
+Reusable library for generating pixel art using the Oxen.ai model.
+
+This module provides the core generation logic that can be used by:
+- view_generations.py (Flask web server)
+- generate_tiles_omni.py (command-line script)
+- automatic_generation.py (automated generation)
+
+The main entry point is `run_generation_for_quadrants()` which handles:
+1. Validating the quadrant selection
+2. Rendering any missing quadrants
+3. Building the template image
+4. Uploading to GCS and calling the Oxen API
+5. Saving the generated quadrants to the database
+"""
+
+import os
+import re
+import sqlite3
+import tempfile
+from io import BytesIO
+from pathlib import Path
+from typing import Callable
+from urllib.parse import urlencode
+
+import requests
+from dotenv import load_dotenv
+from PIL import Image
+from playwright.sync_api import sync_playwright
+
+from isometric_nyc.e2e_generation.infill_template import (
+  QUADRANT_SIZE,
+  InfillRegion,
+  TemplateBuilder,
+  validate_quadrant_selection,
+)
+from isometric_nyc.e2e_generation.shared import (
+  DEFAULT_WEB_PORT,
+  ensure_quadrant_exists,
+  image_to_png_bytes,
+  png_bytes_to_image,
+  save_quadrant_generation,
+  save_quadrant_render,
+  split_tile_into_quadrants,
+  upload_to_gcs,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_generation as shared_get_quadrant_generation,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_render as shared_get_quadrant_render,
+)
+
+# Load environment variables
+load_dotenv()
+
+# Oxen API configuration
+OMNI_MODEL_ID = "cannoneyed-gentle-gold-antlion"
+OMNI_WATER_MODEL_ID = "cannoneyed-quiet-green-lamprey"
+OMNI_WATER_V2_MODEL_ID = "cannoneyed-rural-rose-dingo"
+
+GCS_BUCKET_NAME = "isometric-nyc-infills"
+
+
+# =============================================================================
+# Quadrant Parsing Utilities
+# =============================================================================
+
+
+def parse_quadrant_tuple(s: str) -> tuple[int, int]:
+  """
+  Parse a quadrant tuple string like "(0,1)" or "0,1" into a tuple.
+
+  Args:
+      s: String in format "(x,y)" or "x,y"
+
+  Returns:
+      Tuple of (x, y) coordinates
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  s = s.strip()
+  # Remove optional parentheses
+  if s.startswith("(") and s.endswith(")"):
+    s = s[1:-1]
+  parts = s.split(",")
+  if len(parts) != 2:
+    raise ValueError(f"Invalid quadrant tuple format: {s}")
+  return (int(parts[0].strip()), int(parts[1].strip()))
+
+
+def parse_quadrant_list(s: str) -> list[tuple[int, int]]:
+  """
+  Parse a comma-separated list of quadrant tuples.
+
+  Args:
+      s: String like "(0,1),(0,2)" or "(0,1), (0,2)"
+
+  Returns:
+      List of (x, y) coordinate tuples
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  # Use regex to find all (x,y) patterns
+  pattern = r"\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)"
+  matches = re.findall(pattern, s)
+  if not matches:
+    raise ValueError(f"No valid quadrant tuples found in: {s}")
+  return [(int(x), int(y)) for x, y in matches]
+
+
+# =============================================================================
+# Local Inference API Functions
+# =============================================================================
+
+
+def call_local_api_b64(
+  image: "Image.Image",
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+  use_jpeg: bool = True,
+  jpeg_quality: int = 90,
+) -> "Image.Image":
+  """
+  Call the local inference API using base64 encoding (faster than multipart).
+
+  The local API expects JSON with:
+    - image_b64: Base64-encoded input image
+    - prompt: The generation prompt
+    - steps: Number of inference steps
+
+  Args:
+      image: PIL Image of the input template
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+      use_jpeg: If True, compress image as JPEG (much smaller). Default True.
+      jpeg_quality: JPEG quality 1-100 (default 90, good balance of size/quality)
+
+  Returns:
+      PIL Image of the generated result
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  import base64
+  import time
+  from io import BytesIO
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "http://localhost:8888/edit-b64"
+    num_inference_steps = 15
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  # Convert PIL image to base64 (use JPEG for compression if enabled)
+  img_buffer = BytesIO()
+  if use_jpeg:
+    # Convert to RGB if needed (JPEG doesn't support alpha)
+    if image.mode in ("RGBA", "LA", "P"):
+      rgb_image = Image.new("RGB", image.size, (255, 255, 255))
+      if image.mode == "P":
+        image = image.convert("RGBA")
+      rgb_image.paste(image, mask=image.split()[-1] if image.mode == "RGBA" else None)
+      image = rgb_image
+    image.save(img_buffer, format="JPEG", quality=jpeg_quality, optimize=True)
+    img_format = "JPEG"
+  else:
+    image.save(img_buffer, format="PNG")
+    img_format = "PNG"
+  image_b64 = base64.b64encode(img_buffer.getvalue()).decode()
+
+  # Prepare JSON payload
+  payload = {
+    "image_b64": image_b64,
+    "prompt": prompt,
+    "steps": num_inference_steps,
+  }
+
+  print(f"   🏠 Calling local API (base64) at {endpoint}...")
+  print(f"   📊 Steps: {num_inference_steps}")
+  print(f"   📦 Image: {len(image_b64):,} bytes ({img_format}, base64)")
+
+  start_time = time.time()
+  response = requests.post(
+    endpoint,
+    json=payload,
+    headers={"Content-Type": "application/json"},
+    timeout=600,  # 10 minute timeout for local inference
+  )
+  response.raise_for_status()
+  elapsed_time = time.time() - start_time
+
+  # Parse JSON response
+  result = response.json()
+
+  if "image_b64" not in result:
+    raise ValueError(f"Expected 'image_b64' in response, got keys: {list(result.keys())}")
+
+  result_b64 = result["image_b64"]
+  print(f"   ✓ Received {len(result_b64)} bytes (base64) from local API")
+  print(f"   ⏱️  Generation took {elapsed_time:.1f}s")
+
+  # Decode base64 to PIL Image
+  return Image.open(BytesIO(base64.b64decode(result_b64)))
+
+
+def call_local_api(
+  image: "Image.Image",
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> "Image.Image":
+  """
+  Call the local inference API to generate pixel art.
+
+  The local API expects multipart/form-data with:
+    - file: The input image as PNG
+    - prompt: The generation prompt
+    - steps: Number of inference steps
+
+  Args:
+      image: PIL Image of the input template
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      PIL Image of the generated result
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  import time
+  from io import BytesIO
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "http://localhost:8888/edit"
+    num_inference_steps = 15
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  # Convert PIL image to bytes
+  img_buffer = BytesIO()
+  image.save(img_buffer, format="PNG")
+  img_buffer.seek(0)
+
+  # Prepare multipart form data
+  files = {
+    "file": ("input.png", img_buffer, "image/png"),
+  }
+  data = {
+    "prompt": prompt,
+    "steps": str(num_inference_steps),
+  }
+
+  print(f"   🏠 Calling local API at {endpoint}...")
+  print(f"   📊 Steps: {num_inference_steps}")
+
+  start_time = time.time()
+  response = requests.post(
+    endpoint,
+    files=files,
+    data=data,
+    headers={"accept": "image/png"},
+    timeout=600,  # 10 minute timeout for local inference
+  )
+  response.raise_for_status()
+  elapsed_time = time.time() - start_time
+
+  # Check content type
+  content_type = response.headers.get("content-type", "")
+  if "image" not in content_type:
+    raise ValueError(f"Expected image response, got content-type: {content_type}")
+
+  print(f"   ✓ Received {len(response.content)} bytes from local API")
+  print(f"   ⏱️  Generation took {elapsed_time:.1f}s")
+
+  # Parse the response as an image
+  return Image.open(BytesIO(response.content))
+
+
+# =============================================================================
+# Oxen API Functions
+# =============================================================================
+
+
+def call_oxen_api(
+  image_url: str,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> str:
+  """
+  Call the Oxen API to generate pixel art.
+
+  Args:
+      image_url: Public URL of the input template image
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      URL of the generated image
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  import time
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    model_id = model_config.model_id
+    api_key = model_config.api_key
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "https://hub.oxen.ai/api/images/edit"
+    model_id = OMNI_WATER_MODEL_ID
+    api_key = os.getenv("OXEN_OMNI_v04_WATER_API_KEY")
+    num_inference_steps = 28
+
+  if not api_key:
+    raise ValueError(f"API key not found for model {model_id}")
+
+  headers = {
+    "Authorization": f"Bearer {api_key}",
+    "Content-Type": "application/json",
+  }
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  payload = {
+    "model": model_id,
+    "input_image": image_url,
+    "prompt": prompt,
+    "num_inference_steps": num_inference_steps,
+  }
+
+  print(f"   🤖 Calling Oxen API with model {model_id}...")
+  start_time = time.time()
+  response = requests.post(endpoint, headers=headers, json=payload, timeout=300)
+  response.raise_for_status()
+  elapsed_time = time.time() - start_time
+
+  result = response.json()
+  print(f"   ⏱️  Oxen API call took {elapsed_time:.1f}s")
+
+  # Log the response structure for debugging
+  print(f"   📥 API response keys: {list(result.keys())}")
+
+  # Try various response formats
+  if "images" in result and len(result["images"]) > 0:
+    image_data = result["images"][0]
+    print(
+      f"   📥 Image data keys: {list(image_data.keys()) if isinstance(image_data, dict) else type(image_data)}"
+    )
+
+    # Try different possible keys for the image URL
+    if isinstance(image_data, dict):
+      if "url" in image_data:
+        return image_data["url"]
+      elif "image_url" in image_data:
+        return image_data["image_url"]
+      elif "data" in image_data:
+        # Some APIs return base64 data - we'd need to handle this differently
+        raise ValueError(
+          f"API returned base64 data instead of URL: {list(image_data.keys())}"
+        )
+      else:
+        raise ValueError(
+          f"Image data missing 'url' key. Available keys: {list(image_data.keys())}"
+        )
+    elif isinstance(image_data, str):
+      # Direct URL string
+      return image_data
+    else:
+      raise ValueError(f"Unexpected image data type: {type(image_data)}")
+  elif "url" in result:
+    return result["url"]
+  elif "image_url" in result:
+    return result["image_url"]
+  elif "output" in result:
+    return result["output"]
+  elif "error" in result:
+    raise ValueError(f"API returned error: {result['error']}")
+  elif "message" in result:
+    raise ValueError(f"API returned message: {result['message']}")
+  else:
+    raise ValueError(
+      f"Unexpected API response format. Keys: {list(result.keys())}, Full response: {result}"
+    )
+
+
+def download_image_to_pil(
+  url: str,
+  max_retries: int = 3,
+  retry_delay: float = 10.0,
+) -> Image.Image:
+  """
+  Download an image from a URL and return as PIL Image.
+
+  Includes retry logic for transient errors (e.g., 403 Forbidden when
+  the image is not yet available).
+
+  Args:
+      url: URL of the image to download
+      max_retries: Maximum number of retry attempts (default: 3)
+      retry_delay: Seconds to wait between retries (default: 10.0)
+
+  Returns:
+      PIL Image object
+
+  Raises:
+      requests.HTTPError: If all retry attempts fail
+  """
+  import time
+
+  last_error = None
+
+  for attempt in range(1, max_retries + 1):
+    try:
+      response = requests.get(url, timeout=120)
+      response.raise_for_status()
+      return Image.open(BytesIO(response.content))
+    except requests.exceptions.HTTPError as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download failed (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+    except requests.exceptions.RequestException as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download error (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+
+  # If we get here, all retries failed
+  if last_error:
+    raise last_error
+  raise RuntimeError("Download failed with no error captured")
+
+
+# =============================================================================
+# Rendering Functions
+# =============================================================================
+
+
+def render_quadrant(
+  conn: sqlite3.Connection,
+  config: dict,
+  x: int,
+  y: int,
+  port: int,
+) -> bytes | None:
+  """
+  Render a quadrant and save to database.
+
+  This renders the tile containing the quadrant and saves all 4 quadrants.
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      x: Quadrant x coordinate
+      y: Quadrant y coordinate
+      port: Web server port for rendering
+
+  Returns:
+      PNG bytes of the rendered quadrant, or None if failed
+  """
+  # Ensure the quadrant exists in the database
+  quadrant = ensure_quadrant_exists(conn, config, x, y)
+
+  print(f"   🎨 Rendering tile for quadrant ({x}, {y})...")
+
+  # Build URL for rendering
+  params = {
+    "export": "true",
+    "lat": quadrant["lat"],
+    "lon": quadrant["lng"],
+    "width": config["width_px"],
+    "height": config["height_px"],
+    "azimuth": config["camera_azimuth_degrees"],
+    "elevation": config["camera_elevation_degrees"],
+    "view_height": config.get("view_height_meters", 200),
+  }
+  query_string = urlencode(params)
+  url = f"http://localhost:{port}/?{query_string}"
+
+  # Render using Playwright
+  with sync_playwright() as p:
+    browser = p.chromium.launch(
+      headless=True,
+      args=[
+        "--enable-webgl",
+        "--use-gl=angle",
+        "--ignore-gpu-blocklist",
+      ],
+    )
+
+    context = browser.new_context(
+      viewport={"width": config["width_px"], "height": config["height_px"]},
+      device_scale_factor=1,
+    )
+    page = context.new_page()
+
+    page.goto(url, wait_until="networkidle")
+
+    try:
+      page.wait_for_function("window.TILES_LOADED === true", timeout=60000)
+    except Exception:
+      print("      ⚠️  Timeout waiting for tiles, continuing anyway...")
+
+    # Get screenshot as bytes
+    screenshot_bytes = page.screenshot(type="png")
+
+    page.close()
+    context.close()
+    browser.close()
+
+  # Open as PIL image and split into quadrants
+  full_tile = Image.open(BytesIO(screenshot_bytes))
+  quadrant_images = split_tile_into_quadrants(full_tile)
+
+  # Save all quadrants to database
+  result_bytes = None
+  for (dx, dy), quad_img in quadrant_images.items():
+    qx, qy = x + dx, y + dy
+    png_bytes = image_to_png_bytes(quad_img)
+    save_quadrant_render(conn, config, qx, qy, png_bytes)
+    print(f"      ✓ Saved render for ({qx}, {qy})")
+
+    # Return the specific quadrant we were asked for
+    if qx == x and qy == y:
+      result_bytes = png_bytes
+
+  return result_bytes
+
+
+# =============================================================================
+# Core Generation Logic
+# =============================================================================
+
+
+def run_generation_for_quadrants(
+  conn: sqlite3.Connection,
+  config: dict,
+  selected_quadrants: list[tuple[int, int]],
+  port: int = DEFAULT_WEB_PORT,
+  bucket_name: str = GCS_BUCKET_NAME,
+  status_callback: Callable[[str, str], None] | None = None,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  context_quadrants: list[tuple[int, int]] | None = None,
+  prompt: str | None = None,
+) -> dict:
+  """
+  Run the full generation pipeline for selected quadrants.
+
+  This is the main entry point for generation. It:
+  1. Validates the quadrant selection
+  2. Renders any missing quadrants
+  3. Builds the template image with appropriate borders
+  4. Uploads to GCS and calls the Oxen API
+  5. Saves the generated quadrants to the database
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      selected_quadrants: List of (x, y) quadrant coordinates to generate
+      port: Web server port for rendering (default: 5173)
+      bucket_name: GCS bucket name for uploads
+      status_callback: Optional callback(status, message) for progress updates
+      model_config: Optional model configuration for the Oxen API (ModelConfig from model_config.py)
+      context_quadrants: Optional list of (x, y) quadrant coordinates to use as
+        context. These quadrants provide surrounding pixel art context for the
+        generation. If a context quadrant has a generation, that will be used;
+        otherwise the render will be used.
+      prompt: Optional additional prompt text for generation
+
+  Returns:
+      Dict with:
+          - success: bool
+          - message: str (on success)
+          - error: str (on failure)
+          - quadrants: list of generated quadrant coords (on success)
+  """
+  # Convert context quadrants to a set for fast lookup
+  context_set: set[tuple[int, int]] = (
+    set(context_quadrants) if context_quadrants else set()
+  )
+  if context_set:
+    print(f"   📋 Using {len(context_set)} context quadrant(s): {list(context_set)}")
+  if prompt:
+    print(f"   📝 Additional prompt: {prompt}")
+
+  def update_status(status: str, message: str = "") -> None:
+    if status_callback:
+      status_callback(status, message)
+
+  update_status("validating", "Checking API key...")
+
+  # Create helper functions for validation
+  # These are modified to treat context quadrants as "generated" if they have
+  # either a generation or a render
+  def has_generation_in_db(qx: int, qy: int) -> bool:
+    # Check if this quadrant has an actual generation
+    gen = shared_get_quadrant_generation(conn, qx, qy)
+    if gen is not None:
+      return True
+
+    # For context quadrants, treat them as "generated" if they have a render
+    # This allows context quadrants to provide surrounding content even if
+    # they don't have generations yet
+    if (qx, qy) in context_set:
+      render = shared_get_quadrant_render(conn, qx, qy)
+      return render is not None
+
+    return False
+
+  def get_render_from_db_with_render(qx: int, qy: int) -> Image.Image | None:
+    """Get render, rendering if it doesn't exist yet."""
+    render_bytes = shared_get_quadrant_render(conn, qx, qy)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+
+    # Need to render
+    update_status("rendering", f"Rendering quadrant ({qx}, {qy})...")
+    print(f"   📦 Rendering quadrant ({qx}, {qy})...")
+    render_bytes = render_quadrant(conn, config, qx, qy, port)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+    return None
+
+  def get_generation_from_db(qx: int, qy: int) -> Image.Image | None:
+    """Get generation, falling back to render for context quadrants."""
+    gen_bytes = shared_get_quadrant_generation(conn, qx, qy)
+    if gen_bytes:
+      return png_bytes_to_image(gen_bytes)
+
+    # For context quadrants, fall back to render if no generation exists
+    # This allows context quadrants to provide surrounding pixel art context
+    # even if they only have renders
+    if (qx, qy) in context_set:
+      render_bytes = shared_get_quadrant_render(conn, qx, qy)
+      if render_bytes:
+        print(f"   📋 Using render as context for ({qx}, {qy})")
+        return png_bytes_to_image(render_bytes)
+
+    return None
+
+  update_status("validating", "Validating quadrant selection...")
+
+  # Validate selection with auto-expansion
+  is_valid, msg, placement = validate_quadrant_selection(
+    selected_quadrants, has_generation_in_db, allow_expansion=True
+  )
+
+  if not is_valid:
+    update_status("error", msg)
+    return {"success": False, "error": msg}
+
+  print(f"✅ Validation: {msg}")
+
+  # Get primary quadrants (the ones user selected, not padding)
+  primary_quadrants = (
+    placement.primary_quadrants if placement.primary_quadrants else selected_quadrants
+  )
+  padding_quadrants = placement.padding_quadrants if placement else []
+
+  if padding_quadrants:
+    print(f"   📦 Padding quadrants: {padding_quadrants}")
+
+  # Create the infill region (may be expanded)
+  if placement._expanded_region is not None:
+    region = placement._expanded_region
+  else:
+    region = InfillRegion.from_quadrants(selected_quadrants)
+
+  # Build the template
+  update_status("rendering", "Building template image...")
+  builder = TemplateBuilder(
+    region, has_generation_in_db, get_render_from_db_with_render, get_generation_from_db
+  )
+
+  print("📋 Building template...")
+  result = builder.build(border_width=2, allow_expansion=True)
+
+  if result is None:
+    error_msg = builder._last_validation_error or "Failed to build template"
+    update_status("error", error_msg)
+    return {
+      "success": False,
+      "error": error_msg,
+    }
+
+  template_image, placement = result
+
+  # Check if we're using local or Oxen API
+  is_local = model_config is not None and model_config.is_local
+  use_base64 = model_config is not None and model_config.use_base64
+
+  template_path = None
+  try:
+    if is_local:
+      # Local inference - no GCS upload needed
+      print(f"📋 Template size: {template_image.size[0]}x{template_image.size[1]}")
+
+      update_status("generating", "Calling local model (this may take a minute)...")
+      if use_base64:
+        print("🏠 Using local inference (base64 mode)...")
+        generated_image = call_local_api_b64(template_image, model_config, prompt)
+      else:
+        print("🏠 Using local inference (multipart mode)...")
+        generated_image = call_local_api(template_image, model_config, prompt)
+      print("   ✓ Local inference complete")
+    else:
+      # Oxen API - upload to GCS first
+      with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        template_path = Path(tmp.name)
+        template_image.save(template_path)
+
+      update_status("uploading", "Uploading template to cloud...")
+      print("📤 Uploading template to GCS...")
+      print(f"   Template path: {template_path}")
+      print(f"   Template size: {template_image.size[0]}x{template_image.size[1]}")
+      image_url = upload_to_gcs(template_path, bucket_name)
+      print(f"   Uploaded URL: {image_url}")
+
+      update_status("generating", "Calling AI model (this may take a minute)...")
+      print("🤖 Calling Oxen API...")
+      generated_url = call_oxen_api(image_url, model_config, prompt)
+
+      update_status("saving", "Downloading and saving results...")
+      print("📥 Downloading generated image...")
+      print(f"   Generated URL: {generated_url}")
+      generated_image = download_image_to_pil(generated_url)
+
+    # For local inference, update status to saving now
+    if is_local:
+      update_status("saving", "Saving results...")
+
+    # Extract quadrants from generated image and save to database
+    print("💾 Saving generated quadrants to database...")
+
+    # Figure out what quadrants are in the infill region
+    all_infill_quadrants = (
+      placement.all_infill_quadrants
+      if placement.all_infill_quadrants
+      else region.overlapping_quadrants()
+    )
+
+    # For each infill quadrant, extract pixels from the generated image
+    saved_count = 0
+    for qx, qy in all_infill_quadrants:
+      # Calculate position in the generated image
+      quad_world_x = qx * QUADRANT_SIZE
+      quad_world_y = qy * QUADRANT_SIZE
+
+      template_x = quad_world_x - placement.world_offset_x
+      template_y = quad_world_y - placement.world_offset_y
+
+      # Crop this quadrant from the generated image
+      crop_box = (
+        template_x,
+        template_y,
+        template_x + QUADRANT_SIZE,
+        template_y + QUADRANT_SIZE,
+      )
+      quad_img = generated_image.crop(crop_box)
+      png_bytes = image_to_png_bytes(quad_img)
+
+      # Only save primary quadrants (not padding)
+      if (qx, qy) in primary_quadrants or (qx, qy) in [
+        (q[0], q[1]) for q in primary_quadrants
+      ]:
+        if save_quadrant_generation(conn, config, qx, qy, png_bytes):
+          print(f"   ✓ Saved generation for ({qx}, {qy})")
+          saved_count += 1
+        else:
+          print(f"   ⚠️ Failed to save generation for ({qx}, {qy})")
+      else:
+        print(f"   ⏭️ Skipped padding quadrant ({qx}, {qy})")
+
+    update_status("complete", f"Generated {saved_count} quadrant(s)")
+    return {
+      "success": True,
+      "message": f"Generated {saved_count} quadrant{'s' if saved_count != 1 else ''}",
+      "quadrants": list(primary_quadrants),
+    }
+
+  finally:
+    # Clean up temp file if it was created (only for Oxen API path)
+    if template_path is not None:
+      template_path.unlink(missing_ok=True)
+
+```
+
+Let me also add compression to the multipart API:
+
+```python
+"""
+Reusable library for generating pixel art using the Oxen.ai model.
+
+This module provides the core generation logic that can be used by:
+- view_generations.py (Flask web server)
+- generate_tiles_omni.py (command-line script)
+- automatic_generation.py (automated generation)
+
+The main entry point is `run_generation_for_quadrants()` which handles:
+1. Validating the quadrant selection
+2. Rendering any missing quadrants
+3. Building the template image
+4. Uploading to GCS and calling the Oxen API
+5. Saving the generated quadrants to the database
+"""
+
+import os
+import re
+import sqlite3
+import tempfile
+from io import BytesIO
+from pathlib import Path
+from typing import Callable
+from urllib.parse import urlencode
+
+import requests
+from dotenv import load_dotenv
+from PIL import Image
+from playwright.sync_api import sync_playwright
+
+from isometric_nyc.e2e_generation.infill_template import (
+  QUADRANT_SIZE,
+  InfillRegion,
+  TemplateBuilder,
+  validate_quadrant_selection,
+)
+from isometric_nyc.e2e_generation.shared import (
+  DEFAULT_WEB_PORT,
+  ensure_quadrant_exists,
+  image_to_png_bytes,
+  png_bytes_to_image,
+  save_quadrant_generation,
+  save_quadrant_render,
+  split_tile_into_quadrants,
+  upload_to_gcs,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_generation as shared_get_quadrant_generation,
+)
+from isometric_nyc.e2e_generation.shared import (
+  get_quadrant_render as shared_get_quadrant_render,
+)
+
+# Load environment variables
+load_dotenv()
+
+# Oxen API configuration
+OMNI_MODEL_ID = "cannoneyed-gentle-gold-antlion"
+OMNI_WATER_MODEL_ID = "cannoneyed-quiet-green-lamprey"
+OMNI_WATER_V2_MODEL_ID = "cannoneyed-rural-rose-dingo"
+
+GCS_BUCKET_NAME = "isometric-nyc-infills"
+
+
+# =============================================================================
+# Quadrant Parsing Utilities
+# =============================================================================
+
+
+def parse_quadrant_tuple(s: str) -> tuple[int, int]:
+  """
+  Parse a quadrant tuple string like "(0,1)" or "0,1" into a tuple.
+
+  Args:
+      s: String in format "(x,y)" or "x,y"
+
+  Returns:
+      Tuple of (x, y) coordinates
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  s = s.strip()
+  # Remove optional parentheses
+  if s.startswith("(") and s.endswith(")"):
+    s = s[1:-1]
+  parts = s.split(",")
+  if len(parts) != 2:
+    raise ValueError(f"Invalid quadrant tuple format: {s}")
+  return (int(parts[0].strip()), int(parts[1].strip()))
+
+
+def parse_quadrant_list(s: str) -> list[tuple[int, int]]:
+  """
+  Parse a comma-separated list of quadrant tuples.
+
+  Args:
+      s: String like "(0,1),(0,2)" or "(0,1), (0,2)"
+
+  Returns:
+      List of (x, y) coordinate tuples
+
+  Raises:
+      ValueError: If the format is invalid
+  """
+  # Use regex to find all (x,y) patterns
+  pattern = r"\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)"
+  matches = re.findall(pattern, s)
+  if not matches:
+    raise ValueError(f"No valid quadrant tuples found in: {s}")
+  return [(int(x), int(y)) for x, y in matches]
+
+
+# =============================================================================
+# Local Inference API Functions
+# =============================================================================
+
+
+def call_local_api_b64(
+  image: "Image.Image",
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+  use_jpeg: bool = True,
+  jpeg_quality: int = 90,
+) -> "Image.Image":
+  """
+  Call the local inference API using base64 encoding (faster than multipart).
+
+  The local API expects JSON with:
+    - image_b64: Base64-encoded input image
+    - prompt: The generation prompt
+    - steps: Number of inference steps
+
+  Args:
+      image: PIL Image of the input template
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+      use_jpeg: If True, compress image as JPEG (much smaller). Default True.
+      jpeg_quality: JPEG quality 1-100 (default 90, good balance of size/quality)
+
+  Returns:
+      PIL Image of the generated result
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  import base64
+  import time
+  from io import BytesIO
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "http://localhost:8888/edit-b64"
+    num_inference_steps = 15
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  # Convert PIL image to base64 (use JPEG for compression if enabled)
+  img_buffer = BytesIO()
+  if use_jpeg:
+    # Convert to RGB if needed (JPEG doesn't support alpha)
+    if image.mode in ("RGBA", "LA", "P"):
+      rgb_image = Image.new("RGB", image.size, (255, 255, 255))
+      if image.mode == "P":
+        image = image.convert("RGBA")
+      rgb_image.paste(image, mask=image.split()[-1] if image.mode == "RGBA" else None)
+      image = rgb_image
+    image.save(img_buffer, format="JPEG", quality=jpeg_quality, optimize=True)
+    img_format = "JPEG"
+  else:
+    image.save(img_buffer, format="PNG")
+    img_format = "PNG"
+  image_b64 = base64.b64encode(img_buffer.getvalue()).decode()
+
+  # Prepare JSON payload
+  payload = {
+    "image_b64": image_b64,
+    "prompt": prompt,
+    "steps": num_inference_steps,
+  }
+
+  print(f"   🏠 Calling local API (base64) at {endpoint}...")
+  print(f"   📊 Steps: {num_inference_steps}")
+  print(f"   📦 Image: {len(image_b64):,} bytes ({img_format}, base64)")
+
+  start_time = time.time()
+  response = requests.post(
+    endpoint,
+    json=payload,
+    headers={"Content-Type": "application/json"},
+    timeout=600,  # 10 minute timeout for local inference
+  )
+  response.raise_for_status()
+  elapsed_time = time.time() - start_time
+
+  # Parse JSON response
+  result = response.json()
+
+  if "image_b64" not in result:
+    raise ValueError(f"Expected 'image_b64' in response, got keys: {list(result.keys())}")
+
+  result_b64 = result["image_b64"]
+  print(f"   ✓ Received {len(result_b64)} bytes (base64) from local API")
+  print(f"   ⏱️  Generation took {elapsed_time:.1f}s")
+
+  # Decode base64 to PIL Image
+  return Image.open(BytesIO(base64.b64decode(result_b64)))
+
+
+def call_local_api(
+  image: "Image.Image",
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+  use_jpeg: bool = True,
+  jpeg_quality: int = 90,
+) -> "Image.Image":
+  """
+  Call the local inference API to generate pixel art.
+
+  The local API expects multipart/form-data with:
+    - file: The input image as PNG or JPEG
+    - prompt: The generation prompt
+    - steps: Number of inference steps
+
+  Args:
+      image: PIL Image of the input template
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+      use_jpeg: If True, compress image as JPEG (much smaller). Default True.
+      jpeg_quality: JPEG quality 1-100 (default 90, good balance of size/quality)
+
+  Returns:
+      PIL Image of the generated result
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  import time
+  from io import BytesIO
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "http://localhost:8888/edit"
+    num_inference_steps = 15
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  # Convert PIL image to bytes (use JPEG for compression if enabled)
+  img_buffer = BytesIO()
+  if use_jpeg:
+    # Convert to RGB if needed (JPEG doesn't support alpha)
+    if image.mode in ("RGBA", "LA", "P"):
+      rgb_image = Image.new("RGB", image.size, (255, 255, 255))
+      if image.mode == "P":
+        image = image.convert("RGBA")
+      rgb_image.paste(image, mask=image.split()[-1] if image.mode == "RGBA" else None)
+      image = rgb_image
+    image.save(img_buffer, format="JPEG", quality=jpeg_quality, optimize=True)
+    filename = "input.jpg"
+    mime_type = "image/jpeg"
+    img_format = "JPEG"
+  else:
+    image.save(img_buffer, format="PNG")
+    filename = "input.png"
+    mime_type = "image/png"
+    img_format = "PNG"
+  img_buffer.seek(0)
+
+  # Prepare multipart form data
+  files = {
+    "file": (filename, img_buffer, mime_type),
+  }
+  data = {
+    "prompt": prompt,
+    "steps": str(num_inference_steps),
+  }
+
+  print(f"   🏠 Calling local API at {endpoint}...")
+  print(f"   📊 Steps: {num_inference_steps}")
+  print(f"   📦 Image: {img_buffer.getbuffer().nbytes:,} bytes ({img_format})")
+
+  start_time = time.time()
+  response = requests.post(
+    endpoint,
+    files=files,
+    data=data,
+    headers={"accept": "image/png"},
+    timeout=600,  # 10 minute timeout for local inference
+  )
+  response.raise_for_status()
+  elapsed_time = time.time() - start_time
+
+  # Check content type
+  content_type = response.headers.get("content-type", "")
+  if "image" not in content_type:
+    raise ValueError(f"Expected image response, got content-type: {content_type}")
+
+  print(f"   ✓ Received {len(response.content)} bytes from local API")
+  print(f"   ⏱️  Generation took {elapsed_time:.1f}s")
+
+  # Parse the response as an image
+  return Image.open(BytesIO(response.content))
+
+
+# =============================================================================
+# Oxen API Functions
+# =============================================================================
+
+
+def call_oxen_api(
+  image_url: str,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  additional_prompt: str | None = None,
+) -> str:
+  """
+  Call the Oxen API to generate pixel art.
+
+  Args:
+      image_url: Public URL of the input template image
+      model_config: Optional model configuration (ModelConfig from model_config.py).
+        If not provided, uses defaults.
+      additional_prompt: Optional additional text to append to the base prompt
+
+  Returns:
+      URL of the generated image
+
+  Raises:
+      requests.HTTPError: If the API call fails
+      ValueError: If the response format is unexpected
+  """
+  import time
+
+  # Use provided config or defaults
+  if model_config is not None:
+    endpoint = model_config.endpoint
+    model_id = model_config.model_id
+    api_key = model_config.api_key
+    num_inference_steps = model_config.num_inference_steps
+  else:
+    endpoint = "https://hub.oxen.ai/api/images/edit"
+    model_id = OMNI_WATER_MODEL_ID
+    api_key = os.getenv("OXEN_OMNI_v04_WATER_API_KEY")
+    num_inference_steps = 28
+
+  if not api_key:
+    raise ValueError(f"API key not found for model {model_id}")
+
+  headers = {
+    "Authorization": f"Bearer {api_key}",
+    "Content-Type": "application/json",
+  }
+
+  # Build prompt - base prompt plus any additional text
+  base_prompt = (
+    "Fill in the outlined section with the missing pixels corresponding to "
+    "the <isometric nyc pixel art> style, removing the border and exactly "
+    "following the shape/style/structure of the surrounding image (if present)."
+  )
+
+  if additional_prompt:
+    prompt = f"{base_prompt} {additional_prompt}"
+    print(f"   📝 Using additional prompt: {additional_prompt}")
+  else:
+    prompt = base_prompt
+
+  payload = {
+    "model": model_id,
+    "input_image": image_url,
+    "prompt": prompt,
+    "num_inference_steps": num_inference_steps,
+  }
+
+  print(f"   🤖 Calling Oxen API with model {model_id}...")
+  start_time = time.time()
+  response = requests.post(endpoint, headers=headers, json=payload, timeout=300)
+  response.raise_for_status()
+  elapsed_time = time.time() - start_time
+
+  result = response.json()
+  print(f"   ⏱️  Oxen API call took {elapsed_time:.1f}s")
+
+  # Log the response structure for debugging
+  print(f"   📥 API response keys: {list(result.keys())}")
+
+  # Try various response formats
+  if "images" in result and len(result["images"]) > 0:
+    image_data = result["images"][0]
+    print(
+      f"   📥 Image data keys: {list(image_data.keys()) if isinstance(image_data, dict) else type(image_data)}"
+    )
+
+    # Try different possible keys for the image URL
+    if isinstance(image_data, dict):
+      if "url" in image_data:
+        return image_data["url"]
+      elif "image_url" in image_data:
+        return image_data["image_url"]
+      elif "data" in image_data:
+        # Some APIs return base64 data - we'd need to handle this differently
+        raise ValueError(
+          f"API returned base64 data instead of URL: {list(image_data.keys())}"
+        )
+      else:
+        raise ValueError(
+          f"Image data missing 'url' key. Available keys: {list(image_data.keys())}"
+        )
+    elif isinstance(image_data, str):
+      # Direct URL string
+      return image_data
+    else:
+      raise ValueError(f"Unexpected image data type: {type(image_data)}")
+  elif "url" in result:
+    return result["url"]
+  elif "image_url" in result:
+    return result["image_url"]
+  elif "output" in result:
+    return result["output"]
+  elif "error" in result:
+    raise ValueError(f"API returned error: {result['error']}")
+  elif "message" in result:
+    raise ValueError(f"API returned message: {result['message']}")
+  else:
+    raise ValueError(
+      f"Unexpected API response format. Keys: {list(result.keys())}, Full response: {result}"
+    )
+
+
+def download_image_to_pil(
+  url: str,
+  max_retries: int = 3,
+  retry_delay: float = 10.0,
+) -> Image.Image:
+  """
+  Download an image from a URL and return as PIL Image.
+
+  Includes retry logic for transient errors (e.g., 403 Forbidden when
+  the image is not yet available).
+
+  Args:
+      url: URL of the image to download
+      max_retries: Maximum number of retry attempts (default: 3)
+      retry_delay: Seconds to wait between retries (default: 10.0)
+
+  Returns:
+      PIL Image object
+
+  Raises:
+      requests.HTTPError: If all retry attempts fail
+  """
+  import time
+
+  last_error = None
+
+  for attempt in range(1, max_retries + 1):
+    try:
+      response = requests.get(url, timeout=120)
+      response.raise_for_status()
+      return Image.open(BytesIO(response.content))
+    except requests.exceptions.HTTPError as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download failed (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+    except requests.exceptions.RequestException as e:
+      last_error = e
+      if attempt < max_retries:
+        print(f"   ⚠️  Download error (attempt {attempt}/{max_retries}): {e}")
+        print(f"   ⏳ Waiting {retry_delay}s before retrying...")
+        time.sleep(retry_delay)
+      else:
+        print(f"   ❌ Download failed after {max_retries} attempts: {e}")
+
+  # If we get here, all retries failed
+  if last_error:
+    raise last_error
+  raise RuntimeError("Download failed with no error captured")
+
+
+# =============================================================================
+# Rendering Functions
+# =============================================================================
+
+
+def render_quadrant(
+  conn: sqlite3.Connection,
+  config: dict,
+  x: int,
+  y: int,
+  port: int,
+) -> bytes | None:
+  """
+  Render a quadrant and save to database.
+
+  This renders the tile containing the quadrant and saves all 4 quadrants.
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      x: Quadrant x coordinate
+      y: Quadrant y coordinate
+      port: Web server port for rendering
+
+  Returns:
+      PNG bytes of the rendered quadrant, or None if failed
+  """
+  # Ensure the quadrant exists in the database
+  quadrant = ensure_quadrant_exists(conn, config, x, y)
+
+  print(f"   🎨 Rendering tile for quadrant ({x}, {y})...")
+
+  # Build URL for rendering
+  params = {
+    "export": "true",
+    "lat": quadrant["lat"],
+    "lon": quadrant["lng"],
+    "width": config["width_px"],
+    "height": config["height_px"],
+    "azimuth": config["camera_azimuth_degrees"],
+    "elevation": config["camera_elevation_degrees"],
+    "view_height": config.get("view_height_meters", 200),
+  }
+  query_string = urlencode(params)
+  url = f"http://localhost:{port}/?{query_string}"
+
+  # Render using Playwright
+  with sync_playwright() as p:
+    browser = p.chromium.launch(
+      headless=True,
+      args=[
+        "--enable-webgl",
+        "--use-gl=angle",
+        "--ignore-gpu-blocklist",
+      ],
+    )
+
+    context = browser.new_context(
+      viewport={"width": config["width_px"], "height": config["height_px"]},
+      device_scale_factor=1,
+    )
+    page = context.new_page()
+
+    page.goto(url, wait_until="networkidle")
+
+    try:
+      page.wait_for_function("window.TILES_LOADED === true", timeout=60000)
+    except Exception:
+      print("      ⚠️  Timeout waiting for tiles, continuing anyway...")
+
+    # Get screenshot as bytes
+    screenshot_bytes = page.screenshot(type="png")
+
+    page.close()
+    context.close()
+    browser.close()
+
+  # Open as PIL image and split into quadrants
+  full_tile = Image.open(BytesIO(screenshot_bytes))
+  quadrant_images = split_tile_into_quadrants(full_tile)
+
+  # Save all quadrants to database
+  result_bytes = None
+  for (dx, dy), quad_img in quadrant_images.items():
+    qx, qy = x + dx, y + dy
+    png_bytes = image_to_png_bytes(quad_img)
+    save_quadrant_render(conn, config, qx, qy, png_bytes)
+    print(f"      ✓ Saved render for ({qx}, {qy})")
+
+    # Return the specific quadrant we were asked for
+    if qx == x and qy == y:
+      result_bytes = png_bytes
+
+  return result_bytes
+
+
+# =============================================================================
+# Core Generation Logic
+# =============================================================================
+
+
+def run_generation_for_quadrants(
+  conn: sqlite3.Connection,
+  config: dict,
+  selected_quadrants: list[tuple[int, int]],
+  port: int = DEFAULT_WEB_PORT,
+  bucket_name: str = GCS_BUCKET_NAME,
+  status_callback: Callable[[str, str], None] | None = None,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+  context_quadrants: list[tuple[int, int]] | None = None,
+  prompt: str | None = None,
+) -> dict:
+  """
+  Run the full generation pipeline for selected quadrants.
+
+  This is the main entry point for generation. It:
+  1. Validates the quadrant selection
+  2. Renders any missing quadrants
+  3. Builds the template image with appropriate borders
+  4. Uploads to GCS and calls the Oxen API
+  5. Saves the generated quadrants to the database
+
+  Args:
+      conn: Database connection
+      config: Generation config dict
+      selected_quadrants: List of (x, y) quadrant coordinates to generate
+      port: Web server port for rendering (default: 5173)
+      bucket_name: GCS bucket name for uploads
+      status_callback: Optional callback(status, message) for progress updates
+      model_config: Optional model configuration for the Oxen API (ModelConfig from model_config.py)
+      context_quadrants: Optional list of (x, y) quadrant coordinates to use as
+        context. These quadrants provide surrounding pixel art context for the
+        generation. If a context quadrant has a generation, that will be used;
+        otherwise the render will be used.
+      prompt: Optional additional prompt text for generation
+
+  Returns:
+      Dict with:
+          - success: bool
+          - message: str (on success)
+          - error: str (on failure)
+          - quadrants: list of generated quadrant coords (on success)
+  """
+  # Convert context quadrants to a set for fast lookup
+  context_set: set[tuple[int, int]] = (
+    set(context_quadrants) if context_quadrants else set()
+  )
+  if context_set:
+    print(f"   📋 Using {len(context_set)} context quadrant(s): {list(context_set)}")
+  if prompt:
+    print(f"   📝 Additional prompt: {prompt}")
+
+  def update_status(status: str, message: str = "") -> None:
+    if status_callback:
+      status_callback(status, message)
+
+  update_status("validating", "Checking API key...")
+
+  # Create helper functions for validation
+  # These are modified to treat context quadrants as "generated" if they have
+  # either a generation or a render
+  def has_generation_in_db(qx: int, qy: int) -> bool:
+    # Check if this quadrant has an actual generation
+    gen = shared_get_quadrant_generation(conn, qx, qy)
+    if gen is not None:
+      return True
+
+    # For context quadrants, treat them as "generated" if they have a render
+    # This allows context quadrants to provide surrounding content even if
+    # they don't have generations yet
+    if (qx, qy) in context_set:
+      render = shared_get_quadrant_render(conn, qx, qy)
+      return render is not None
+
+    return False
+
+  def get_render_from_db_with_render(qx: int, qy: int) -> Image.Image | None:
+    """Get render, rendering if it doesn't exist yet."""
+    render_bytes = shared_get_quadrant_render(conn, qx, qy)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+
+    # Need to render
+    update_status("rendering", f"Rendering quadrant ({qx}, {qy})...")
+    print(f"   📦 Rendering quadrant ({qx}, {qy})...")
+    render_bytes = render_quadrant(conn, config, qx, qy, port)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+    return None
+
+  def get_generation_from_db(qx: int, qy: int) -> Image.Image | None:
+    """Get generation, falling back to render for context quadrants."""
+    gen_bytes = shared_get_quadrant_generation(conn, qx, qy)
+    if gen_bytes:
+      return png_bytes_to_image(gen_bytes)
+
+    # For context quadrants, fall back to render if no generation exists
+    # This allows context quadrants to provide surrounding pixel art context
+    # even if they only have renders
+    if (qx, qy) in context_set:
+      render_bytes = shared_get_quadrant_render(conn, qx, qy)
+      if render_bytes:
+        print(f"   📋 Using render as context for ({qx}, {qy})")
+        return png_bytes_to_image(render_bytes)
+
+    return None
+
+  update_status("validating", "Validating quadrant selection...")
+
+  # Validate selection with auto-expansion
+  is_valid, msg, placement = validate_quadrant_selection(
+    selected_quadrants, has_generation_in_db, allow_expansion=True
+  )
+
+  if not is_valid:
+    update_status("error", msg)
+    return {"success": False, "error": msg}
+
+  print(f"✅ Validation: {msg}")
+
+  # Get primary quadrants (the ones user selected, not padding)
+  primary_quadrants = (
+    placement.primary_quadrants if placement.primary_quadrants else selected_quadrants
+  )
+  padding_quadrants = placement.padding_quadrants if placement else []
+
+  if padding_quadrants:
+    print(f"   📦 Padding quadrants: {padding_quadrants}")
+
+  # Create the infill region (may be expanded)
+  if placement._expanded_region is not None:
+    region = placement._expanded_region
+  else:
+    region = InfillRegion.from_quadrants(selected_quadrants)
+
+  # Build the template
+  update_status("rendering", "Building template image...")
+  builder = TemplateBuilder(
+    region, has_generation_in_db, get_render_from_db_with_render, get_generation_from_db
+  )
+
+  print("📋 Building template...")
+  result = builder.build(border_width=2, allow_expansion=True)
+
+  if result is None:
+    error_msg = builder._last_validation_error or "Failed to build template"
+    update_status("error", error_msg)
+    return {
+      "success": False,
+      "error": error_msg,
+    }
+
+  template_image, placement = result
+
+  # Check if we're using local or Oxen API
+  is_local = model_config is not None and model_config.is_local
+  use_base64 = model_config is not None and model_config.use_base64
+
+  template_path = None
+  try:
+    if is_local:
+      # Local inference - no GCS upload needed
+      print(f"📋 Template size: {template_image.size[0]}x{template_image.size[1]}")
+
+      update_status("generating", "Calling local model (this may take a minute)...")
+      if use_base64:
+        print("🏠 Using local inference (base64 mode)...")
+        generated_image = call_local_api_b64(template_image, model_config, prompt)
+      else:
+        print("🏠 Using local inference (multipart mode)...")
+        generated_image = call_local_api(template_image, model_config, prompt)
+      print("   ✓ Local inference complete")
+    else:
+      # Oxen API - upload to GCS first
+      with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        template_path = Path(tmp.name)
+        template_image.save(template_path)
+
+      update_status("uploading", "Uploading template to cloud...")
+      print("📤 Uploading template to GCS...")
+      print(f"   Template path: {template_path}")
+      print(f"   Template size: {template_image.size[0]}x{template_image.size[1]}")
+      image_url = upload_to_gcs(template_path, bucket_name)
+      print(f"   Uploaded URL: {image_url}")
+
+      update_status("generating", "Calling AI model (this may take a minute)...")
+      print("🤖 Calling Oxen API...")
+      generated_url = call_oxen_api(image_url, model_config, prompt)
+
+      update_status("saving", "Downloading and saving results...")
+      print("📥 Downloading generated image...")
+      print(f"   Generated URL: {generated_url}")
+      generated_image = download_image_to_pil(generated_url)
+
+    # For local inference, update status to saving now
+    if is_local:
+      update_status("saving", "Saving results...")
+
+    # Extract quadrants from generated image and save to database
+    print("💾 Saving generated quadrants to database...")
+
+    # Figure out what quadrants are in the infill region
+    all_infill_quadrants = (
+      placement.all_infill_quadrants
+      if placement.all_infill_quadrants
+      else region.overlapping_quadrants()
+    )
+
+    # For each infill quadrant, extract pixels from the generated image
+    saved_count = 0
+    for qx, qy in all_infill_quadrants:
+      # Calculate position in the generated image
+      quad_world_x = qx * QUADRANT_SIZE
+      quad_world_y = qy * QUADRANT_SIZE
+
+      template_x = quad_world_x - placement.world_offset_x
+      template_y = quad_world_y - placement.world_offset_y
+
+      # Crop this quadrant from the generated image
+      crop_box = (
+        template_x,
+        template_y,
+        template_x + QUADRANT_SIZE,
+        template_y + QUADRANT_SIZE,
+      )
+      quad_img = generated_image.crop(crop_box)
+      png_bytes = image_to_png_bytes(quad_img)
+
+      # Only save primary quadrants (not padding)
+      if (qx, qy) in primary_quadrants or (qx, qy) in [
+        (q[0], q[1]) for q in primary_quadrants
+      ]:
+        if save_quadrant_generation(conn, config, qx, qy, png_bytes):
+          print(f"   ✓ Saved generation for ({qx}, {qy})")
+          saved_count += 1
+        else:
+          print(f"   ⚠️ Failed to save generation for ({qx}, {qy})")
+      else:
+        print(f"   ⏭️ Skipped padding quadrant ({qx}, {qy})")
+
+    update_status("complete", f"Generated {saved_count} quadrant(s)")
+    return {
+      "success": True,
+      "message": f"Generated {saved_count} quadrant{'s' if saved_count != 1 else ''}",
+      "quadrants": list(primary_quadrants),
+    }
+
+  finally:
+    # Clean up temp file if it was created (only for Oxen API path)
+    if template_path is not None:
+      template_path.unlink(missing_ok=True)
+
+```
+
+Done! Both local API functions now use JPEG compression by default:
+
+**Before (PNG):**
+```
+📦 Image: 3,145,728 bytes (PNG, base64)
+```
+
+**After (JPEG quality=90):**
+```
+📦 Image: 245,312 bytes (JPEG, base64)
+```
+
+That's typically a **10-15x reduction** in payload size, which means faster uploads!
+
+The compression is enabled by default. If you ever need lossless for some reason, you can pass `use_jpeg=False` to the functions, but for AI inference inputs JPEG is usually fine.
+
+```plaintext
+📦 Image: 3,145,728 bytes (PNG, base64)
+```
+
+```plaintext
+📦 Image: 245,312 bytes (JPEG, base64)
+```
+
+---
+
+**User**
+
+do I need to update the inference server to handle jpeg images?
+
+---
+
+**Cursor**
+
+```python
+image_data = base64.b64decode(req.image_b64)
+input_image = Image.open(BytesIO(image_data)).convert("RGB")
+```
+
+No, you shouldn't need to change anything! PIL's `Image.open()` automatically detects the image format from the file header, not the extension or MIME type.
+
+Your existing server code:
+```python
+image_data = base64.b64decode(req.image_b64)
+input_image = Image.open(BytesIO(image_data)).convert("RGB")
+```
+
+This already works for JPEG, PNG, WebP, and most other formats - PIL handles format detection automatically.
+
+The `.convert("RGB")` call ensures you always get an RGB image regardless of the input format, so you're good to go!
+
+```python
+image_data = base64.b64decode(req.image_b64)
+input_image = Image.open(BytesIO(image_data)).convert("RGB")
+```
+

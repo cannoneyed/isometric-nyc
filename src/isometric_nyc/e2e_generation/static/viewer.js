@@ -468,15 +468,19 @@ document.addEventListener("keydown", (e) => {
 
   switch (e.key) {
     case "ArrowLeft":
+      e.preventDefault();
       navigate(-1, 0);
       break;
     case "ArrowRight":
+      e.preventDefault();
       navigate(1, 0);
       break;
     case "ArrowUp":
+      e.preventDefault();
       navigate(0, -1);
       break;
     case "ArrowDown":
+      e.preventDefault();
       navigate(0, 1);
       break;
     case "l":
@@ -2156,6 +2160,177 @@ function restoreSavedQuadrants() {
   }
 }
 
+// =============================================================================
+// NYC Outline Feature
+// =============================================================================
+
+let nycBoundaryData = null;
+let nycOutlineVisible = false;
+
+// Toggle NYC outline visibility
+function toggleNycOutline() {
+  const checkbox = document.getElementById("showNycOutline");
+  nycOutlineVisible = checkbox?.checked || false;
+
+  // Save preference to localStorage
+  try {
+    localStorage.setItem("viewer_show_nyc_outline", nycOutlineVisible ? "1" : "0");
+  } catch (e) {
+    console.warn("Could not save NYC outline preference:", e);
+  }
+
+  if (nycOutlineVisible) {
+    if (nycBoundaryData) {
+      renderNycOutline();
+    } else {
+      fetchNycBoundary();
+    }
+  } else {
+    clearNycOutline();
+  }
+}
+
+// Initialize NYC outline state from localStorage
+function initNycOutline() {
+  try {
+    const saved = localStorage.getItem("viewer_show_nyc_outline");
+    if (saved === "1") {
+      const checkbox = document.getElementById("showNycOutline");
+      if (checkbox) {
+        checkbox.checked = true;
+        nycOutlineVisible = true;
+        fetchNycBoundary();
+      }
+    }
+  } catch (e) {
+    // Ignore localStorage errors
+  }
+}
+
+// Fetch NYC boundary data from API
+async function fetchNycBoundary() {
+  try {
+    const response = await fetch("/api/nyc-boundary");
+    const data = await response.json();
+    nycBoundaryData = data;
+    console.log("Fetched NYC boundary with", data.boundary.features.length, "features");
+    if (nycOutlineVisible) {
+      renderNycOutline();
+    }
+  } catch (error) {
+    console.error("Failed to fetch NYC boundary:", error);
+  }
+}
+
+// Convert quadrant coordinates to pixel position on the grid
+function quadrantToPixel(qx, qy) {
+  const gridX = config.x;
+  const gridY = config.y;
+  const sizePx = config.size_px;
+  const showLines = document.getElementById("showLines")?.checked || false;
+  const gap = showLines ? 2 : 0;
+
+  // Calculate pixel position relative to the grid
+  const col = qx - gridX;
+  const row = qy - gridY;
+
+  const px = col * (sizePx + gap);
+  const py = row * (sizePx + gap);
+
+  return { x: px, y: py };
+}
+
+// Render the NYC outline as SVG paths
+function renderNycOutline() {
+  const svg = document.getElementById("nycOutlineOverlay");
+  if (!svg || !nycBoundaryData) return;
+
+  // Clear existing paths
+  svg.innerHTML = "";
+
+  const nx = config.nx;
+  const ny = config.ny;
+  const sizePx = config.size_px;
+  const showLines = document.getElementById("showLines")?.checked || false;
+  const gap = showLines ? 2 : 0;
+
+  // Calculate SVG dimensions to match the grid
+  const svgWidth = nx * sizePx + (nx - 1) * gap;
+  const svgHeight = ny * sizePx + (ny - 1) * gap;
+
+  svg.setAttribute("width", svgWidth);
+  svg.setAttribute("height", svgHeight);
+  svg.setAttribute("viewBox", `0 0 ${svgWidth} ${svgHeight}`);
+
+  // Borough colors for visual distinction
+  const boroughColors = {
+    "Manhattan": "#ff6b6b",
+    "Brooklyn": "#4ecdc4",
+    "Queens": "#45b7d1",
+    "Bronx": "#96ceb4",
+    "Staten Island": "#ffeaa7"
+  };
+
+  // Render each borough - always render all paths, SVG will clip naturally
+  nycBoundaryData.boundary.features.forEach((feature) => {
+    const name = feature.properties.name;
+    const color = boroughColors[name] || "#3b82f6";
+
+    // Process each ring of the polygon
+    feature.geometry.coordinates.forEach((ring, ringIndex) => {
+      // Build SVG path data
+      let pathData = "";
+
+      ring.forEach((coord, i) => {
+        const [qx, qy] = coord;
+        const pixel = quadrantToPixel(qx, qy);
+
+        const cmd = i === 0 ? "M" : "L";
+        pathData += `${cmd}${pixel.x.toFixed(1)},${pixel.y.toFixed(1)}`;
+      });
+
+      // Close the path
+      pathData += "Z";
+
+      // Always render the path - SVG overflow handles clipping
+      if (pathData.length > 2) {
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", pathData);
+        path.setAttribute("fill", "none");
+        path.setAttribute("stroke", color);
+        path.setAttribute("stroke-width", "2");
+        path.setAttribute("stroke-opacity", "0.8");
+        path.setAttribute("data-borough", name);
+        svg.appendChild(path);
+      }
+    });
+  });
+
+  console.log("Rendered NYC outline");
+}
+
+// Clear the NYC outline
+function clearNycOutline() {
+  const svg = document.getElementById("nycOutlineOverlay");
+  if (svg) {
+    svg.innerHTML = "";
+  }
+}
+
+// Re-render NYC outline when grid settings change (lines toggle)
+function updateNycOutlineOnSettingsChange() {
+  if (nycOutlineVisible && nycBoundaryData) {
+    renderNycOutline();
+  }
+}
+
+// Override toggleLines to also update NYC outline
+const originalToggleLines = toggleLines;
+toggleLines = function() {
+  originalToggleLines();
+  updateNycOutlineOnSettingsChange();
+};
+
 // Initialize on page load
 (async function initialize() {
   // Initialize model selector
@@ -2163,6 +2338,9 @@ function restoreSavedQuadrants() {
 
   // Initialize water highlight toggle
   initWaterHighlight();
+
+  // Initialize NYC outline toggle
+  initNycOutline();
 
   // Restore saved tool
   restoreSavedTool();

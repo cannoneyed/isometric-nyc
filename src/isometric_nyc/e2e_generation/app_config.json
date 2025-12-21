@@ -1,9 +1,17 @@
 {
   "models": [
     {
-      "name": "Local",
-      "model_id": "local",
+      "name": "Local 1",
+      "model_id": "local_01",
       "endpoint": "http://localhost:8888/edit-b64",
+      "num_inference_steps": 15,
+      "model_type": "local",
+      "use_base64": true
+    },
+    {
+      "name": "Local 2",
+      "model_id": "local_02",
+      "endpoint": "http://localhost:8889/edit-b64",
       "num_inference_steps": 15,
       "model_type": "local",
       "use_base64": true
@@ -33,5 +41,5 @@
       "model_type": "oxen"
     }
   ],
-  "default_model_id": "local"
+  "default_model_id": "local_01"
 }
