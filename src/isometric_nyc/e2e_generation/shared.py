@@ -13,14 +13,25 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from io import BytesIO
 from pathlib import Path
+from urllib.parse import urlencode
 
 from google.cloud import storage
 from PIL import Image
+from playwright.sync_api import sync_playwright
 
 # Web server configuration
 WEB_DIR = Path(__file__).parent.parent.parent / "web"
 DEFAULT_WEB_PORT = 5173
+
+# Shared Chromium args for Playwright rendering
+CHROMIUM_ARGS = [
+  "--enable-webgl",
+  "--use-gl=angle",
+  "--ignore-gpu-blocklist",
+  "--remote-debugging-port=0",
+]
 
 
 # =============================================================================
@@ -107,6 +118,129 @@ def start_web_server(web_dir: Path, port: int) -> subprocess.Popen:
     print("   ⚠️  Server may not be fully ready, continuing anyway...")
 
   return process
+
+
+# =============================================================================
+# Playwright Rendering
+# =============================================================================
+
+
+def render_url_to_bytes(
+  url: str,
+  width: int,
+  height: int,
+  wait_for_tiles: bool = True,
+  timeout_ms: int = 60000,
+) -> bytes:
+  """
+  Render a URL to PNG bytes using Playwright.
+
+  This is a shared utility for rendering web pages to images with consistent
+  Chromium configuration across all scripts.
+
+  Args:
+      url: The URL to render
+      width: Viewport width in pixels
+      height: Viewport height in pixels
+      wait_for_tiles: Whether to wait for window.TILES_LOADED === true
+      timeout_ms: Timeout for waiting for tiles in milliseconds
+
+  Returns:
+      PNG image bytes
+  """
+  with sync_playwright() as p:
+    browser = p.chromium.launch(
+      headless=True,
+      args=CHROMIUM_ARGS,
+    )
+
+    context = browser.new_context(
+      viewport={"width": width, "height": height},
+      device_scale_factor=1,
+    )
+    page = context.new_page()
+
+    page.goto(url, wait_until="networkidle")
+
+    if wait_for_tiles:
+      try:
+        page.wait_for_function("window.TILES_LOADED === true", timeout=timeout_ms)
+      except Exception:
+        print("      ⚠️  Timeout waiting for tiles, continuing anyway...")
+
+    screenshot_bytes = page.screenshot(type="png")
+
+    page.close()
+    context.close()
+    browser.close()
+
+  return screenshot_bytes
+
+
+def render_url_to_image(
+  url: str,
+  width: int,
+  height: int,
+  wait_for_tiles: bool = True,
+  timeout_ms: int = 60000,
+) -> Image.Image:
+  """
+  Render a URL to a PIL Image using Playwright.
+
+  This is a convenience wrapper around render_url_to_bytes.
+
+  Args:
+      url: The URL to render
+      width: Viewport width in pixels
+      height: Viewport height in pixels
+      wait_for_tiles: Whether to wait for window.TILES_LOADED === true
+      timeout_ms: Timeout for waiting for tiles in milliseconds
+
+  Returns:
+      PIL Image
+  """
+  screenshot_bytes = render_url_to_bytes(url, width, height, wait_for_tiles, timeout_ms)
+  return Image.open(BytesIO(screenshot_bytes))
+
+
+def build_tile_render_url(
+  port: int,
+  lat: float,
+  lng: float,
+  width_px: int,
+  height_px: int,
+  azimuth: float,
+  elevation: float,
+  view_height: float,
+) -> str:
+  """
+  Build the URL for rendering a tile at the given coordinates.
+
+  Args:
+      port: Web server port
+      lat: Latitude of the tile center
+      lng: Longitude of the tile center
+      width_px: Viewport width
+      height_px: Viewport height
+      azimuth: Camera azimuth in degrees
+      elevation: Camera elevation in degrees
+      view_height: View height in meters
+
+  Returns:
+      URL string for rendering
+  """
+  params = {
+    "export": "true",
+    "lat": lat,
+    "lon": lng,
+    "width": width_px,
+    "height": height_px,
+    "azimuth": azimuth,
+    "elevation": elevation,
+    "view_height": view_height,
+  }
+  query_string = urlencode(params)
+  return f"http://localhost:{port}/?{query_string}"
 
 
 # =============================================================================

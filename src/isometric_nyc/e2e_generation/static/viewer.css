@@ -506,6 +506,11 @@ body.generating .tile.queued.selectable {
   cursor: wait;
 }
 
+.export-btn.loading {
+  background: #666;
+  cursor: wait;
+}
+
 .generate-rect-btn .spinner {
   display: inline-block;
   width: 10px;

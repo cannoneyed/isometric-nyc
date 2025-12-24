@@ -136,6 +136,11 @@ def get_default_config() -> AppConfig:
         api_key_env="OXEN_OMNI_WATER_V2_API_KEY",
       ),
       ModelConfig(
+        name="Omni Terrain v2",
+        model_id="cannoneyed-dark-copper-flea",
+        api_key_env="OXEN_OMNI_WATER_V2_API_KEY",
+      ),
+      ModelConfig(
         name="Omni (Original)",
         model_id="cannoneyed-gentle-gold-antlion",
         api_key_env="OXEN_OMNI_API_KEY",

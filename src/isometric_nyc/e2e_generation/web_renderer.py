@@ -20,6 +20,7 @@ from PIL import Image
 from playwright.sync_api import sync_playwright
 
 from isometric_nyc.e2e_generation.shared import (
+  CHROMIUM_ARGS,
   DEFAULT_WEB_PORT,
   WEB_DIR,
   image_to_png_bytes,
@@ -223,14 +224,7 @@ class WebRenderer:
 
     # Render using Playwright
     with sync_playwright() as p:
-      browser = p.chromium.launch(
-        headless=True,
-        args=[
-          "--enable-webgl",
-          "--use-gl=angle",
-          "--ignore-gpu-blocklist",
-        ],
-      )
+      browser = p.chromium.launch(headless=True, args=CHROMIUM_ARGS)
 
       context = browser.new_context(
         viewport={"width": request.width_px, "height": request.height_px},

@@ -19,7 +19,10 @@ def load_bounds(bounds_path: Path | str | None = None) -> dict[str, Any]:
 
   Args:
       bounds_path: Path to the bounds JSON file. If None, loads the default
-                  NYC boundary.
+                  NYC boundary. Can be:
+                  - An absolute path
+                  - A relative path from current directory
+                  - A filename in the bounds directory (e.g., "v0_bounds.json")
 
   Returns:
       GeoJSON dictionary with the boundary features.
@@ -33,8 +36,14 @@ def load_bounds(bounds_path: Path | str | None = None) -> dict[str, Any]:
   elif isinstance(bounds_path, str):
     bounds_path = Path(bounds_path)
 
+  # If the path doesn't exist, try looking in the bounds directory
   if not bounds_path.exists():
-    raise FileNotFoundError(f"Bounds file not found: {bounds_path}")
+    # Try as a filename within the bounds directory
+    bounds_in_dir = BOUNDS_DIR / bounds_path.name
+    if bounds_in_dir.exists():
+      bounds_path = bounds_in_dir
+    else:
+      raise FileNotFoundError(f"Bounds file not found: {bounds_path}")
 
   with open(bounds_path) as f:
     return json.load(f)

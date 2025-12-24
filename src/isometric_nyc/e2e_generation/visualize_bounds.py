@@ -28,6 +28,7 @@ from urllib.parse import urlencode
 from playwright.sync_api import sync_playwright
 
 from isometric_nyc.e2e_generation.shared import (
+  CHROMIUM_ARGS,
   DEFAULT_WEB_PORT,
   WEB_DIR,
   calculate_offset,
@@ -301,14 +302,7 @@ def render_bounds(
   print(f"   URL: {url}")
 
   with sync_playwright() as p:
-    browser = p.chromium.launch(
-      headless=True,
-      args=[
-        "--enable-webgl",
-        "--use-gl=angle",
-        "--ignore-gpu-blocklist",
-      ],
-    )
+    browser = p.chromium.launch(headless=True, args=CHROMIUM_ARGS)
 
     context = browser.new_context(
       viewport={"width": view_params["width"], "height": view_params["height"]},

@@ -15,18 +15,16 @@ The tile rendered will have quadrant (x, y) in its top-left, with (x+1, y),
 import argparse
 import sqlite3
 from pathlib import Path
-from urllib.parse import urlencode
-
-from PIL import Image
-from playwright.sync_api import sync_playwright
 
 from isometric_nyc.e2e_generation.shared import (
   DEFAULT_WEB_PORT,
   WEB_DIR,
+  build_tile_render_url,
   check_all_quadrants_rendered,
   ensure_quadrant_exists,
   get_generation_config,
   image_to_png_bytes,
+  render_url_to_image,
   save_quadrant_render,
   split_tile_into_quadrants,
   start_web_server,
@@ -86,62 +84,30 @@ def render_quadrant_tile(
     # Output path for full tile
     output_path = renders_dir / f"render_{x}_{y}.png"
 
-    # Build URL parameters - center on the quadrant's anchor
-    params = {
-      "export": "true",
-      "lat": quadrant["lat"],
-      "lon": quadrant["lng"],
-      "width": config["width_px"],
-      "height": config["height_px"],
-      "azimuth": config["camera_azimuth_degrees"],
-      "elevation": config["camera_elevation_degrees"],
-      "view_height": config.get("view_height_meters", 200),
-    }
-    query_string = urlencode(params)
-    url = f"http://localhost:{port}/?{query_string}"
+    # Build URL using shared utility
+    url = build_tile_render_url(
+      port=port,
+      lat=quadrant["lat"],
+      lng=quadrant["lng"],
+      width_px=config["width_px"],
+      height_px=config["height_px"],
+      azimuth=config["camera_azimuth_degrees"],
+      elevation=config["camera_elevation_degrees"],
+      view_height=config.get("view_height_meters", 200),
+    )
 
-    # Render using Playwright
+    # Render using shared utility
     print("\n🌐 Rendering via web viewer...")
     print(f"   URL: {url}")
 
-    with sync_playwright() as p:
-      browser = p.chromium.launch(
-        headless=True,
-        args=[
-          "--enable-webgl",
-          "--use-gl=angle",
-          "--ignore-gpu-blocklist",
-        ],
-      )
+    tile_image = render_url_to_image(url, config["width_px"], config["height_px"])
 
-      context = browser.new_context(
-        viewport={"width": config["width_px"], "height": config["height_px"]},
-        device_scale_factor=1,
-      )
-      page = context.new_page()
-
-      # Navigate to the page
-      page.goto(url, wait_until="networkidle")
-
-      # Wait for tiles to load
-      try:
-        page.wait_for_function("window.TILES_LOADED === true", timeout=60000)
-      except Exception as e:
-        print(f"   ⚠️  Timeout waiting for tiles: {e}")
-        print("   📸 Taking screenshot anyway...")
-
-      # Take screenshot
-      page.screenshot(path=str(output_path))
-
-      page.close()
-      context.close()
-      browser.close()
-
+    # Save full tile
+    tile_image.save(output_path)
     print(f"✅ Rendered full tile to {output_path}")
 
     # Split tile into quadrants and save to database
     print("\n💾 Saving quadrants to database...")
-    tile_image = Image.open(output_path)
     quadrant_images = split_tile_into_quadrants(tile_image)
 
     # Map (dx, dy) offsets to absolute quadrant positions

@@ -1243,6 +1243,9 @@ function updateSelectionStatus(serverStatus = null) {
   // Export Cmd requires exactly 2 selected
   const exportCmdBtn = document.getElementById("exportCmdBtn");
   if (exportCmdBtn) exportCmdBtn.disabled = count !== 2;
+  // Export requires exactly 2 selected
+  const exportBtn = document.getElementById("exportBtn");
+  if (exportBtn) exportBtn.disabled = count !== 2;
 }
 
 // Toast notification system
@@ -1301,8 +1304,45 @@ async function deleteSelected() {
   const dataType = isRenderMode ? "render" : "generation";
   const apiEndpoint = isRenderMode ? "/api/delete-render" : "/api/delete";
 
+  let quadrantsToDelete = coords;
+
+  // If exactly 2 quadrants selected, offer to delete the full rectangle
+  if (coords.length === 2) {
+    const minX = Math.min(coords[0][0], coords[1][0]);
+    const maxX = Math.max(coords[0][0], coords[1][0]);
+    const minY = Math.min(coords[0][1], coords[1][1]);
+    const maxY = Math.max(coords[0][1], coords[1][1]);
+
+    const width = maxX - minX + 1;
+    const height = maxY - minY + 1;
+    const totalQuadrants = width * height;
+
+    // Only offer rectangle deletion if it would include more than the 2 selected
+    if (totalQuadrants > 2) {
+      const rectangleChoice = confirm(
+        `You've selected 2 corners defining a ${width}×${height} rectangle.\n\n` +
+        `Do you want to delete ALL ${totalQuadrants} quadrant(s) in this rectangle?\n\n` +
+        `Click OK to delete the full rectangle.\n` +
+        `Click Cancel to delete only the 2 selected quadrants.`
+      );
+
+      if (rectangleChoice) {
+        // Build array of all quadrants in the rectangle
+        quadrantsToDelete = [];
+        for (let x = minX; x <= maxX; x++) {
+          for (let y = minY; y <= maxY; y++) {
+            quadrantsToDelete.push([x, y]);
+          }
+        }
+        console.log(`Deleting rectangle from (${minX},${minY}) to (${maxX},${maxY}): ${quadrantsToDelete.length} quadrants`);
+      }
+    }
+  }
+
   // Confirm deletion
-  const coordsStr = coords.map(([x, y]) => `(${x},${y})`).join(", ");
+  const coordsStr = quadrantsToDelete.length <= 4
+    ? quadrantsToDelete.map(([x, y]) => `(${x},${y})`).join(", ")
+    : `${quadrantsToDelete.length} quadrants`;
   if (!confirm(`Delete ${dataType} data for ${coordsStr}?`)) {
     return;
   }
@@ -1311,7 +1351,7 @@ async function deleteSelected() {
     const response = await fetch(apiEndpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ quadrants: coords }),
+      body: JSON.stringify({ quadrants: quadrantsToDelete }),
     });
 
     const result = await response.json();
@@ -1825,6 +1865,116 @@ async function copyExportCommand() {
       "Copy failed",
       "Could not copy to clipboard. Check browser permissions."
     );
+  }
+}
+
+async function exportSelected() {
+  if (selectedQuadrants.size !== 2) {
+    showToast(
+      "error",
+      "Invalid selection",
+      "Please select exactly 2 quadrants to define the export bounds."
+    );
+    return;
+  }
+
+  // Get the two selected coordinates
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return { x, y };
+  });
+
+  // Calculate rectangle bounds (top-left and bottom-right)
+  const minX = Math.min(coords[0].x, coords[1].x);
+  const maxX = Math.max(coords[0].x, coords[1].x);
+  const minY = Math.min(coords[0].y, coords[1].y);
+  const maxY = Math.max(coords[0].y, coords[1].y);
+
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const totalQuadrants = width * height;
+
+  // Check if we're in render view mode
+  const useRender = document.getElementById("showRender")?.checked || false;
+  const dataType = useRender ? "renders" : "generations";
+
+  console.log(
+    `Exporting ${dataType} from (${minX},${minY}) to (${maxX},${maxY}) (${width}x${height} = ${totalQuadrants} quadrants)`
+  );
+
+  // Show loading state
+  const btn = document.getElementById("exportBtn");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  btn.innerHTML = 'Exporting...<span class="spinner"></span>';
+
+  showToast(
+    "loading",
+    "Exporting...",
+    `Creating ${width}×${height} image from ${totalQuadrants} quadrant(s)`
+  );
+
+  try {
+    const response = await fetch("/api/export", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        tl: [minX, minY],
+        br: [maxX, maxY],
+        use_render: useRender,
+      }),
+    });
+
+    clearLoadingToasts();
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || "Export failed");
+    }
+
+    // Get the filename from Content-Disposition header or create one
+    const contentDisposition = response.headers.get("Content-Disposition");
+    let filename = `export_tl_${minX}_${minY}_br_${maxX}_${maxY}.png`;
+    if (contentDisposition) {
+      const match = contentDisposition.match(/filename=(.+)/);
+      if (match) {
+        filename = match[1];
+      }
+    }
+
+    // Download the file
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+
+    showToast(
+      "success",
+      "Export complete!",
+      `Downloaded ${filename} (${width}×${height} quadrants)`
+    );
+    console.log("Export downloaded:", filename);
+
+    // Reset button
+    btn.classList.remove("loading");
+    btn.innerHTML = "Export";
+    btn.disabled = selectedQuadrants.size !== 2;
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Export error:", error);
+    showToast("error", "Export failed", error.message);
+
+    // Reset button
+    btn.classList.remove("loading");
+    btn.innerHTML = "Export";
+    btn.disabled = selectedQuadrants.size !== 2;
   }
 }
 

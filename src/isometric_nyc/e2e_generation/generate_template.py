@@ -26,10 +26,8 @@ import argparse
 import re
 import sqlite3
 from pathlib import Path
-from urllib.parse import urlencode
 
 from PIL import Image
-from playwright.sync_api import sync_playwright
 
 from isometric_nyc.e2e_generation.infill_template import (
   TEMPLATE_SIZE,
@@ -41,12 +39,14 @@ from isometric_nyc.e2e_generation.infill_template import (
 from isometric_nyc.e2e_generation.shared import (
   DEFAULT_WEB_PORT,
   WEB_DIR,
+  build_tile_render_url,
   ensure_quadrant_exists,
   get_generation_config,
   get_quadrant_generation,
   get_quadrant_render,
   image_to_png_bytes,
   png_bytes_to_image,
+  render_url_to_image,
   save_quadrant_render,
   split_tile_into_quadrants,
   start_web_server,
@@ -164,55 +164,19 @@ def render_quadrant(
   print(f"   🎨 Rendering tile for quadrant ({x}, {y})...")
   print(f"      Anchor: {quadrant['lat']:.6f}, {quadrant['lng']:.6f}")
 
-  # Build URL for rendering
-  params = {
-    "export": "true",
-    "lat": quadrant["lat"],
-    "lon": quadrant["lng"],
-    "width": config["width_px"],
-    "height": config["height_px"],
-    "azimuth": config["camera_azimuth_degrees"],
-    "elevation": config["camera_elevation_degrees"],
-    "view_height": config.get("view_height_meters", 200),
-  }
-  query_string = urlencode(params)
-  url = f"http://localhost:{port}/?{query_string}"
+  # Build URL and render using shared utilities
+  url = build_tile_render_url(
+    port=port,
+    lat=quadrant["lat"],
+    lng=quadrant["lng"],
+    width_px=config["width_px"],
+    height_px=config["height_px"],
+    azimuth=config["camera_azimuth_degrees"],
+    elevation=config["camera_elevation_degrees"],
+    view_height=config.get("view_height_meters", 200),
+  )
 
-  # Render using Playwright
-  with sync_playwright() as p:
-    browser = p.chromium.launch(
-      headless=True,
-      args=[
-        "--enable-webgl",
-        "--use-gl=angle",
-        "--ignore-gpu-blocklist",
-      ],
-    )
-
-    context = browser.new_context(
-      viewport={"width": config["width_px"], "height": config["height_px"]},
-      device_scale_factor=1,
-    )
-    page = context.new_page()
-
-    page.goto(url, wait_until="networkidle")
-
-    try:
-      page.wait_for_function("window.TILES_LOADED === true", timeout=60000)
-    except Exception:
-      print("      ⚠️  Timeout waiting for tiles, continuing anyway...")
-
-    # Take screenshot as bytes
-    screenshot_bytes = page.screenshot()
-
-    page.close()
-    context.close()
-    browser.close()
-
-  # Load the full tile image
-  import io
-
-  tile_image = Image.open(io.BytesIO(screenshot_bytes))
+  tile_image = render_url_to_image(url, config["width_px"], config["height_px"])
 
   # Split into quadrants and save all to database
   quadrant_images = split_tile_into_quadrants(tile_image)

@@ -18,15 +18,12 @@ import os
 import re
 import sqlite3
 import tempfile
-from io import BytesIO
 from pathlib import Path
 from typing import Callable
-from urllib.parse import urlencode
 
 import requests
 from dotenv import load_dotenv
 from PIL import Image
-from playwright.sync_api import sync_playwright
 
 from isometric_nyc.e2e_generation.infill_template import (
   QUADRANT_SIZE,
@@ -36,19 +33,23 @@ from isometric_nyc.e2e_generation.infill_template import (
 )
 from isometric_nyc.e2e_generation.shared import (
   DEFAULT_WEB_PORT,
+  build_tile_render_url,
   ensure_quadrant_exists,
-  image_to_png_bytes,
-  png_bytes_to_image,
-  save_quadrant_generation,
-  save_quadrant_render,
-  split_tile_into_quadrants,
-  upload_to_gcs,
 )
 from isometric_nyc.e2e_generation.shared import (
   get_quadrant_generation as shared_get_quadrant_generation,
 )
 from isometric_nyc.e2e_generation.shared import (
   get_quadrant_render as shared_get_quadrant_render,
+)
+from isometric_nyc.e2e_generation.shared import (
+  image_to_png_bytes,
+  png_bytes_to_image,
+  render_url_to_image,
+  save_quadrant_generation,
+  save_quadrant_render,
+  split_tile_into_quadrants,
+  upload_to_gcs,
 )
 
 # Load environment variables
@@ -183,9 +184,20 @@ def call_local_api_b64(
       image = rgb_image
     image.save(img_buffer, format="JPEG", quality=jpeg_quality, optimize=True)
     img_format = "JPEG"
+    tmp_ext = ".jpg"
   else:
     image.save(img_buffer, format="PNG")
     img_format = "PNG"
+    tmp_ext = ".png"
+
+  # Save temp image for debugging before encoding to base64
+  tmp_file = tempfile.NamedTemporaryFile(
+    delete=False, suffix=f"_local_api_input{tmp_ext}", prefix="isometric_"
+  )
+  tmp_file.write(img_buffer.getvalue())
+  tmp_file.close()
+  print(f"   💾 Saved temp image for debugging: {tmp_file.name}")
+
   image_b64 = base64.b64encode(img_buffer.getvalue()).decode()
 
   # Prepare JSON payload
@@ -213,14 +225,25 @@ def call_local_api_b64(
   result = response.json()
 
   if "image_b64" not in result:
-    raise ValueError(f"Expected 'image_b64' in response, got keys: {list(result.keys())}")
+    raise ValueError(
+      f"Expected 'image_b64' in response, got keys: {list(result.keys())}"
+    )
 
   result_b64 = result["image_b64"]
   print(f"   ✓ Received {len(result_b64)} bytes (base64) from local API")
   print(f"   ⏱️  Generation took {elapsed_time:.1f}s")
 
   # Decode base64 to PIL Image
-  return Image.open(BytesIO(base64.b64decode(result_b64)))
+  result_image = Image.open(BytesIO(base64.b64decode(result_b64)))
+
+  # Save generated image to temp file for debugging
+  tmp_output = tempfile.NamedTemporaryFile(
+    delete=False, suffix="_local_api_output.png", prefix="isometric_"
+  )
+  result_image.save(tmp_output.name, format="PNG")
+  print(f"   💾 Saved generated image for debugging: {tmp_output.name}")
+
+  return result_image
 
 
 def call_local_api(
@@ -480,6 +503,7 @@ def download_image_to_pil(
       requests.HTTPError: If all retry attempts fail
   """
   import time
+  from io import BytesIO
 
   last_error = None
 
@@ -543,53 +567,19 @@ def render_quadrant(
 
   print(f"   🎨 Rendering tile for quadrant ({x}, {y})...")
 
-  # Build URL for rendering
-  params = {
-    "export": "true",
-    "lat": quadrant["lat"],
-    "lon": quadrant["lng"],
-    "width": config["width_px"],
-    "height": config["height_px"],
-    "azimuth": config["camera_azimuth_degrees"],
-    "elevation": config["camera_elevation_degrees"],
-    "view_height": config.get("view_height_meters", 200),
-  }
-  query_string = urlencode(params)
-  url = f"http://localhost:{port}/?{query_string}"
+  # Build URL and render using shared utilities
+  url = build_tile_render_url(
+    port=port,
+    lat=quadrant["lat"],
+    lng=quadrant["lng"],
+    width_px=config["width_px"],
+    height_px=config["height_px"],
+    azimuth=config["camera_azimuth_degrees"],
+    elevation=config["camera_elevation_degrees"],
+    view_height=config.get("view_height_meters", 200),
+  )
 
-  # Render using Playwright
-  with sync_playwright() as p:
-    browser = p.chromium.launch(
-      headless=True,
-      args=[
-        "--enable-webgl",
-        "--use-gl=angle",
-        "--ignore-gpu-blocklist",
-      ],
-    )
-
-    context = browser.new_context(
-      viewport={"width": config["width_px"], "height": config["height_px"]},
-      device_scale_factor=1,
-    )
-    page = context.new_page()
-
-    page.goto(url, wait_until="networkidle")
-
-    try:
-      page.wait_for_function("window.TILES_LOADED === true", timeout=60000)
-    except Exception:
-      print("      ⚠️  Timeout waiting for tiles, continuing anyway...")
-
-    # Get screenshot as bytes
-    screenshot_bytes = page.screenshot(type="png")
-
-    page.close()
-    context.close()
-    browser.close()
-
-  # Open as PIL image and split into quadrants
-  full_tile = Image.open(BytesIO(screenshot_bytes))
+  full_tile = render_url_to_image(url, config["width_px"], config["height_px"])
   quadrant_images = split_tile_into_quadrants(full_tile)
 
   # Save all quadrants to database

@@ -13,6 +13,10 @@ URL Parameters:
   coords - Show coordinates: 1=on, 0=off (default: 1)
   render - Show renders instead of generations: 1=renders, 0=generations (default: 0)
 
+Command-line flags:
+  --no-generate - Disable generation processing (queue items are preserved
+                  but not processed until the flag is removed)
+
 Keyboard shortcuts:
   Arrow keys - Navigate the grid
   L          - Toggle lines
@@ -149,6 +153,7 @@ generation_cancelled = False
 GENERATION_DIR: Path | None = None
 WEB_SERVER_PORT: int = DEFAULT_WEB_PORT
 APP_CONFIG: AppConfig | None = None
+NO_GENERATE_MODE: bool = False
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -739,14 +744,27 @@ def queue_worker():
   This worker supports parallel processing of different models - each model
   can have one active generation at a time, but different models can run
   concurrently.
+
+  If NO_GENERATE_MODE is enabled, the worker will not process any items but
+  will keep them preserved in the queue.
   """
   global generation_state, queue_worker_running, generation_cancelled
 
-  print("🔄 Queue worker started (parallel model support)")
+  if NO_GENERATE_MODE:
+    print(
+      "🔄 Queue worker started (NO-GENERATE MODE - queue preserved but not processed)"
+    )
+  else:
+    print("🔄 Queue worker started (parallel model support)")
 
   while queue_worker_running:
     conn = None
     try:
+      # If no-generate mode is enabled, just sleep and don't process anything
+      if NO_GENERATE_MODE:
+        time.sleep(1.0)
+        continue
+
       # Check if we were cancelled
       if generation_cancelled:
         print("⚠️  Generation cancelled, resetting flags...")
@@ -1148,12 +1166,12 @@ def api_delete():
   try:
     deleted_count = 0
     for qx, qy in quadrants:
-      # Clear the generation column (set to NULL) but keep the row
+      # Clear the generation column (set to NULL) and also clear flagged status
       # Columns are quadrant_x and quadrant_y
       cursor = conn.execute(
         """
         UPDATE quadrants
-        SET generation = NULL
+        SET generation = NULL, flagged = 0
         WHERE quadrant_x = ? AND quadrant_y = ?
         """,
         (qx, qy),
@@ -1194,11 +1212,11 @@ def api_delete_render():
   try:
     deleted_count = 0
     for qx, qy in quadrants:
-      # Clear the render column (set to NULL) but keep the row
+      # Clear the render column (set to NULL) and also clear flagged status
       cursor = conn.execute(
         """
         UPDATE quadrants
-        SET render = NULL
+        SET render = NULL, flagged = 0
         WHERE quadrant_x = ? AND quadrant_y = ?
         """,
         (qx, qy),
@@ -1728,6 +1746,155 @@ def load_queued_quadrants(conn: sqlite3.Connection) -> set[Point]:
   return queued
 
 
+@app.route("/api/export", methods=["POST"])
+def api_export():
+  """
+  API endpoint to export a rectangular region of quadrants as a single PNG image.
+
+  Request body:
+    {
+      "tl": [x, y] or {"x": x, "y": y},  // Top-left corner
+      "br": [x, y] or {"x": x, "y": y},  // Bottom-right corner
+      "use_render": false                 // Optional: export render instead of generation
+    }
+
+  Returns:
+    PNG image as attachment download
+  """
+  import io
+
+  from PIL import Image
+
+  from isometric_nyc.e2e_generation.shared import (
+    get_quadrant_generation,
+    png_bytes_to_image,
+  )
+
+  # Parse request
+  data = request.get_json()
+  if not data:
+    return jsonify({"success": False, "error": "No JSON body provided"}), 400
+
+  # Parse top-left coordinate
+  tl_raw = data.get("tl")
+  if not tl_raw:
+    return jsonify(
+      {"success": False, "error": "Missing 'tl' (top-left) coordinate"}
+    ), 400
+
+  try:
+    if isinstance(tl_raw, list) and len(tl_raw) == 2:
+      tl_x, tl_y = int(tl_raw[0]), int(tl_raw[1])
+    elif isinstance(tl_raw, dict) and "x" in tl_raw and "y" in tl_raw:
+      tl_x, tl_y = int(tl_raw["x"]), int(tl_raw["y"])
+    else:
+      return jsonify({"success": False, "error": f"Invalid 'tl' format: {tl_raw}"}), 400
+  except (ValueError, TypeError) as e:
+    return jsonify({"success": False, "error": f"Invalid 'tl' coordinate: {e}"}), 400
+
+  # Parse bottom-right coordinate
+  br_raw = data.get("br")
+  if not br_raw:
+    return jsonify(
+      {"success": False, "error": "Missing 'br' (bottom-right) coordinate"}
+    ), 400
+
+  try:
+    if isinstance(br_raw, list) and len(br_raw) == 2:
+      br_x, br_y = int(br_raw[0]), int(br_raw[1])
+    elif isinstance(br_raw, dict) and "x" in br_raw and "y" in br_raw:
+      br_x, br_y = int(br_raw["x"]), int(br_raw["y"])
+    else:
+      return jsonify({"success": False, "error": f"Invalid 'br' format: {br_raw}"}), 400
+  except (ValueError, TypeError) as e:
+    return jsonify({"success": False, "error": f"Invalid 'br' coordinate: {e}"}), 400
+
+  # Validate bounds
+  if tl_x > br_x or tl_y > br_y:
+    return jsonify(
+      {
+        "success": False,
+        "error": "Invalid bounds: top-left must be above and to the left of bottom-right",
+      }
+    ), 400
+
+  use_render = data.get("use_render", False)
+  data_type = "render" if use_render else "generation"
+
+  width_count = br_x - tl_x + 1
+  height_count = br_y - tl_y + 1
+
+  print(f"\n{'=' * 60}")
+  print(
+    f"📤 Export request: ({tl_x},{tl_y}) to ({br_x},{br_y}) "
+    f"({width_count}x{height_count} quadrants, {data_type})"
+  )
+  print(f"{'=' * 60}")
+
+  conn = get_db_connection()
+  try:
+    quadrant_images: dict[tuple[int, int], Image.Image] = {}
+    missing_quadrants = []
+
+    for dy in range(height_count):
+      for dx in range(width_count):
+        qx, qy = tl_x + dx, tl_y + dy
+
+        # Get the appropriate data (render or generation)
+        if use_render:
+          img_bytes = get_quadrant_render(qx, qy)
+        else:
+          img_bytes = get_quadrant_generation(conn, qx, qy)
+
+        if img_bytes is None:
+          missing_quadrants.append((qx, qy))
+        else:
+          quadrant_images[(dx, dy)] = png_bytes_to_image(img_bytes)
+          print(f"   ✓ Quadrant ({qx}, {qy})")
+
+    if missing_quadrants:
+      print(
+        f"❌ Export failed: Missing {data_type} for {len(missing_quadrants)} quadrant(s)"
+      )
+      return jsonify(
+        {
+          "success": False,
+          "error": f"Missing {data_type} for quadrants: {missing_quadrants}",
+        }
+      ), 400
+
+    # Stitch quadrants into a single image
+    sample_quad = next(iter(quadrant_images.values()))
+    quad_w, quad_h = sample_quad.size
+
+    tile_image = Image.new("RGBA", (quad_w * width_count, quad_h * height_count))
+    for (dx, dy), quad_img in quadrant_images.items():
+      pos = (dx * quad_w, dy * quad_h)
+      tile_image.paste(quad_img, pos)
+
+    # Convert to PNG bytes
+    buffer = io.BytesIO()
+    tile_image.save(buffer, format="PNG")
+    buffer.seek(0)
+
+    # Generate filename
+    filename = f"export_tl_{tl_x}_{tl_y}_br_{br_x}_{br_y}.png"
+
+    print(f"✅ Export complete: {tile_image.size[0]}x{tile_image.size[1]} pixels")
+
+    return Response(
+      buffer.getvalue(),
+      mimetype="image/png",
+      headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+  except Exception as e:
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
+  finally:
+    conn.close()
+
+
 @app.route("/api/generate-rectangle", methods=["POST"])
 def api_generate_rectangle():
   """
@@ -1877,7 +2044,7 @@ def api_generate_rectangle():
 
 
 def main():
-  global GENERATION_DIR, WEB_SERVER_PORT, APP_CONFIG, BOUNDARY_GEOJSON
+  global GENERATION_DIR, WEB_SERVER_PORT, APP_CONFIG, BOUNDARY_GEOJSON, NO_GENERATE_MODE
 
   parser = argparse.ArgumentParser(description="View generated tiles in a grid.")
   parser.add_argument(
@@ -1914,11 +2081,18 @@ def main():
     default=None,
     help="Path to custom bounds GeoJSON file (default: NYC boundary)",
   )
+  parser.add_argument(
+    "--no-generate",
+    action="store_true",
+    default=False,
+    help="Disable generation processing (queue items are preserved but not processed)",
+  )
 
   args = parser.parse_args()
 
   GENERATION_DIR = args.generation_dir.resolve()
   WEB_SERVER_PORT = args.web_port
+  NO_GENERATE_MODE = args.no_generate
 
   if not GENERATION_DIR.exists():
     print(f"❌ Error: Directory not found: {GENERATION_DIR}")
@@ -1975,6 +2149,8 @@ def main():
   print(f"   Generation dir: {GENERATION_DIR}")
   print(f"   Flask server: http://{args.host}:{args.port}/")
   print(f"   Web render port: {WEB_SERVER_PORT}")
+  if NO_GENERATE_MODE:
+    print("   ⚠️  NO-GENERATE MODE: Queue items preserved but not processed")
   print("   Press Ctrl+C to stop")
 
   try:

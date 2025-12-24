@@ -14,13 +14,17 @@ Usage:
   # Generate a 2x2 tile anchored at (0,0):
   uv run python src/isometric_nyc/e2e_generation/generate_tile_nano_banana.py <gen_dir> 0 0
 
-  # Generate arbitrary quadrants (context auto-calculated):
+  # Generate arbitrary quadrants (context auto-calculated) - comma-separated:
   uv run python src/isometric_nyc/e2e_generation/generate_tile_nano_banana.py <gen_dir> \\
     --quadrants "(0,0),(1,0),(0,1)"
 
+  # Generate arbitrary quadrants (context auto-calculated) - multiple args:
+  uv run python src/isometric_nyc/e2e_generation/generate_tile_nano_banana.py <gen_dir> \\
+    --quadrants "(0,0)" "(1,0)" "(0,1)"
+
   # Generate quadrants with explicit context:
   uv run python src/isometric_nyc/e2e_generation/generate_tile_nano_banana.py <gen_dir> \\
-    --quadrants "(2,2)" --context "(1,2),(2,1),(1,1)"
+    --quadrants "(2,2)" --context "(1,2)" "(2,1)" "(1,1)"
 
   # Generate a single quadrant with target position (legacy 2x2 context):
   uv run python src/isometric_nyc/e2e_generation/generate_tile_nano_banana.py <gen_dir> 0 0 -t br
@@ -31,20 +35,17 @@ Reference images can be specified with --references to provide style context:
 """
 
 import argparse
-import io
 import os
 import re
 import sqlite3
 import tempfile
 from pathlib import Path
 from typing import Callable
-from urllib.parse import urlencode
 
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 from PIL import Image
-from playwright.sync_api import sync_playwright
 
 from isometric_nyc.e2e_generation.infill_template import (
   QUADRANT_SIZE,
@@ -55,12 +56,14 @@ from isometric_nyc.e2e_generation.infill_template import (
 from isometric_nyc.e2e_generation.shared import (
   DEFAULT_WEB_PORT,
   WEB_DIR,
+  build_tile_render_url,
   ensure_quadrant_exists,
   get_generation_config,
   get_quadrant_generation,
   get_quadrant_render,
   image_to_png_bytes,
   png_bytes_to_image,
+  render_url_to_image,
   save_quadrant_generation,
   save_quadrant_render,
   split_tile_into_quadrants,
@@ -357,53 +360,19 @@ def render_quadrant(
 
   print(f"   🎨 Rendering tile for quadrant ({x}, {y})...")
 
-  # Build URL for rendering
-  params = {
-    "export": "true",
-    "lat": quadrant["lat"],
-    "lon": quadrant["lng"],
-    "width": config["width_px"],
-    "height": config["height_px"],
-    "azimuth": config["camera_azimuth_degrees"],
-    "elevation": config["camera_elevation_degrees"],
-    "view_height": config.get("view_height_meters", 200),
-  }
-  query_string = urlencode(params)
-  url = f"http://localhost:{port}/?{query_string}"
+  # Build URL and render using shared utilities
+  url = build_tile_render_url(
+    port=port,
+    lat=quadrant["lat"],
+    lng=quadrant["lng"],
+    width_px=config["width_px"],
+    height_px=config["height_px"],
+    azimuth=config["camera_azimuth_degrees"],
+    elevation=config["camera_elevation_degrees"],
+    view_height=config.get("view_height_meters", 200),
+  )
 
-  # Render using Playwright
-  with sync_playwright() as p:
-    browser = p.chromium.launch(
-      headless=True,
-      args=[
-        "--enable-webgl",
-        "--use-gl=angle",
-        "--ignore-gpu-blocklist",
-      ],
-    )
-
-    context = browser.new_context(
-      viewport={"width": config["width_px"], "height": config["height_px"]},
-      device_scale_factor=1,
-    )
-    page = context.new_page()
-
-    page.goto(url, wait_until="networkidle")
-
-    try:
-      page.wait_for_function("window.TILES_LOADED === true", timeout=60000)
-    except Exception:
-      print("      ⚠️  Timeout waiting for tiles, continuing anyway...")
-
-    # Get screenshot as bytes
-    screenshot_bytes = page.screenshot(type="png")
-
-    page.close()
-    context.close()
-    browser.close()
-
-  # Open as PIL image and split into quadrants
-  full_tile = Image.open(io.BytesIO(screenshot_bytes))
+  full_tile = render_url_to_image(url, config["width_px"], config["height_px"])
   quadrant_images = split_tile_into_quadrants(full_tile)
 
   # Save all quadrants to database
@@ -1034,11 +1003,14 @@ Examples:
   # Generate a single quadrant (0,0) with context from adjacent generated quadrants:
   %(prog)s generations/v01 0 0 -t br
 
-  # Generate arbitrary quadrants (context auto-calculated):
+  # Generate arbitrary quadrants (context auto-calculated) - comma-separated:
   %(prog)s generations/v01 --quadrants "(0,0),(1,0),(0,1)"
 
+  # Generate arbitrary quadrants (context auto-calculated) - multiple args:
+  %(prog)s generations/v01 --quadrants "(0,0)" "(1,0)" "(0,1)"
+
   # Generate quadrants with explicit context:
-  %(prog)s generations/v01 --quadrants "(2,2)" --context "(1,2),(2,1),(1,1)"
+  %(prog)s generations/v01 --quadrants "(2,2)" --context "(1,2)" "(2,1)" "(1,1)"
 """,
   )
   parser.add_argument(
@@ -1063,25 +1035,29 @@ Examples:
   parser.add_argument(
     "--quadrants",
     "-q",
+    nargs="+",
     type=str,
     default=None,
     help=(
-      "List of quadrant coordinates to generate in format '(x,y),(x,y),...'. "
+      "List of quadrant coordinates to generate. Accepts multiple formats: "
+      "1) Single string: --quadrants '(0,0),(1,0),(0,1)' "
+      "2) Multiple args: --quadrants '(0,0)' '(1,0)' '(0,1)'. "
       "When provided, ignores x, y, and --target-position. "
-      "Context quadrants are automatically calculated from adjacent generations. "
-      "Example: --quadrants '(0,0),(1,0),(0,1)'"
+      "Context quadrants are automatically calculated from adjacent generations."
     ),
   )
   parser.add_argument(
     "--context",
     "-c",
+    nargs="+",
     type=str,
     default=None,
     help=(
-      "List of context quadrant coordinates in format '(x,y),(x,y),...'. "
+      "List of context quadrant coordinates. Accepts multiple formats: "
+      "1) Single string: --context '(1,2),(2,1)' "
+      "2) Multiple args: --context '(1,2)' '(2,1)'. "
       "These quadrants will be used as surrounding context for generation. "
-      "If not provided, context is automatically calculated. "
-      "Example: --context '(1,2),(2,1)'"
+      "If not provided, context is automatically calculated."
     ),
   )
   parser.add_argument(
@@ -1144,21 +1120,43 @@ Examples:
     print(f"❌ Error: Not a directory: {generation_dir}")
     return 1
 
-  # Parse quadrants if provided
+  # Parse quadrants if provided (supports multiple args or comma-separated)
   quadrants_list = None
   if args.quadrants:
     try:
-      quadrants_list = parse_quadrant_list(args.quadrants)
+      quadrants_list = []
+      for quad_str in args.quadrants:
+        parsed = parse_quadrant_list(quad_str)
+        quadrants_list.extend(parsed)
+      # Remove duplicates while preserving order
+      seen = set()
+      unique_quadrants = []
+      for q in quadrants_list:
+        if q not in seen:
+          seen.add(q)
+          unique_quadrants.append(q)
+      quadrants_list = unique_quadrants
       print(f"📋 Parsed quadrants: {quadrants_list}")
     except ValueError as e:
       print(f"❌ Error parsing --quadrants: {e}")
       return 1
 
-  # Parse context if provided
+  # Parse context if provided (supports multiple args or comma-separated)
   context_list = None
   if args.context:
     try:
-      context_list = parse_quadrant_list(args.context)
+      context_list = []
+      for ctx_str in args.context:
+        parsed = parse_quadrant_list(ctx_str)
+        context_list.extend(parsed)
+      # Remove duplicates while preserving order
+      seen = set()
+      unique_context = []
+      for c in context_list:
+        if c not in seen:
+          seen.add(c)
+          unique_context.append(c)
+      context_list = unique_context
       print(f"📋 Parsed context: {context_list}")
     except ValueError as e:
       print(f"❌ Error parsing --context: {e}")

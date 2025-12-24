@@ -506,27 +506,26 @@ def main() -> None:
   if args.dry_run:
     print("\n🔍 DRY RUN - No files will be created\n")
 
-    if not args.test_only:
-      type_assignments = assign_generation_types(len(pairs), args.variants, rng)
+    type_assignments = assign_generation_types(len(pairs), args.variants, rng)
 
-      # Count types
-      type_counts: dict[str, int] = {}
-      for image_types in type_assignments:
-        for gen_type in image_types:
-          type_counts[gen_type] = type_counts.get(gen_type, 0) + 1
+    # Count types
+    type_counts: dict[str, int] = {}
+    for image_types in type_assignments:
+      for gen_type in image_types:
+        type_counts[gen_type] = type_counts.get(gen_type, 0) + 1
 
-      print("Type distribution:")
-      total = sum(type_counts.values())
-      for gen_type, count in sorted(type_counts.items()):
-        pct = (count / total) * 100 if total > 0 else 0
-        print(f"   {gen_type}: {count} ({pct:.1f}%)")
+    print("Type distribution:")
+    total = sum(type_counts.values())
+    for gen_type, count in sorted(type_counts.items()):
+      pct = (count / total) * 100 if total > 0 else 0
+      print(f"   {gen_type}: {count} ({pct:.1f}%)")
 
-      print("\nSample assignments:")
-      for i, (image_num, _, _) in enumerate(pairs[:3]):
-        print(f"   {image_num}:")
-        for j, gen_type in enumerate(type_assignments[i]):
-          suffix = VARIANT_SUFFIXES[j]
-          print(f"      {image_num}_{suffix}.png -> {gen_type}")
+    print("\nSample assignments:")
+    for i, (image_num, _, _) in enumerate(pairs[:3]):
+      print(f"   {image_num}:")
+      for j, gen_type in enumerate(type_assignments[i]):
+        suffix = VARIANT_SUFFIXES[j]
+        print(f"      {image_num}_{suffix}.png -> {gen_type}")
 
     sys.exit(0)
 

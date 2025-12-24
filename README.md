@@ -303,6 +303,64 @@ uv run python src/isometric_nyc/e2e_generation/debug_map.py generations/v01 -o .
 **Output example:** Shows coverage gaps, generation progress, and geographic
 extent of the current generation.
 
+### Bounds Editor
+
+The `create_bounds.py` script provides an interactive polygon editor for
+defining custom generation boundaries.
+
+```bash
+# Create new bounds
+uv run python src/isometric_nyc/e2e_generation/create_bounds.py generations/v01
+
+# Edit existing bounds file
+uv run python src/isometric_nyc/e2e_generation/create_bounds.py generations/v01 --load bounds/my-region.json
+
+# Custom port
+uv run python src/isometric_nyc/e2e_generation/create_bounds.py generations/v01 --port 8888
+```
+
+**Features:**
+
+- Interactive polygon editor on a Leaflet map
+- View generated and pending tiles overlaid on real NYC geography
+- NYC boundary displayed by default for reference
+- Drag vertices to reshape the boundary
+- Double-click on an edge to add a new vertex
+- Double-click on a vertex to delete it (minimum 3 vertices)
+- Self-intersection validation with warnings
+- Save boundaries to `e2e_generation/bounds/` directory
+
+**Controls:**
+
+| Action             | How                       |
+| ------------------ | ------------------------- |
+| Move vertex        | Drag the vertex marker    |
+| Add vertex         | Double-click on edge      |
+| Delete vertex      | Double-click on vertex    |
+| Reset to rectangle | Click "Reset" button      |
+| Clear all          | Click "Clear" button      |
+| Save               | Enter name, click "Save"  |
+
+### Custom Boundaries
+
+Both `debug_map.py` and `app.py` support custom boundary files:
+
+```bash
+# Debug map with custom bounds
+uv run python src/isometric_nyc/e2e_generation/debug_map.py generations/v01 --bounds bounds/my-region.json
+
+# Generation app with custom bounds
+uv run python src/isometric_nyc/e2e_generation/app.py generations/v01 --bounds bounds/my-region.json
+```
+
+Boundary files are stored in `src/isometric_nyc/e2e_generation/bounds/`:
+
+```
+bounds/
+├── nyc.json          # Default NYC borough boundaries
+└── my-region.json    # Custom region (created with bounds editor)
+```
+
 ---
 
 ## Development

@@ -3,13 +3,11 @@
 **Input Images:**
 - Image A (template with red border indicating infill area)
 - Image B (style reference 1)
-- Image C (style reference 2)
-- Image D (style reference 3)
 
 **Instructions:**
 
 1. Look at the red border in Image A - this marks the area to be filled with generated pixels.
-2. Study the style of Image B, Image C, Image D carefully - these show the exact visual style to match.
+2. Study the style of Image B carefully - these show the exact visual style to match.
 3. Fill the bordered area with pixel art that:
    - Matches the isometric pixel art style of the reference images exactly
    - Seamlessly blends with any surrounding context in Image A
@@ -23,3 +21,6 @@
 - Remove all traces of the red border
 - All sections must flow seamlessly into the surrounding area. There should be no hard edges, visible seams, or gaps.
 - The infilled region MUST PERFECTLY BLEND INTO THE SURROUNDING AREA.
+
+**Additional Instructions:**
+Ensure the trees are simple blobs, and use a limited color palette

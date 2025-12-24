@@ -13,14 +13,15 @@ The assembled image will be saved as renders/check_tiles_assembled.png
 import argparse
 import sqlite3
 from pathlib import Path
-from urllib.parse import urlencode
 
 from PIL import Image
 from playwright.sync_api import sync_playwright
 
 from isometric_nyc.e2e_generation.shared import (
+  CHROMIUM_ARGS,
   DEFAULT_WEB_PORT,
   WEB_DIR,
+  build_tile_render_url,
   get_generation_config,
   get_quadrant,
   start_web_server,
@@ -35,18 +36,16 @@ def render_tile(
   port: int,
 ) -> bool:
   """Render a single tile using Playwright."""
-  params = {
-    "export": "true",
-    "lat": quadrant["lat"],
-    "lon": quadrant["lng"],
-    "width": config["width_px"],
-    "height": config["height_px"],
-    "azimuth": config["camera_azimuth_degrees"],
-    "elevation": config["camera_elevation_degrees"],
-    "view_height": config.get("view_height_meters", 200),
-  }
-  query_string = urlencode(params)
-  url = f"http://localhost:{port}/?{query_string}"
+  url = build_tile_render_url(
+    port=port,
+    lat=quadrant["lat"],
+    lng=quadrant["lng"],
+    width_px=config["width_px"],
+    height_px=config["height_px"],
+    azimuth=config["camera_azimuth_degrees"],
+    elevation=config["camera_elevation_degrees"],
+    view_height=config.get("view_height_meters", 200),
+  )
 
   page.goto(url, wait_until="networkidle")
 
@@ -102,14 +101,7 @@ def check_tiles(generation_dir: Path, port: int = DEFAULT_WEB_PORT) -> Path | No
     tile_paths = {}
 
     with sync_playwright() as p:
-      browser = p.chromium.launch(
-        headless=True,
-        args=[
-          "--enable-webgl",
-          "--use-gl=angle",
-          "--ignore-gpu-blocklist",
-        ],
-      )
+      browser = p.chromium.launch(headless=True, args=CHROMIUM_ARGS)
 
       context = browser.new_context(
         viewport={"width": width, "height": height},

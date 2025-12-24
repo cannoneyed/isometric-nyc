@@ -4,7 +4,7 @@
       "name": "Local 1",
       "model_id": "local_01",
       "endpoint": "http://localhost:8888/edit-b64",
-      "num_inference_steps": 15,
+      "num_inference_steps": 20,
       "model_type": "local",
       "use_base64": true
     },
@@ -12,7 +12,7 @@
       "name": "Local 2",
       "model_id": "local_02",
       "endpoint": "http://localhost:8889/edit-b64",
-      "num_inference_steps": 15,
+      "num_inference_steps": 20,
       "model_type": "local",
       "use_base64": true
     },
@@ -28,6 +28,22 @@
       "name": "Omni v2",
       "model_id": "cannoneyed-rural-rose-dingo",
       "api_key_env": "OXEN_OMNI_v04_WATER_V2_API_KEY",
+      "endpoint": "https://hub.oxen.ai/api/images/edit",
+      "num_inference_steps": 28,
+      "model_type": "oxen"
+    },
+    {
+      "name": "Omni plus terrain",
+      "model_id": "cannoneyed-dark-copper-flea",
+      "api_key_env": "OXEN_OMNI_v2_TERRAIN_API_KEY",
+      "endpoint": "https://hub.oxen.ai/api/images/edit",
+      "num_inference_steps": 28,
+      "model_type": "oxen"
+    },
+    {
+      "name": "Omni v5 (FLUX)",
+      "model_id": "cannoneyed-written-gray-marmot",
+      "api_key_env": "OXEN_OMNI_V5_TERRAIN_FLUX_API_KEY",
       "endpoint": "https://hub.oxen.ai/api/images/edit",
       "num_inference_steps": 28,
       "model_type": "oxen"

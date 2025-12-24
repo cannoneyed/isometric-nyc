@@ -562,14 +562,11 @@ def render_quadrant(
   port: int,
 ) -> bytes | None:
   """Render a single quadrant using the web server."""
-  from urllib.parse import urlencode
-
-  from PIL import Image
-  from playwright.sync_api import sync_playwright
-
   from isometric_nyc.e2e_generation.shared import (
+    build_tile_render_url,
     ensure_quadrant_exists,
     image_to_png_bytes,
+    render_url_to_bytes,
     save_quadrant_render,
     split_tile_into_quadrants,
   )
@@ -585,52 +582,24 @@ def render_quadrant(
   # Get the top-left quadrant of the tile
   tl_quadrant = ensure_quadrant_exists(conn, config, tile_x, tile_y)
 
-  # Build URL for rendering
-  params = {
-    "export": "true",
-    "lat": tl_quadrant["lat"],
-    "lon": tl_quadrant["lng"],
-    "width": config["width_px"],
-    "height": config["height_px"],
-    "azimuth": config["camera_azimuth_degrees"],
-    "elevation": config["camera_elevation_degrees"],
-    "view_height": config.get("view_height_meters", 200),
-  }
-  query_string = urlencode(params)
-  url = f"http://localhost:{port}/?{query_string}"
+  # Build URL and render using shared utilities
+  url = build_tile_render_url(
+    port=port,
+    lat=tl_quadrant["lat"],
+    lng=tl_quadrant["lng"],
+    width_px=config["width_px"],
+    height_px=config["height_px"],
+    azimuth=config["camera_azimuth_degrees"],
+    elevation=config["camera_elevation_degrees"],
+    view_height=config.get("view_height_meters", 200),
+  )
 
-  # Render using Playwright
-  with sync_playwright() as p:
-    browser = p.chromium.launch(
-      headless=True,
-      args=[
-        "--enable-webgl",
-        "--use-gl=angle",
-        "--ignore-gpu-blocklist",
-      ],
-    )
-
-    context = browser.new_context(
-      viewport={"width": config["width_px"], "height": config["height_px"]},
-      device_scale_factor=1,
-    )
-    page = context.new_page()
-
-    page.goto(url, wait_until="networkidle")
-
-    try:
-      page.wait_for_function("window.TILES_LOADED === true", timeout=60000)
-    except Exception:
-      print("      ⚠️ Timeout waiting for tiles, continuing anyway...")
-
-    screenshot = page.screenshot()
-
-    page.close()
-    context.close()
-    browser.close()
+  screenshot = render_url_to_bytes(url, config["width_px"], config["height_px"])
 
   # Convert to PIL Image
   from io import BytesIO
+
+  from PIL import Image
 
   tile_image = Image.open(BytesIO(screenshot))
 
