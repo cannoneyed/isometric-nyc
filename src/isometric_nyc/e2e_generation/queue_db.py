@@ -41,17 +41,21 @@ class QueueItem:
   result_message: str | None
   context_quadrants: list[tuple[int, int]] | None = None
   prompt: str | None = None
+  negative_prompt: str | None = None
 
   @classmethod
   def from_row(cls, row: tuple) -> "QueueItem":
     """Create a QueueItem from a database row."""
-    # Handle schema evolution: 10 base columns + optional context_quadrants + optional prompt
+    # Handle schema evolution: 10 base columns + optional context_quadrants + optional prompt + optional negative_prompt
     context = None
     prompt = None
+    negative_prompt = None
     if len(row) > 10 and row[10]:
       context = json.loads(row[10])
     if len(row) > 11 and row[11]:
       prompt = row[11]
+    if len(row) > 12 and row[12]:
+      negative_prompt = row[12]
 
     return cls(
       id=row[0],
@@ -66,6 +70,7 @@ class QueueItem:
       result_message=row[9],
       context_quadrants=context,
       prompt=prompt,
+      negative_prompt=negative_prompt,
     )
 
   def to_dict(self) -> dict[str, Any]:
@@ -86,6 +91,8 @@ class QueueItem:
       result["context_quadrants"] = self.context_quadrants
     if self.prompt:
       result["prompt"] = self.prompt
+    if self.negative_prompt:
+      result["negative_prompt"] = self.negative_prompt
     return result
 
 
@@ -105,7 +112,8 @@ def init_queue_table(conn: sqlite3.Connection) -> None:
       error_message TEXT,
       result_message TEXT,
       context_quadrants TEXT,
-      prompt TEXT
+      prompt TEXT,
+      negative_prompt TEXT
     )
   """)
   # Create index on status for efficient queue queries
@@ -120,6 +128,8 @@ def init_queue_table(conn: sqlite3.Connection) -> None:
     cursor.execute("ALTER TABLE generation_queue ADD COLUMN context_quadrants TEXT")
   if "prompt" not in columns:
     cursor.execute("ALTER TABLE generation_queue ADD COLUMN prompt TEXT")
+  if "negative_prompt" not in columns:
+    cursor.execute("ALTER TABLE generation_queue ADD COLUMN negative_prompt TEXT")
 
   conn.commit()
 
@@ -131,6 +141,7 @@ def add_to_queue(
   model_id: str | None = None,
   context_quadrants: list[tuple[int, int]] | None = None,
   prompt: str | None = None,
+  negative_prompt: str | None = None,
 ) -> QueueItem:
   """
   Add a new item to the generation queue.
@@ -145,6 +156,7 @@ def add_to_queue(
       generation. If a context quadrant has a generation, that will be used;
       otherwise the render will be used.
     prompt: Optional additional prompt text for generation
+    negative_prompt: Optional negative prompt text for generation
 
   Returns:
     The created QueueItem
@@ -157,8 +169,8 @@ def add_to_queue(
   cursor.execute(
     """
     INSERT INTO generation_queue
-      (item_type, quadrants, model_id, status, created_at, context_quadrants, prompt)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+      (item_type, quadrants, model_id, status, created_at, context_quadrants, prompt, negative_prompt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """,
     (
       item_type.value,
@@ -168,6 +180,7 @@ def add_to_queue(
       created_at,
       context_json,
       prompt,
+      negative_prompt,
     ),
   )
   conn.commit()
@@ -186,6 +199,7 @@ def add_to_queue(
     result_message=None,
     context_quadrants=context_quadrants,
     prompt=prompt,
+    negative_prompt=negative_prompt,
   )
 
 
@@ -200,7 +214,7 @@ def get_next_pending_item(conn: sqlite3.Connection) -> QueueItem | None:
     """
     SELECT id, item_type, quadrants, model_id, status,
            created_at, started_at, completed_at, error_message, result_message,
-           context_quadrants, prompt
+           context_quadrants, prompt, negative_prompt
     FROM generation_queue
     WHERE status = ?
     ORDER BY created_at ASC
@@ -234,7 +248,7 @@ def get_next_pending_item_for_available_model(
     """
     SELECT id, item_type, quadrants, model_id, status,
            created_at, started_at, completed_at, error_message, result_message,
-           context_quadrants, prompt
+           context_quadrants, prompt, negative_prompt
     FROM generation_queue
     WHERE status = ?
     ORDER BY created_at ASC
@@ -262,7 +276,7 @@ def get_processing_item(conn: sqlite3.Connection) -> QueueItem | None:
     """
     SELECT id, item_type, quadrants, model_id, status,
            created_at, started_at, completed_at, error_message, result_message,
-           context_quadrants, prompt
+           context_quadrants, prompt, negative_prompt
     FROM generation_queue
     WHERE status = ?
     ORDER BY started_at DESC
@@ -325,7 +339,7 @@ def get_pending_queue(conn: sqlite3.Connection) -> list[QueueItem]:
     """
     SELECT id, item_type, quadrants, model_id, status,
            created_at, started_at, completed_at, error_message, result_message,
-           context_quadrants, prompt
+           context_quadrants, prompt, negative_prompt
     FROM generation_queue
     WHERE status = ?
     ORDER BY created_at ASC
@@ -399,7 +413,7 @@ def get_all_processing_items(conn: sqlite3.Connection) -> list[QueueItem]:
     """
     SELECT id, item_type, quadrants, model_id, status,
            created_at, started_at, completed_at, error_message, result_message,
-           context_quadrants, prompt
+           context_quadrants, prompt, negative_prompt
     FROM generation_queue
     WHERE status = ?
     ORDER BY started_at ASC

@@ -75,6 +75,31 @@ from isometric_nyc.e2e_generation.shared import (
 load_dotenv()
 
 # =============================================================================
+# Reference Image Upload Cache
+# =============================================================================
+
+# Cache for uploaded reference images to Gemini API
+# Maps (tl_x, tl_y) -> uploaded file reference
+# This avoids re-uploading the same reference images on every generation
+_REFERENCE_UPLOAD_CACHE: dict[tuple[int, int], any] = {}
+
+
+def clear_reference_cache():
+  """Clear the reference upload cache. Call this if references are regenerated."""
+  global _REFERENCE_UPLOAD_CACHE
+  _REFERENCE_UPLOAD_CACHE.clear()
+  print("   🗑️ Cleared reference upload cache")
+
+
+def get_cache_stats() -> dict:
+  """Get statistics about the reference upload cache."""
+  return {
+    "cached_references": len(_REFERENCE_UPLOAD_CACHE),
+    "coordinates": list(_REFERENCE_UPLOAD_CACHE.keys()),
+  }
+
+
+# =============================================================================
 # Context Quadrant Calculation (from app.py)
 # =============================================================================
 
@@ -395,9 +420,125 @@ def render_quadrant(
 # =============================================================================
 
 
+def create_few_shot_template(
+  reference_image: Image.Image,
+  reference_tl: tuple[int, int],
+  infill_region,
+  conn: sqlite3.Connection,
+  config: dict,
+  port: int,
+) -> Image.Image | None:
+  """
+  Create a few-shot "before" template from a reference tile.
+
+  This recreates what the template would have looked like before generation,
+  using the same infill region position as the current generation.
+
+  The strategy is to take the infill region's RELATIVE position within a 2x2 tile
+  and apply that same relative region to the reference tile.
+
+  Args:
+    reference_image: The reference tile (1024x1024 pixel art)
+    reference_tl: Top-left coordinates of the reference tile (qx, qy)
+    infill_region: The infill region from the current generation
+    conn: Database connection
+    config: Generation config
+    port: Web server port for rendering
+
+  Returns:
+    PIL Image showing the reference tile with infill region replaced by renders + red border,
+    or None if renders couldn't be created
+  """
+  from PIL import ImageDraw
+
+  # Start with a copy of the reference image
+  template = reference_image.copy()
+
+  # Get overlapping quadrants from the infill region
+  # These are in absolute world coordinates
+  overlapping_quads = infill_region.overlapping_quadrants()
+
+  ref_x, ref_y = reference_tl
+
+  # For the few-shot example, we want to show the same RELATIVE quadrants
+  # So if the infill region covers quadrants (5,6) and (6,6),
+  # we want to show quadrants (ref_x, ref_y) and (ref_x+1, ref_y) in the reference
+  # We need to translate the overlapping quadrants to be relative to (0,0) first
+  if not overlapping_quads:
+    return None
+
+  # Find the bounds of the overlapping quadrants
+  min_qx = min(q[0] for q in overlapping_quads)
+  max_qx = max(q[0] for q in overlapping_quads)
+  min_qy = min(q[1] for q in overlapping_quads)
+  max_qy = max(q[1] for q in overlapping_quads)
+
+  print(f"         📐 Infill region quadrants: {overlapping_quads}")
+  print(f"         📐 Infill bounds: ({min_qx}, {min_qy}) to ({max_qx}, {max_qy})")
+  print(f"         📐 Reference TL: ({ref_x}, {ref_y})")
+
+  # Calculate the infill region in template-relative coordinates (0-1024)
+  # Since the reference is always a 2x2 tile (1024x1024), we translate the region
+  infill_rel_x = (min_qx - min_qx) * QUADRANT_SIZE  # Always 0 for the minimum
+  infill_rel_y = (min_qy - min_qy) * QUADRANT_SIZE  # Always 0 for the minimum
+  infill_width = (max_qx - min_qx + 1) * QUADRANT_SIZE
+  infill_height = (max_qy - min_qy + 1) * QUADRANT_SIZE
+
+  print(f"         📐 Template-relative infill: ({infill_rel_x}, {infill_rel_y}) size {infill_width}x{infill_height}px")
+
+  # For each quadrant in the relative region, render it from the reference tile position
+  print(f"         🎨 Rendering quadrants for few-shot template:")
+  for rel_qx in range(max_qx - min_qx + 1):
+    for rel_qy in range(max_qy - min_qy + 1):
+      # Calculate the actual quadrant coordinates in the reference tile
+      actual_qx = ref_x + rel_qx
+      actual_qy = ref_y + rel_qy
+
+      # Render this quadrant
+      render_bytes = render_quadrant(conn, config, actual_qx, actual_qy, port)
+      if render_bytes is None:
+        print(f"            ⚠️ Could not render ({actual_qx}, {actual_qy}) for few-shot template")
+        return None
+
+      render_img = png_bytes_to_image(render_bytes)
+
+      # Paste into template at the correct relative position
+      paste_x = rel_qx * QUADRANT_SIZE
+      paste_y = rel_qy * QUADRANT_SIZE
+      template.paste(render_img, (paste_x, paste_y))
+      print(f"            ✓ Rendered ({actual_qx}, {actual_qy}) → pasted at ({paste_x}, {paste_y})px")
+
+  # Draw red border around the infill region (in template-relative coordinates)
+  print(f"         🟥 Drawing red border at ({infill_rel_x}, {infill_rel_y}) size {infill_width}x{infill_height}px")
+  draw = ImageDraw.Draw(template)
+  border_width = 2
+
+  # Draw rectangle border
+  for i in range(border_width):
+    draw.rectangle(
+      [
+        infill_rel_x + i,
+        infill_rel_y + i,
+        infill_rel_x + infill_width - 1 - i,
+        infill_rel_y + infill_height - 1 - i,
+      ],
+      outline=(255, 0, 0),
+      width=1,
+    )
+
+  print(f"         ✅ Few-shot template created: {template.size[0]}x{template.size[1]}px, mode={template.mode}")
+
+  return template
+
+
 def call_gemini_nano_banana(
   template_image: Image.Image,
   reference_images: list[Image.Image],
+  reference_coords: list[tuple[int, int]] | None = None,
+  infill_region=None,
+  conn: sqlite3.Connection | None = None,
+  config: dict | None = None,
+  port: int | None = None,
   prompt: str | None = None,
   debug_dir: Path | None = None,
 ) -> Image.Image:
@@ -407,7 +548,12 @@ def call_gemini_nano_banana(
   Args:
     template_image: The template image with render pixels and red border
     reference_images: List of reference images for style context
-    prompt: Optional additional prompt text
+    reference_coords: Optional list of (x, y) TL coordinates for caching uploaded references
+    infill_region: Optional infill region for creating few-shot examples
+    conn: Optional database connection for few-shot examples
+    config: Optional generation config for few-shot examples
+    port: Optional web server port for few-shot examples
+    prompt: Optional custom prompt text (overrides the default prompt)
     debug_dir: Optional directory to save debug images (template, references, output)
 
   Returns:
@@ -447,61 +593,175 @@ def call_gemini_nano_banana(
   finally:
     Path(template_path).unlink(missing_ok=True)
 
-  # Add reference images
-  ref_paths = []
-  for i, ref_img in enumerate(reference_images):
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-      ref_path = tmp.name
-      ref_img.save(ref_path)
-      ref_paths.append(ref_path)
+  # Simplified approach: Upload just ONE reference image (no few-shot)
+  # Use the first reference image only
+  print(f"\n   📷 Using simplified approach: template + 1 reference with LABELS")
 
-    # Save reference to debug dir
-    if debug_dir:
-      ref_debug_path = debug_dir / f"reference_{i + 1}.png"
-      ref_img.save(ref_debug_path)
-      print(f"      ✓ Saved reference {i + 1}: {ref_debug_path}")
+  # Add visual labels to the template image
+  from PIL import ImageDraw, ImageFont
 
-    ref_ref = client.files.upload(file=ref_path)
-    contents.append(ref_ref)
+  template_labeled = template_image.copy()
+  draw = ImageDraw.Draw(template_labeled)
 
-  # Build the prompt
-  image_refs = []
-  image_refs.append("Image A (template with red border indicating infill area)")
-  for i in range(len(reference_images)):
-    letter = chr(ord("B") + i)
-    image_refs.append(f"Image {letter} (style reference {i + 1})")
+  # Try to use a larger font, fall back to default if not available
+  try:
+    font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 48)
+  except:
+    font = ImageFont.load_default()
 
-  ref_images_str = ", ".join(
-    [f"Image {chr(ord('B') + i)}" for i in range(len(reference_images))]
+  # Add label at top of image
+  label_text = "TRANSFORM THIS AREA ➜"
+  bbox = draw.textbbox((0, 0), label_text, font=font)
+  text_width = bbox[2] - bbox[0]
+  text_height = bbox[3] - bbox[1]
+
+  # Position at top center with black background
+  x = (template_labeled.width - text_width) // 2
+  y = 20
+
+  # Draw black background rectangle
+  padding = 10
+  draw.rectangle(
+    [x - padding, y - padding, x + text_width + padding, y + text_height + padding],
+    fill=(0, 0, 0)
   )
 
-  generation_prompt = f"""
-**Task:** Fill in the outlined section (marked with red border) in Image A with isometric pixel art in the style of the reference images.
+  # Draw text in bright yellow
+  draw.text((x, y), label_text, fill=(255, 255, 0), font=font)
 
-**Input Images:**
-{chr(10).join(f"- {ref}" for ref in image_refs)}
+  print(f"      ✓ Added label to template: '{label_text}'")
 
-**Instructions:**
+  # Save labeled template to debug dir
+  if debug_dir:
+    template_labeled_path = debug_dir / "template_labeled.png"
+    template_labeled.save(template_labeled_path)
+    print(f"      ✓ Saved labeled template: {template_labeled_path}")
 
-1. Look at the red border in Image A - this marks the area to be filled with generated pixels.
-2. Study the style of {ref_images_str} carefully - these show the exact visual style to match.
-3. Fill the bordered area with pixel art that:
-   - Matches the isometric pixel art style of the reference images exactly
-   - Seamlessly blends with any surrounding context in Image A
-   - Follows the structure/shapes hinted at by the render pixels inside the border
-   - Removes the red border completely in the output
+  # Re-upload the labeled template
+  with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+    labeled_template_path = tmp.name
+    template_labeled.save(labeled_template_path)
 
+  try:
+    # Remove the original unlabeled template from contents
+    contents.pop()
+    # Upload the labeled version
+    print(f"      ⬆️ Uploading labeled template to Gemini API...")
+    template_labeled_ref = client.files.upload(file=labeled_template_path)
+    contents.append(template_labeled_ref)
+  finally:
+    Path(labeled_template_path).unlink(missing_ok=True)
 
-**Output:**
-- Generate the **complete** image with the bordered area filled in - ensure you preserve the context of the surrounding area.
-- The output should be 1024x1024 pixels
-- Remove all traces of the red border
-- All sections must flow seamlessly into the surrounding area. There should be no hard edges, visible seams, or gaps.
-- The infilled region MUST PERFECTLY BLEND INTO THE SURROUNDING AREA.
-""".strip()
+  if reference_images:
+    ref_img = reference_images[0]
+    ref_coord = reference_coords[0] if reference_coords else None
 
+    # Add visual labels to the reference image
+    ref_labeled = ref_img.copy()
+    draw_ref = ImageDraw.Draw(ref_labeled)
+
+    # Add label at top
+    ref_label_text = "TARGET STYLE ⭐"
+    bbox = draw_ref.textbbox((0, 0), ref_label_text, font=font)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+
+    x = (ref_labeled.width - text_width) // 2
+    y = 20
+
+    # Draw black background
+    draw_ref.rectangle(
+      [x - padding, y - padding, x + text_width + padding, y + text_height + padding],
+      fill=(0, 0, 0)
+    )
+
+    # Draw text in bright cyan
+    draw_ref.text((x, y), ref_label_text, fill=(0, 255, 255), font=font)
+
+    print(f"      ✓ Added label to reference: '{ref_label_text}'")
+
+    # Save labeled reference to debug dir
+    if debug_dir:
+      ref_labeled_path = debug_dir / f"reference_labeled.png"
+      ref_labeled.save(ref_labeled_path)
+      print(f"      ✓ Saved labeled reference: {ref_labeled_path}")
+
+    # Upload the labeled reference
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+      ref_tmp_path = tmp.name
+      ref_labeled.save(ref_tmp_path)
+
+    try:
+      print(f"      ⬆️ Uploading labeled reference to Gemini API...")
+      ref_ref = client.files.upload(file=ref_tmp_path)
+      contents.append(ref_ref)
+      print(f"      ✅ Labeled reference uploaded")
+    finally:
+      Path(ref_tmp_path).unlink(missing_ok=True)
+
+  # Build the prompt - custom prompt overrides default
   if prompt:
-    generation_prompt += f"\n\n**Additional Instructions:**\n{prompt}"
+    # Use custom prompt entirely (override default)
+    generation_prompt = prompt
+    print(f"   📝 Using custom prompt (overriding default)")
+  else:
+    # Use default prompt
+    generation_prompt = f"""
+PIXEL ART STYLE TRANSFER TASK
+
+**Images provided (with visual labels burned in):**
+- Image A: Labeled "TRANSFORM THIS AREA ➜" - Template with 3D render inside red border
+- Image B: Labeled "TARGET STYLE ⭐" - Pixel art reference showing the style to match
+
+**YOUR TASK:**
+Fill in the red-bordered area in Image A with NEW pixel art that:
+1. Shows the SAME CONTENT as the 3D render (buildings, roads, trees in same positions)
+2. Uses the ARTISTIC STYLE from Image B (pixel art aesthetic, colors, simplification)
+
+**CRITICAL RULES:**
+❌ DO NOT copy Image A as your output
+❌ DO NOT copy Image B as your output
+❌ DO NOT return any input image unchanged
+✅ You MUST CREATE something NEW by transforming the render
+
+**How to complete this task:**
+
+STEP 1: Study Image B (TARGET STYLE ⭐)
+- Memorize the pixel art technique: color choices, shading style, detail level
+- Notice how buildings are simplified, how roads are drawn, how trees look
+- This is your STYLE GUIDE - you will draw in this exact same style
+
+STEP 2: Study Image A (TRANSFORM THIS AREA ➜)
+- Look at the 3D render inside the red border
+- Note what objects are there and where they're positioned
+- This tells you WHAT to draw and WHERE - but NOT how to draw it
+
+STEP 3: Create the output
+- Draw the objects from the 3D render (the WHAT and WHERE)
+- But draw them using the pixel art style from Image B (the HOW)
+- Example: If the render shows a building, draw a pixelated building like ones in Image B
+- Example: If the render shows a road, draw a pixelated road like roads in Image B
+
+**Style requirements (copy from Image B):**
+- Use Image B's color palette
+- Use Image B's shading technique
+- Use Image B's level of detail
+- Use Image B's pixel grid aesthetic
+- Use Image B's geometric simplification
+
+**DO NOT include the labels in your output!**
+The yellow "TRANSFORM THIS AREA" and cyan "TARGET STYLE" labels are just for your understanding.
+Your output should have NO TEXT LABELS.
+
+**OUTPUT REQUIREMENTS:**
+- Full 1024x1024 pixel image
+- Red-bordered area filled with NEWLY CREATED pixel art
+- Pixel art matches Image B's style but shows Image A's content
+- Remove red border and any text labels from output
+- Areas outside red border preserved unchanged
+
+Think of this like: "Redraw the 3D render as pixel art in the style of Image B"
+""".strip()
 
   contents.append(generation_prompt)
 
@@ -512,14 +772,14 @@ def call_gemini_nano_banana(
       f.write(generation_prompt)
     print(f"      ✓ Saved prompt: {prompt_debug_path}")
 
-  # Log the prompt and reference images before sending
+  # Log the prompt and images before sending
   print("\n" + "=" * 60)
-  print("📤 GEMINI API REQUEST")
+  print("📤 GEMINI API REQUEST (WITH VISUAL LABELS)")
   print("=" * 60)
-  print(f"   📐 Template image size: {template_image.size}")
-  print(f"   📷 Reference images: {len(reference_images)}")
-  for i, ref_img in enumerate(reference_images):
-    print(f"      - Reference {i + 1}: {ref_img.size}")
+  print(f"   📐 Image A: 'TRANSFORM THIS AREA ➜' (yellow label)")
+  if reference_images:
+    print(f"   📐 Image B: 'TARGET STYLE ⭐' (cyan label)")
+  print(f"   📊 Total images: {len([c for c in contents if not isinstance(c, str)])}")
   print("\n   📝 PROMPT:")
   print("-" * 60)
   for line in generation_prompt.split("\n"):
@@ -538,10 +798,6 @@ def call_gemini_nano_banana(
       ),
     ),
   )
-
-  # Clean up reference files
-  for ref_path in ref_paths:
-    Path(ref_path).unlink(missing_ok=True)
 
   # Extract the generated image
   for part in response.parts:
@@ -579,6 +835,7 @@ def run_nano_banana_generation(
   status_callback: Callable[[str, str], None] | None = None,
   context_quadrants: list[tuple[int, int]] | None = None,
   generation_dir: Path | None = None,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
 ) -> dict:
   """
   Run the full nano banana generation pipeline for selected quadrants.
@@ -597,11 +854,12 @@ def run_nano_banana_generation(
     selected_quadrants: List of (x, y) quadrant coordinates to generate
     reference_coords: List of (x, y) TL quadrant coordinates for reference tiles
     port: Web server port for rendering (default: 5173)
-    prompt: Optional additional prompt text for generation
+    prompt: Optional custom prompt text (overrides the default prompt) for generation
     save: Whether to save generated quadrants to database (default: True)
     status_callback: Optional callback(status, message) for progress updates
     context_quadrants: Optional list of (x, y) quadrant coordinates to use as context
     generation_dir: Optional path to generation directory for saving debug images
+    model_config: Optional model configuration for preprocessing parameters
 
   Returns:
     Dict with:
@@ -718,7 +976,11 @@ def run_nano_banana_generation(
   # Build the template
   update_status("rendering", "Building template image...")
   builder = TemplateBuilder(
-    region, has_generation_in_db, get_render_from_db_with_render, get_generation_from_db
+    region,
+    has_generation_in_db,
+    get_render_from_db_with_render,
+    get_generation_from_db,
+    model_config=model_config,
   )
 
   print("📋 Building template...")
@@ -759,6 +1021,11 @@ def run_nano_banana_generation(
       "error": "No valid reference images could be loaded",
     }
 
+  # Show cache stats
+  cache_stats = get_cache_stats()
+  if cache_stats["cached_references"] > 0:
+    print(f"   💾 Upload cache: {cache_stats['cached_references']} reference(s) cached")
+
   # Call Gemini API
   update_status("generating", "Calling Gemini API (this may take a minute)...")
   print("🤖 Calling Gemini nano banana API...")
@@ -772,6 +1039,11 @@ def run_nano_banana_generation(
     generated_image = call_gemini_nano_banana(
       template_image=template_image,
       reference_images=reference_images,
+      reference_coords=reference_coords,
+      infill_region=region,
+      conn=conn,
+      config=config,
+      port=port,
       prompt=prompt,
       debug_dir=debug_dir,
     )

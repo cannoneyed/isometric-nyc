@@ -5,6 +5,8 @@ const config = JSON.parse(document.getElementById("app-config").dataset.config);
 const STORAGE_KEY_MODEL = "viewer_selected_model";
 const STORAGE_KEY_TOOL = "viewer_selected_tool";
 const STORAGE_KEY_SELECTION = "viewer_selected_quadrants";
+const STORAGE_KEY_PROMPT = "viewer_saved_prompt";
+const STORAGE_KEY_NEGATIVE_PROMPT = "viewer_saved_negative_prompt";
 
 // Save selected model ID to localStorage
 function saveSelectedModel(modelId) {
@@ -59,6 +61,107 @@ function getSavedQuadrants() {
     return saved ? JSON.parse(saved) : [];
   } catch (e) {
     return [];
+  }
+}
+
+// Save prompt to localStorage
+function savePrompt(prompt) {
+  try {
+    if (prompt && prompt.trim()) {
+      localStorage.setItem(STORAGE_KEY_PROMPT, prompt.trim());
+    } else {
+      localStorage.removeItem(STORAGE_KEY_PROMPT);
+    }
+    updatePromptButtonIndicator();
+  } catch (e) {
+    console.warn("Could not save prompt to localStorage:", e);
+  }
+}
+
+// Get saved prompt from localStorage
+function getSavedPrompt() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_PROMPT) || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+// Clear saved prompt
+function clearSavedPrompt() {
+  try {
+    localStorage.removeItem(STORAGE_KEY_PROMPT);
+    updatePromptButtonIndicator();
+    showToast("info", "Prompt cleared", "Saved prompt has been removed");
+  } catch (e) {
+    console.warn("Could not clear prompt from localStorage:", e);
+  }
+}
+
+// Update the prompt button to show indicator when a prompt is saved
+function updatePromptButtonIndicator() {
+  const btn = document.getElementById("generateWithPromptBtn");
+  if (!btn) return;
+
+  const savedPrompt = getSavedPrompt();
+  if (savedPrompt) {
+    btn.classList.add("has-saved-prompt");
+    btn.title = `Generate with custom prompt (overrides default): "${savedPrompt.substring(0, 50)}${savedPrompt.length > 50 ? '...' : ''}"`;
+    btn.innerHTML = '+ Prompt <span class="prompt-indicator">●</span>';
+  } else {
+    btn.classList.remove("has-saved-prompt");
+    btn.title = "Generate with custom prompt (overrides default)";
+    btn.textContent = "+ Prompt";
+  }
+}
+
+// Save negative_prompt to localStorage
+function saveNegativePrompt(negativePrompt) {
+  try {
+    if (negativePrompt && negativePrompt.trim()) {
+      localStorage.setItem(STORAGE_KEY_NEGATIVE_PROMPT, negativePrompt.trim());
+    } else {
+      localStorage.removeItem(STORAGE_KEY_NEGATIVE_PROMPT);
+    }
+    updateNegativePromptButtonIndicator();
+  } catch (e) {
+    console.warn("Could not save negative_prompt to localStorage:", e);
+  }
+}
+
+// Get saved negative_prompt from localStorage
+function getSavedNegativePrompt() {
+  try {
+    return localStorage.getItem(STORAGE_KEY_NEGATIVE_PROMPT) || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+// Clear saved negative_prompt
+function clearSavedNegativePrompt() {
+  try {
+    localStorage.removeItem(STORAGE_KEY_NEGATIVE_PROMPT);
+    updateNegativePromptButtonIndicator();
+    showToast("info", "Negative prompt cleared", "Saved negative prompt has been removed");
+  } catch (e) {
+    console.warn("Could not clear negative_prompt from localStorage:", e);
+  }
+}
+
+// Update the negative_prompt button to show indicator when a negative_prompt is saved
+function updateNegativePromptButtonIndicator() {
+  const btn = document.getElementById("generateWithNegativePromptBtn");
+  if (!btn) return;
+
+  const savedNegativePrompt = getSavedNegativePrompt();
+  if (savedNegativePrompt) {
+    btn.classList.add("has-saved-negative-prompt");
+    btn.title = `Generate with negative prompt: "${savedNegativePrompt.substring(0, 50)}${savedNegativePrompt.length > 50 ? '...' : ''}"`; btn.innerHTML = '- Neg Prompt <span class="prompt-indicator">●</span>';
+  } else {
+    btn.classList.remove("has-saved-negative-prompt");
+    btn.title = "Generate with negative prompt";
+    btn.textContent = "- Neg Prompt";
   }
 }
 
@@ -458,6 +561,37 @@ function initWaterHighlight() {
   }
 }
 
+// Toggle labels (starred/flagged indicators and outlines)
+function toggleLabels() {
+  const container = document.getElementById("gridContainer");
+  const showLabels = document.getElementById("showLabels")?.checked ?? true;
+  container.classList.toggle("hide-labels", !showLabels);
+
+  // Save preference to localStorage
+  try {
+    localStorage.setItem("viewer_show_labels", showLabels ? "1" : "0");
+  } catch (e) {
+    console.warn("Could not save labels preference:", e);
+  }
+}
+
+// Initialize labels state from localStorage
+function initLabels() {
+  try {
+    const saved = localStorage.getItem("viewer_show_labels");
+    // Default to showing labels if not set (checkbox is checked by default in HTML)
+    if (saved === "0") {
+      const checkbox = document.getElementById("showLabels");
+      if (checkbox) {
+        checkbox.checked = false;
+        toggleLabels();
+      }
+    }
+  } catch (e) {
+    // Ignore localStorage errors
+  }
+}
+
 // Keyboard navigation
 document.addEventListener("keydown", (e) => {
   if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
@@ -520,6 +654,16 @@ document.addEventListener("keydown", (e) => {
       if (fixWaterToolActive) cancelWaterFix();
       if (waterFillToolActive) cancelWaterFill();
       if (waterSelectToolActive) cancelWaterSelect();
+      break;
+    case "[":
+      goToPrevStarred();
+      break;
+    case "]":
+      goToNextStarred();
+      break;
+    case "b":
+    case "B":
+      referenceSelected();
       break;
   }
 });
@@ -1238,6 +1382,19 @@ function updateSelectionStatus(serverStatus = null) {
   if (generateWithPromptBtn) {
     generateWithPromptBtn.disabled = count === 0;
   }
+  // Generate with negative prompt button
+  const generateWithNegativePromptBtn = document.getElementById(
+    "generateWithNegativePromptBtn"
+  );
+  if (generateWithNegativePromptBtn) {
+    generateWithNegativePromptBtn.disabled = count === 0;
+  }
+  // Star button requires exactly 1 selected
+  const starBtn = document.getElementById("starBtn");
+  if (starBtn) starBtn.disabled = count !== 1;
+  // Reference button requires exactly 1 selected
+  const referenceBtn = document.getElementById("referenceBtn");
+  if (referenceBtn) referenceBtn.disabled = count !== 1;
   // Generate Rectangle requires exactly 2 selected
   if (generateRectBtn) generateRectBtn.disabled = count !== 2;
   // Export Cmd requires exactly 2 selected
@@ -1431,6 +1588,382 @@ async function flagSelected() {
   }
 }
 
+async function starSelected() {
+  // Only allow starring exactly 1 quadrant
+  if (selectedQuadrants.size !== 1) {
+    showToast("error", "Invalid selection", "Select exactly 1 quadrant to star");
+    return;
+  }
+
+  const coordKey = Array.from(selectedQuadrants)[0];
+  const [x, y] = coordKey.split(",").map(Number);
+  const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+  
+  // Toggle: if already starred, unstar; otherwise star
+  const isCurrentlyStarred = tile && tile.dataset.starred === "true";
+  const shouldStar = !isCurrentlyStarred;
+
+  try {
+    const response = await fetch("/api/star", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quadrant: [x, y], star: shouldStar }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast(
+        "success",
+        result.starred ? "⭐ Starred" : "Unstarred",
+        result.message
+      );
+
+      // Invalidate cached starred list
+      cachedStarredList = null;
+      currentStarredIndex = -1;
+
+      // Update tile visual state
+      if (tile) {
+        if (shouldStar) {
+          tile.classList.add("starred");
+          tile.dataset.starred = "true";
+          // Add star indicator if not present
+          if (!tile.querySelector(".starred-indicator")) {
+            const indicator = document.createElement("span");
+            indicator.className = "starred-indicator";
+            indicator.title = "Starred for dataset";
+            indicator.textContent = "⭐";
+            tile.appendChild(indicator);
+          }
+        } else {
+          tile.classList.remove("starred");
+          tile.dataset.starred = "false";
+          // Remove star indicator
+          const indicator = tile.querySelector(".starred-indicator");
+          if (indicator) indicator.remove();
+        }
+      }
+
+      // Deselect after starring
+      deselectAll();
+    } else {
+      showToast("error", "Star failed", result.error);
+    }
+  } catch (error) {
+    console.error("Star error:", error);
+    showToast("error", "Star failed", error.message);
+  }
+}
+
+// Reference tile function
+async function referenceSelected() {
+  // Only allow marking exactly 1 quadrant as reference (top-left of 2x2)
+  if (selectedQuadrants.size !== 1) {
+    showToast("warning", "Invalid selection", "Select exactly 1 quadrant (top-left of 2x2 reference tile)");
+    return;
+  }
+
+  const coordKey = Array.from(selectedQuadrants)[0];
+  const [x, y] = coordKey.split(",").map(Number);
+  const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+
+  // Toggle: if already reference, unmark; otherwise mark
+  const isCurrentlyReference = tile && tile.dataset.isReference === "true";
+  const shouldMark = !isCurrentlyReference;
+
+  try {
+    const response = await fetch("/api/reference", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quadrant: [x, y], reference: shouldMark }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast(
+        "success",
+        shouldMark ? "🍌 Marked as reference" : "Unmarked as reference",
+        result.message
+      );
+
+      // Update tile visual state
+      if (tile) {
+        if (shouldMark) {
+          tile.classList.add("is-reference");
+          tile.dataset.isReference = "true";
+          // Add reference indicator if not present
+          if (!tile.querySelector(".reference-indicator")) {
+            const indicator = document.createElement("span");
+            indicator.className = "reference-indicator";
+            indicator.title = "Reference tile (top-left of 2x2)";
+            indicator.textContent = "🍌";
+            tile.appendChild(indicator);
+          }
+        } else {
+          tile.classList.remove("is-reference");
+          tile.dataset.isReference = "false";
+          // Remove reference indicator
+          const indicator = tile.querySelector(".reference-indicator");
+          if (indicator) indicator.remove();
+        }
+      }
+
+      // Deselect after marking
+      deselectAll();
+    } else {
+      showToast("error", "Reference failed", result.error);
+    }
+  } catch (error) {
+    console.error("Reference error:", error);
+    showToast("error", "Reference failed", error.message);
+  }
+}
+
+// Clear all references function
+async function clearAllReferences() {
+  // Confirm with user
+  if (!confirm("Clear all reference tiles? This will remove all 🍌 markers.")) {
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/references/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast("success", "References cleared", result.message);
+
+      // Remove all reference indicators from tiles
+      const referenceTiles = document.querySelectorAll(".tile.is-reference");
+      referenceTiles.forEach((tile) => {
+        tile.classList.remove("is-reference");
+        tile.dataset.isReference = "false";
+        const indicator = tile.querySelector(".reference-indicator");
+        if (indicator) indicator.remove();
+      });
+    } else {
+      showToast("error", "Clear failed", result.error);
+    }
+  } catch (error) {
+    console.error("Clear references error:", error);
+    showToast("error", "Clear failed", error.message);
+  }
+}
+
+// Starred entries dialog
+async function showStarredDialog() {
+  const dialog = document.getElementById("starredDialog");
+  const listContainer = document.getElementById("starredList");
+  const emptyState = document.getElementById("starredEmptyState");
+  const countDisplay = document.getElementById("starredCountDisplay");
+  const listContainerWrapper = document.getElementById("starredListContainer");
+
+  if (!dialog || !listContainer) return;
+
+  // Show dialog immediately with loading state
+  dialog.style.display = "flex";
+  listContainer.innerHTML = '<div style="text-align: center; padding: 20px; color: #888;">Loading...</div>';
+
+  try {
+    const response = await fetch("/api/starred");
+    const result = await response.json();
+
+    if (result.success) {
+      const starred = result.starred || [];
+      countDisplay.textContent = `${starred.length} starred`;
+
+      if (starred.length === 0) {
+        listContainerWrapper.style.display = "none";
+        emptyState.style.display = "block";
+      } else {
+        listContainerWrapper.style.display = "block";
+        emptyState.style.display = "none";
+        
+        // Build list HTML
+        listContainer.innerHTML = starred.map(entry => `
+          <div class="starred-entry" data-x="${entry.x}" data-y="${entry.y}" onclick="navigateToStarred(${entry.x}, ${entry.y})">
+            <div class="starred-entry-coords">
+              <span class="star-icon">⭐</span>
+              <span class="coords-text">(${entry.x}, ${entry.y})</span>
+            </div>
+            <div class="starred-entry-status">
+              ${entry.has_generation ? '<span class="has-gen">✓ generation</span>' : ''}
+              ${entry.has_render ? '<span class="has-render">✓ render</span>' : ''}
+            </div>
+            <div class="starred-entry-actions">
+              <button class="starred-unstar-btn" onclick="event.stopPropagation(); unstarFromDialog(${entry.x}, ${entry.y})">Unstar</button>
+            </div>
+          </div>
+        `).join('');
+      }
+    } else {
+      showToast("error", "Failed to load starred", result.error);
+      dialog.style.display = "none";
+    }
+  } catch (error) {
+    console.error("Load starred error:", error);
+    showToast("error", "Failed to load starred", error.message);
+    dialog.style.display = "none";
+  }
+}
+
+function hideStarredDialog() {
+  const dialog = document.getElementById("starredDialog");
+  if (dialog) {
+    dialog.style.display = "none";
+  }
+}
+
+function navigateToStarred(x, y) {
+  hideStarredDialog();
+  navigateToCoord(x, y);
+}
+
+async function unstarFromDialog(x, y) {
+  try {
+    const response = await fetch("/api/star", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quadrant: [x, y], star: false }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      showToast("success", "Unstarred", result.message);
+      
+      // Update tile if visible
+      const tile = document.querySelector(`.tile[data-coords="${x},${y}"]`);
+      if (tile) {
+        tile.classList.remove("starred");
+        tile.dataset.starred = "false";
+        const indicator = tile.querySelector(".starred-indicator");
+        if (indicator) indicator.remove();
+      }
+      
+      // Invalidate cached starred list
+      cachedStarredList = null;
+      currentStarredIndex = -1;
+      
+      // Refresh the dialog
+      showStarredDialog();
+    } else {
+      showToast("error", "Unstar failed", result.error);
+    }
+  } catch (error) {
+    console.error("Unstar error:", error);
+    showToast("error", "Unstar failed", error.message);
+  }
+}
+
+// Starred navigation state
+let cachedStarredList = null;
+let currentStarredIndex = -1;
+
+// Fetch and cache the starred list
+async function fetchStarredList() {
+  try {
+    const response = await fetch("/api/starred");
+    const result = await response.json();
+    if (result.success) {
+      cachedStarredList = result.starred || [];
+      return cachedStarredList;
+    }
+  } catch (error) {
+    console.error("Failed to fetch starred list:", error);
+  }
+  return [];
+}
+
+// Find the index of a coordinate in the starred list
+function findStarredIndex(x, y) {
+  if (!cachedStarredList) return -1;
+  return cachedStarredList.findIndex(entry => entry.x === x && entry.y === y);
+}
+
+// Get the current view center coordinates
+function getCurrentViewCenter() {
+  const params = getParams();
+  const centerX = parseInt(params.x) + Math.floor(parseInt(params.nx) / 2);
+  const centerY = parseInt(params.y) + Math.floor(parseInt(params.ny) / 2);
+  return { x: centerX, y: centerY };
+}
+
+// Find the nearest starred quadrant to current view
+function findNearestStarredIndex() {
+  if (!cachedStarredList || cachedStarredList.length === 0) return -1;
+  
+  const center = getCurrentViewCenter();
+  let nearestIndex = 0;
+  let nearestDist = Infinity;
+  
+  cachedStarredList.forEach((entry, index) => {
+    const dist = Math.abs(entry.x - center.x) + Math.abs(entry.y - center.y);
+    if (dist < nearestDist) {
+      nearestDist = dist;
+      nearestIndex = index;
+    }
+  });
+  
+  return nearestIndex;
+}
+
+// Go to next starred quadrant
+async function goToNextStarred() {
+  // Fetch list if not cached
+  if (!cachedStarredList) {
+    await fetchStarredList();
+  }
+  
+  if (!cachedStarredList || cachedStarredList.length === 0) {
+    showToast("info", "No starred entries", "Star some quadrants first");
+    return;
+  }
+  
+  // If no current index, find nearest
+  if (currentStarredIndex < 0) {
+    currentStarredIndex = findNearestStarredIndex();
+  }
+  
+  // Move to next (wrap around)
+  currentStarredIndex = (currentStarredIndex + 1) % cachedStarredList.length;
+  
+  const entry = cachedStarredList[currentStarredIndex];
+  showToast("info", `⭐ ${currentStarredIndex + 1}/${cachedStarredList.length}`, `Going to (${entry.x}, ${entry.y})`);
+  navigateToCoord(entry.x, entry.y);
+}
+
+// Go to previous starred quadrant
+async function goToPrevStarred() {
+  // Fetch list if not cached
+  if (!cachedStarredList) {
+    await fetchStarredList();
+  }
+  
+  if (!cachedStarredList || cachedStarredList.length === 0) {
+    showToast("info", "No starred entries", "Star some quadrants first");
+    return;
+  }
+  
+  // If no current index, find nearest
+  if (currentStarredIndex < 0) {
+    currentStarredIndex = findNearestStarredIndex();
+  }
+  
+  // Move to previous (wrap around)
+  currentStarredIndex = (currentStarredIndex - 1 + cachedStarredList.length) % cachedStarredList.length;
+  
+  const entry = cachedStarredList[currentStarredIndex];
+  showToast("info", `⭐ ${currentStarredIndex + 1}/${cachedStarredList.length}`, `Going to (${entry.x}, ${entry.y})`);
+  navigateToCoord(entry.x, entry.y);
+}
+
 async function clearQueue() {
   // Get current queue info first
   try {
@@ -1502,10 +2035,29 @@ function showPromptDialog() {
   if (selectedQuadrants.size === 0) return;
   const dialog = document.getElementById("promptDialog");
   const input = document.getElementById("promptInput");
+  const savedPromptDisplay = document.getElementById("savedPromptDisplay");
+  const clearPromptBtn = document.getElementById("clearPromptBtn");
+  
   if (dialog && input) {
-    input.value = "";
+    // Pre-fill with saved prompt if one exists
+    const savedPrompt = getSavedPrompt();
+    input.value = savedPrompt;
+    
+    // Update saved prompt display
+    if (savedPromptDisplay && clearPromptBtn) {
+      if (savedPrompt) {
+        savedPromptDisplay.textContent = `Saved: "${savedPrompt.substring(0, 60)}${savedPrompt.length > 60 ? '...' : ''}"`;
+        savedPromptDisplay.style.display = "";
+        clearPromptBtn.style.display = "";
+      } else {
+        savedPromptDisplay.style.display = "none";
+        clearPromptBtn.style.display = "none";
+      }
+    }
+    
     dialog.style.display = "flex";
     input.focus();
+    input.select();
   }
 }
 
@@ -1519,8 +2071,67 @@ function hidePromptDialog() {
 async function submitPromptGeneration() {
   const input = document.getElementById("promptInput");
   const prompt = input ? input.value.trim() : "";
+  
+  // Save the prompt for future generations
+  if (prompt) {
+    savePrompt(prompt);
+    showToast("success", "Prompt saved", `"${prompt.substring(0, 40)}${prompt.length > 40 ? '...' : ''}" will be applied to future generations`);
+  }
+  
   hidePromptDialog();
   await generateSelected(prompt);
+}
+
+// Negative Prompt dialog functions
+function showNegativePromptDialog() {
+  if (selectedQuadrants.size === 0) return;
+  const dialog = document.getElementById("negativePromptDialog");
+  const input = document.getElementById("negativePromptInput");
+  const savedNegativePromptDisplay = document.getElementById("savedNegativePromptDisplay");
+  const clearNegativePromptBtn = document.getElementById("clearNegativePromptBtn");
+
+  if (dialog && input) {
+    // Pre-fill with saved negative prompt if one exists
+    const savedNegativePrompt = getSavedNegativePrompt();
+    input.value = savedNegativePrompt;
+
+    // Update saved negative prompt display
+    if (savedNegativePromptDisplay && clearNegativePromptBtn) {
+      if (savedNegativePrompt) {
+        savedNegativePromptDisplay.textContent = `Saved: "${savedNegativePrompt.substring(0, 60)}${savedNegativePrompt.length > 60 ? '...' : ''}"`;
+        savedNegativePromptDisplay.style.display = "";
+        clearNegativePromptBtn.style.display = "";
+      } else {
+        savedNegativePromptDisplay.style.display = "none";
+        clearNegativePromptBtn.style.display = "none";
+      }
+    }
+
+    dialog.style.display = "flex";
+    input.focus();
+    input.select();
+  }
+}
+
+function hideNegativePromptDialog() {
+  const dialog = document.getElementById("negativePromptDialog");
+  if (dialog) {
+    dialog.style.display = "none";
+  }
+}
+
+async function submitNegativePromptGeneration() {
+  const input = document.getElementById("negativePromptInput");
+  const negativePrompt = input ? input.value.trim() : "";
+
+  // Save the negative prompt for future generations
+  if (negativePrompt) {
+    saveNegativePrompt(negativePrompt);
+    showToast("success", "Negative prompt saved", `"${negativePrompt.substring(0, 40)}${negativePrompt.length > 40 ? '...' : ''}" will be applied to future generations`);
+  }
+
+  hideNegativePromptDialog();
+  await generateSelected();
 }
 
 async function generateSelected(prompt = null) {
@@ -1553,6 +2164,12 @@ async function generateSelected(prompt = null) {
     return;
   }
 
+  // Use saved prompt if no explicit prompt provided
+  const effectivePrompt = prompt !== null ? prompt : getSavedPrompt();
+
+  // Always use saved negative_prompt
+  const effectiveNegativePrompt = getSavedNegativePrompt();
+
   const modelId = getSelectedModelId();
 
   console.log(
@@ -1561,7 +2178,11 @@ async function generateSelected(prompt = null) {
     "with context:",
     contextQuadrants,
     "model:",
-    modelId
+    modelId,
+    "prompt:",
+    effectivePrompt || "(none)",
+    "negative_prompt:",
+    effectiveNegativePrompt || "(none)"
   );
 
   // Clear selection
@@ -1576,7 +2197,7 @@ async function generateSelected(prompt = null) {
     contextQuadrants.length > 0
       ? ` (using ${contextQuadrants.length} as context)`
       : "";
-  const promptMsg = prompt ? " with prompt" : "";
+  const promptMsg = effectivePrompt ? " with prompt" : "";
 
   // Start polling for status updates
   startStatusPolling();
@@ -1592,9 +2213,14 @@ async function generateSelected(prompt = null) {
       requestBody.context = contextQuadrants;
     }
 
-    // Include prompt if provided
-    if (prompt) {
-      requestBody.prompt = prompt;
+    // Include prompt if provided (either explicit or saved)
+    if (effectivePrompt) {
+      requestBody.prompt = effectivePrompt;
+    }
+
+    // Include negative_prompt if provided (from saved)
+    if (effectiveNegativePrompt) {
+      requestBody.negative_prompt = effectiveNegativePrompt;
     }
 
     const response = await fetch("/api/generate", {
@@ -2491,6 +3117,15 @@ toggleLines = function() {
 
   // Initialize NYC outline toggle
   initNycOutline();
+
+  // Initialize labels toggle
+  initLabels();
+
+  // Initialize saved prompt indicator
+  updatePromptButtonIndicator();
+
+  // Initialize saved negative prompt indicator
+  updateNegativePromptButtonIndicator();
 
   // Restore saved tool
   restoreSavedTool();

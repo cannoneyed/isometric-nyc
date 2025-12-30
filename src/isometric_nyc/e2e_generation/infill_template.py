@@ -34,6 +34,10 @@ from typing import Callable
 
 from PIL import Image, ImageDraw
 
+from isometric_nyc.e2e_generation.image_preprocessing import (
+  apply_preprocessing as _apply_preprocessing,
+)
+
 # Template and quadrant dimensions
 TEMPLATE_SIZE = 1024
 QUADRANT_SIZE = 512
@@ -209,6 +213,7 @@ class TemplateBuilder:
     has_generation: Callable[[int, int], bool],
     get_render: Callable[[int, int], Image.Image | None] | None = None,
     get_generation: Callable[[int, int], Image.Image | None] | None = None,
+    model_config: "ModelConfig | None" = None,  # noqa: F821
   ):
     """
     Initialize the template builder.
@@ -218,11 +223,13 @@ class TemplateBuilder:
       has_generation: Callable(qx, qy) -> bool to check if quadrant has generation
       get_render: Callable(qx, qy) -> Image to get render for quadrant
       get_generation: Callable(qx, qy) -> Image to get generation for quadrant
+      model_config: Optional model configuration for preprocessing parameters
     """
     self.region = infill_region
     self.has_generation = has_generation
     self.get_render = get_render
     self.get_generation = get_generation
+    self.model_config = model_config
     self._last_validation_error = ""
 
     # Validate region size
@@ -700,7 +707,9 @@ class TemplateBuilder:
       return None
 
     # Create a new builder for the expanded region to find its placement
-    expanded_builder = TemplateBuilder(expanded_region, self.has_generation)
+    expanded_builder = TemplateBuilder(
+      expanded_region, self.has_generation, model_config=self.model_config
+    )
     expanded_placement = expanded_builder.find_optimal_placement(allow_expansion=False)
 
     if expanded_placement is None:
@@ -783,6 +792,21 @@ class TemplateBuilder:
           source_type = "render"
           if quad_img is None:
             continue
+
+          # Apply preprocessing if model_config is provided
+          if self.model_config is not None:
+            has_preprocessing = (
+              self.model_config.desaturation is not None
+              or self.model_config.gamma_shift is not None
+              or self.model_config.noise is not None
+            )
+            if has_preprocessing:
+              quad_img = _apply_preprocessing(
+                quad_img,
+                desaturation=self.model_config.desaturation or 0.0,
+                gamma_shift=self.model_config.gamma_shift or 0.0,
+                noise=self.model_config.noise or 0.0,
+              )
         else:
           # Use generation for context quadrants
           quad_img = self.get_generation(qx, qy)

@@ -23,6 +23,10 @@ class ModelConfig:
   num_inference_steps: int = 28
   model_type: str = "oxen"  # "oxen" for Oxen API, "local" for local inference
   use_base64: bool = False  # Use base64 encoding for local inference (faster)
+  # Optional preprocessing parameters applied to render images in the template
+  desaturation: float | None = None  # 0.0-1.0, amount to desaturate (0=no change, 1=grayscale)
+  gamma_shift: float | None = None  # Gamma adjustment (1.0=no change, <1=darker, >1=brighter)
+  noise: float | None = None  # 0.0-1.0, amount of noise to add
 
   @property
   def api_key(self) -> str | None:
@@ -36,7 +40,7 @@ class ModelConfig:
 
   def to_dict(self) -> dict[str, Any]:
     """Convert to dictionary for JSON serialization (without API key)."""
-    return {
+    result = {
       "name": self.name,
       "model_id": self.model_id,
       "endpoint": self.endpoint,
@@ -44,6 +48,14 @@ class ModelConfig:
       "model_type": self.model_type,
       "use_base64": self.use_base64,
     }
+    # Include preprocessing params if set
+    if self.desaturation is not None:
+      result["desaturation"] = self.desaturation
+    if self.gamma_shift is not None:
+      result["gamma_shift"] = self.gamma_shift
+    if self.noise is not None:
+      result["noise"] = self.noise
+    return result
 
 
 @dataclass
@@ -108,6 +120,9 @@ def load_app_config(config_path: Path | None = None) -> AppConfig:
         num_inference_steps=model_data.get("num_inference_steps", 28),
         model_type=model_data.get("model_type", "oxen"),
         use_base64=model_data.get("use_base64", False),
+        desaturation=model_data.get("desaturation"),
+        gamma_shift=model_data.get("gamma_shift"),
+        noise=model_data.get("noise"),
       )
     )
 
@@ -165,17 +180,24 @@ def save_app_config(config: AppConfig, config_path: Path | None = None) -> None:
   }
 
   for model in config.models:
-    data["models"].append(
-      {
-        "name": model.name,
-        "model_id": model.model_id,
-        "api_key_env": model.api_key_env,
-        "endpoint": model.endpoint,
-        "num_inference_steps": model.num_inference_steps,
-        "model_type": model.model_type,
-        "use_base64": model.use_base64,
-      }
-    )
+    model_dict = {
+      "name": model.name,
+      "model_id": model.model_id,
+      "api_key_env": model.api_key_env,
+      "endpoint": model.endpoint,
+      "num_inference_steps": model.num_inference_steps,
+      "model_type": model.model_type,
+      "use_base64": model.use_base64,
+    }
+    # Include preprocessing params if set
+    if model.desaturation is not None:
+      model_dict["desaturation"] = model.desaturation
+    if model.gamma_shift is not None:
+      model_dict["gamma_shift"] = model.gamma_shift
+    if model.noise is not None:
+      model_dict["noise"] = model.noise
+
+    data["models"].append(model_dict)
 
   with open(config_path, "w") as f:
     json.dump(data, f, indent=2)

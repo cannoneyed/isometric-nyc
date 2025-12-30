@@ -188,6 +188,30 @@ def ensure_is_water_column_exists(conn: sqlite3.Connection) -> None:
     print("📝 Added 'is_water' column to quadrants table")
 
 
+def ensure_starred_column_exists(conn: sqlite3.Connection) -> None:
+  """Ensure the starred column exists in the quadrants table (migration)."""
+  cursor = conn.cursor()
+  # Check if column exists
+  cursor.execute("PRAGMA table_info(quadrants)")
+  columns = [row[1] for row in cursor.fetchall()]
+  if "starred" not in columns:
+    cursor.execute("ALTER TABLE quadrants ADD COLUMN starred INTEGER DEFAULT 0")
+    conn.commit()
+    print("📝 Added 'starred' column to quadrants table")
+
+
+def ensure_is_reference_column_exists(conn: sqlite3.Connection) -> None:
+  """Ensure the is_reference column exists in the quadrants table (migration)."""
+  cursor = conn.cursor()
+  # Check if column exists
+  cursor.execute("PRAGMA table_info(quadrants)")
+  columns = [row[1] for row in cursor.fetchall()]
+  if "is_reference" not in columns:
+    cursor.execute("ALTER TABLE quadrants ADD COLUMN is_reference INTEGER DEFAULT 0")
+    conn.commit()
+    print("📝 Added 'is_reference' column to quadrants table")
+
+
 def get_quadrant_generation(x: int, y: int) -> bytes | None:
   """Get the generation bytes for a quadrant."""
   conn = get_db_connection()
@@ -227,7 +251,7 @@ def get_quadrant_data(x: int, y: int, use_render: bool = False) -> bytes | None:
 
 def get_quadrant_info(x: int, y: int, use_render: bool = False) -> dict:
   """
-  Get info about a quadrant including whether it has data, is flagged, and water status.
+  Get info about a quadrant including whether it has data, is flagged, starred, and water status.
 
   Water status values:
     -1: Explicitly NOT water (protected from auto-detection)
@@ -239,12 +263,15 @@ def get_quadrant_info(x: int, y: int, use_render: bool = False) -> dict:
     # Ensure columns exist
     ensure_flagged_column_exists(conn)
     ensure_is_water_column_exists(conn)
+    ensure_starred_column_exists(conn)
+    ensure_is_reference_column_exists(conn)
 
     cursor = conn.cursor()
     column = "render" if use_render else "generation"
     cursor.execute(
       f"""
-      SELECT {column} IS NOT NULL, COALESCE(flagged, 0), COALESCE(is_water, 0)
+      SELECT {column} IS NOT NULL, COALESCE(flagged, 0), COALESCE(is_water, 0),
+             COALESCE(starred, 0), COALESCE(is_reference, 0)
       FROM quadrants
       WHERE quadrant_x = ? AND quadrant_y = ?
       """,
@@ -259,6 +286,8 @@ def get_quadrant_info(x: int, y: int, use_render: bool = False) -> dict:
         "is_water": water_status == 1,  # True if water
         "is_explicit_not_water": water_status == -1,  # True if explicitly not water
         "water_status": water_status,  # Raw value: -1, 0, or 1
+        "starred": bool(row[3]),
+        "is_reference": bool(row[4]),
       }
     return {
       "has_data": False,
@@ -266,6 +295,8 @@ def get_quadrant_info(x: int, y: int, use_render: bool = False) -> dict:
       "is_water": False,
       "is_explicit_not_water": False,
       "water_status": 0,
+      "starred": False,
+      "is_reference": False,
     }
   finally:
     conn.close()
@@ -289,19 +320,23 @@ def index():
   nx = max(1, min(nx, 20))
   ny = max(1, min(ny, 20))
 
-  # Check which tiles have data, flagged status, and water status
+  # Check which tiles have data, flagged status, starred status, and water status
   tiles = {}
   flagged_tiles = {}
+  starred_tiles = {}
   water_tiles = {}
   explicit_not_water_tiles = {}
+  reference_tiles = {}
   for dx in range(nx):
     for dy in range(ny):
       qx, qy = x + dx, y + dy
       info = get_quadrant_info(qx, qy, use_render=show_render)
       tiles[(dx, dy)] = info["has_data"]
       flagged_tiles[(dx, dy)] = info["flagged"]
+      starred_tiles[(dx, dy)] = info["starred"]
       water_tiles[(dx, dy)] = info["is_water"]
       explicit_not_water_tiles[(dx, dy)] = info["is_explicit_not_water"]
+      reference_tiles[(dx, dy)] = info["is_reference"]
 
   # Get model configuration for the frontend
   models_config = []
@@ -322,8 +357,10 @@ def index():
     show_render=show_render,
     tiles=tiles,
     flagged_tiles=flagged_tiles,
+    starred_tiles=starred_tiles,
     water_tiles=water_tiles,
     explicit_not_water_tiles=explicit_not_water_tiles,
+    reference_tiles=reference_tiles,
     generation_dir=str(GENERATION_DIR),
     models_config=json.dumps(models_config),
     default_model_id=default_model_id,
@@ -442,6 +479,61 @@ def calculate_context_quadrants(
   return context
 
 
+def run_nano_banana_generation_wrapper(
+  conn: sqlite3.Connection,
+  config: dict,
+  selected_quadrants: list[tuple[int, int]],
+  context_quadrants: list[tuple[int, int]] | None = None,
+  prompt: str | None = None,
+  negative_prompt: str | None = None,
+  model_config: "ModelConfig | None" = None,  # noqa: F821
+) -> dict:
+  """Wrapper to call nano banana generation with references from DB."""
+  from isometric_nyc.e2e_generation.generate_tile_nano_banana import (
+    run_nano_banana_generation,
+  )
+
+  # Load all marked references from database
+  ensure_is_reference_column_exists(conn)
+  cursor = conn.cursor()
+  cursor.execute(
+    "SELECT quadrant_x, quadrant_y FROM quadrants WHERE is_reference = 1"
+  )
+  reference_coords = [(row[0], row[1]) for row in cursor.fetchall()]
+
+  if not reference_coords:
+    return {
+      "success": False,
+      "error": "No reference tiles marked. Please mark at least one 2x2 reference tile.",
+    }
+
+  print(f"   🍌 Loaded {len(reference_coords)} reference tile(s)")
+
+  # Call nano banana generation
+  try:
+    result = run_nano_banana_generation(
+      conn=conn,
+      config=config,
+      selected_quadrants=selected_quadrants,
+      reference_coords=reference_coords,
+      port=DEFAULT_WEB_PORT,
+      prompt=prompt,
+      negative_prompt=negative_prompt,
+      save=True,
+      status_callback=None,
+      context_quadrants=context_quadrants,
+      generation_dir=GENERATION_DIR,
+      model_config=model_config,
+    )
+
+    return result
+  except Exception as e:
+    import traceback
+
+    traceback.print_exc()
+    return {"success": False, "error": f"Nano banana generation failed: {str(e)}"}
+
+
 def run_generation(
   conn: sqlite3.Connection,
   config: dict,
@@ -449,6 +541,7 @@ def run_generation(
   model_id: str | None = None,
   context_quadrants: list[tuple[int, int]] | None = None,
   prompt: str | None = None,
+  negative_prompt: str | None = None,
 ) -> dict:
   """
   Run the full generation pipeline for selected quadrants.
@@ -465,6 +558,7 @@ def run_generation(
       context. These quadrants provide surrounding pixel art context for the
       generation.
     prompt: Optional additional prompt text for generation
+    negative_prompt: Optional negative prompt text for generation
 
   Returns dict with success status and message/error.
   """
@@ -474,6 +568,12 @@ def run_generation(
     model_config = APP_CONFIG.get_model(model_id)
   elif APP_CONFIG:
     model_config = APP_CONFIG.get_default_model()
+
+  # Route to nano banana if model_type is nano_banana
+  if model_config and model_config.model_type == "nano_banana":
+    return run_nano_banana_generation_wrapper(
+      conn, config, selected_quadrants, context_quadrants, prompt, negative_prompt, model_config
+    )
 
   # Create status callback that updates global state
   def status_callback(status: str, message: str) -> None:
@@ -489,6 +589,7 @@ def run_generation(
     model_config=model_config,
     context_quadrants=context_quadrants,
     prompt=prompt,
+    negative_prompt=negative_prompt,
   )
 
 
@@ -553,7 +654,7 @@ def process_queue_item_from_db(item_id: int) -> dict:
     cursor = conn.cursor()
     cursor.execute(
       """
-      SELECT item_type, quadrants, model_id, context_quadrants, prompt
+      SELECT item_type, quadrants, model_id, context_quadrants, prompt, negative_prompt
       FROM generation_queue
       WHERE id = ?
       """,
@@ -568,6 +669,7 @@ def process_queue_item_from_db(item_id: int) -> dict:
     model_id = row[2]
     context_quadrants_raw = json.loads(row[3]) if row[3] else None
     prompt = row[4]
+    negative_prompt = row[5]
 
     # Convert to list of tuples
     selected_quadrants = [(q[0], q[1]) for q in quadrants]
@@ -616,6 +718,8 @@ def process_queue_item_from_db(item_id: int) -> dict:
       print(f"   Context: {context_quadrants}")
     if prompt:
       print(f"   Prompt: {prompt}")
+    if negative_prompt:
+      print(f"   Negative Prompt: {negative_prompt}")
     print(f"{'=' * 60}")
 
     config = get_generation_config(conn)
@@ -627,7 +731,7 @@ def process_queue_item_from_db(item_id: int) -> dict:
 
       for gen_attempt in range(1, max_generation_retries + 1):
         result = run_generation(
-          conn, config, selected_quadrants, model_id, context_quadrants, prompt
+          conn, config, selected_quadrants, model_id, context_quadrants, prompt, negative_prompt
         )
 
         if result["success"]:
@@ -867,6 +971,7 @@ def add_to_queue_db(
   model_id: str | None = None,
   context_quadrants: list[tuple[int, int]] | None = None,
   prompt: str | None = None,
+  negative_prompt: str | None = None,
 ) -> dict:
   """Add a generation/render request to the database queue."""
   conn = get_db_connection()
@@ -878,6 +983,7 @@ def add_to_queue_db(
       model_id,
       context_quadrants,
       prompt,
+      negative_prompt,
     )
 
     # Get model-specific queue position
@@ -1289,6 +1395,254 @@ def api_flag():
     conn.close()
 
 
+@app.route("/api/star", methods=["POST"])
+def api_star():
+  """
+  API endpoint to star/unstar a single quadrant.
+
+  Note: Only one quadrant can be starred at a time.
+  """
+  data = request.get_json()
+  if not data or "quadrant" not in data:
+    return jsonify({"success": False, "error": "No quadrant specified"})
+
+  quadrant = data["quadrant"]
+  if not isinstance(quadrant, list) or len(quadrant) != 2:
+    return jsonify({"success": False, "error": "Quadrant must be [x, y]"})
+
+  qx, qy = int(quadrant[0]), int(quadrant[1])
+  star_value = 1 if data.get("star", True) else 0
+
+  conn = get_db_connection()
+
+  try:
+    # Ensure the starred column exists
+    ensure_starred_column_exists(conn)
+
+    cursor = conn.execute(
+      """
+      UPDATE quadrants
+      SET starred = ?
+      WHERE quadrant_x = ? AND quadrant_y = ?
+      """,
+      (star_value, qx, qy),
+    )
+
+    if cursor.rowcount > 0:
+      conn.commit()
+      action = "Starred" if star_value else "Unstarred"
+      return jsonify(
+        {
+          "success": True,
+          "message": f"{action} quadrant ({qx}, {qy})",
+          "starred": bool(star_value),
+          "quadrant": [qx, qy],
+        }
+      )
+    else:
+      return jsonify(
+        {
+          "success": False,
+          "error": f"Quadrant ({qx}, {qy}) not found in database",
+        }
+      )
+  except Exception as e:
+    return jsonify({"success": False, "error": str(e)})
+  finally:
+    conn.close()
+
+
+@app.route("/api/starred")
+def api_starred():
+  """
+  API endpoint to get all starred quadrants.
+
+  Returns a list of starred quadrant coordinates with their info.
+  """
+  conn = get_db_connection()
+
+  try:
+    # Ensure the starred column exists
+    ensure_starred_column_exists(conn)
+
+    cursor = conn.cursor()
+    cursor.execute(
+      """
+      SELECT quadrant_x, quadrant_y, generation IS NOT NULL, render IS NOT NULL
+      FROM quadrants
+      WHERE starred = 1
+      ORDER BY quadrant_y, quadrant_x
+      """
+    )
+
+    starred = []
+    for row in cursor.fetchall():
+      starred.append(
+        {
+          "x": row[0],
+          "y": row[1],
+          "has_generation": bool(row[2]),
+          "has_render": bool(row[3]),
+        }
+      )
+
+    return jsonify(
+      {
+        "success": True,
+        "starred": starred,
+        "count": len(starred),
+      }
+    )
+  except Exception as e:
+    return jsonify({"success": False, "error": str(e)})
+  finally:
+    conn.close()
+
+
+@app.route("/api/reference", methods=["POST"])
+def api_reference():
+  """
+  API endpoint to mark/unmark a single quadrant as reference (top-left of 2x2 tile).
+
+  Reference tiles are used for nano banana generation to provide style context.
+  """
+  from isometric_nyc.e2e_generation.shared import (
+    get_quadrant_generation as shared_get_quadrant_generation,
+  )
+
+  data = request.get_json()
+  if not data or "quadrant" not in data:
+    return jsonify({"success": False, "error": "No quadrant specified"})
+
+  quadrant = data["quadrant"]
+  if not isinstance(quadrant, list) or len(quadrant) != 2:
+    return jsonify({"success": False, "error": "Quadrant must be [x, y]"})
+
+  qx, qy = int(quadrant[0]), int(quadrant[1])
+  reference_value = 1 if data.get("reference", True) else 0
+
+  conn = get_db_connection()
+
+  try:
+    # Ensure the is_reference column exists
+    ensure_is_reference_column_exists(conn)
+
+    # Validate that this is a valid 2x2 tile (all 4 quadrants have generations)
+    if reference_value == 1:
+      # Check all 4 quadrants exist with generations
+      for dx in [0, 1]:
+        for dy in [0, 1]:
+          gen = shared_get_quadrant_generation(conn, qx + dx, qy + dy)
+          if gen is None:
+            return jsonify(
+              {
+                "success": False,
+                "error": f"Incomplete 2x2 tile at ({qx + dx}, {qy + dy}). All 4 quadrants must have generations.",
+              }
+            )
+
+    cursor = conn.execute(
+      """
+      UPDATE quadrants
+      SET is_reference = ?
+      WHERE quadrant_x = ? AND quadrant_y = ?
+      """,
+      (reference_value, qx, qy),
+    )
+
+    if cursor.rowcount > 0:
+      conn.commit()
+      action = "Marked as reference" if reference_value else "Unmarked as reference"
+      return jsonify(
+        {
+          "success": True,
+          "message": f"{action}: ({qx}, {qy})",
+          "is_reference": bool(reference_value),
+          "quadrant": [qx, qy],
+        }
+      )
+    else:
+      return jsonify(
+        {
+          "success": False,
+          "error": f"Quadrant ({qx}, {qy}) not found in database",
+        }
+      )
+  except Exception as e:
+    return jsonify({"success": False, "error": str(e)})
+  finally:
+    conn.close()
+
+
+@app.route("/api/references")
+def api_references():
+  """
+  API endpoint to get all reference quadrants.
+
+  Returns a list of reference quadrant coordinates (top-left of 2x2 tiles).
+  """
+  conn = get_db_connection()
+
+  try:
+    # Ensure the is_reference column exists
+    ensure_is_reference_column_exists(conn)
+
+    cursor = conn.cursor()
+    cursor.execute(
+      """
+      SELECT quadrant_x, quadrant_y
+      FROM quadrants
+      WHERE is_reference = 1
+      ORDER BY quadrant_y, quadrant_x
+      """
+    )
+
+    references = [[row[0], row[1]] for row in cursor.fetchall()]
+
+    return jsonify(
+      {
+        "success": True,
+        "references": references,
+        "count": len(references),
+      }
+    )
+  except Exception as e:
+    return jsonify({"success": False, "error": str(e)})
+  finally:
+    conn.close()
+
+
+@app.route("/api/references/clear", methods=["POST"])
+def api_clear_references():
+  """
+  API endpoint to clear all reference quadrants.
+
+  Removes reference status from all quadrants.
+  """
+  conn = get_db_connection()
+
+  try:
+    # Ensure the is_reference column exists
+    ensure_is_reference_column_exists(conn)
+
+    cursor = conn.execute("UPDATE quadrants SET is_reference = 0 WHERE is_reference = 1")
+
+    cleared_count = cursor.rowcount
+    conn.commit()
+
+    return jsonify(
+      {
+        "success": True,
+        "message": f"Cleared {cleared_count} reference(s)",
+        "count": cleared_count,
+      }
+    )
+  except Exception as e:
+    return jsonify({"success": False, "error": str(e)})
+  finally:
+    conn.close()
+
+
 @app.route("/api/water", methods=["POST"])
 def api_water():
   """
@@ -1689,6 +2043,22 @@ def api_generate():
     if not prompt:
       prompt = None
 
+  # Parse optional negative_prompt
+  negative_prompt = data.get("negative_prompt")
+  if negative_prompt and not isinstance(negative_prompt, str):
+    return jsonify(
+      {
+        "success": False,
+        "error": "negative_prompt must be a string",
+      }
+    ), 400
+
+  # Clean up negative_prompt (strip whitespace, None if empty)
+  if negative_prompt:
+    negative_prompt = negative_prompt.strip()
+    if not negative_prompt:
+      negative_prompt = None
+
   print(f"\n{'=' * 60}")
   print(f"🎯 Generation request: {selected_quadrants}")
   if model_id:
@@ -1697,11 +2067,13 @@ def api_generate():
     print(f"   Context: {context_quadrants}")
   if prompt:
     print(f"   Prompt: {prompt}")
+  if negative_prompt:
+    print(f"   Negative Prompt: {negative_prompt}")
   print(f"{'=' * 60}")
 
   # Always add to queue (database-backed queue handles everything)
   result = add_to_queue_db(
-    selected_quadrants, "generate", model_id, context_quadrants, prompt
+    selected_quadrants, "generate", model_id, context_quadrants, prompt, negative_prompt
   )
   return jsonify(result), 202  # 202 Accepted
 

@@ -11,19 +11,69 @@ This script generates training examples combining:
 
 All render pixels are outlined with a 1px solid red border.
 
+Transformations can be applied to render regions (in order):
+- desaturation: Reduce color saturation (0.0 to 1.0) - kills the "satellite green"
+- noise: Add multiplicative grain (0.0 to 1.0) - mimics texture loss, looks like gritty paper
+- gamma_shift: Apply gamma crush (0.0 to 1.0) - THE SECRET SAUCE
+  * Pushes dark greys to black while keeping lighter areas visible
+  * Separates "tree tops" (visible) from "ground" (black)
+  * Destroys the flat look of satellite photos
+  * At intensity=1.0: gamma=1.8 + 0.7x brightness (the perfect corruption)
+
+This "Perfect Corruption" recipe ensures inputs are dark, gritty, high-contrast versions
+of the clean targets, forcing the model to become a "Light Resurrector"
+
 Usage:
   uv run python src/isometric_nyc/synthetic_data/create_omni_dataset.py
   uv run python src/isometric_nyc/synthetic_data/create_omni_dataset.py --dry-run
+
+  # The "Perfect Corruption" recipe (recommended for training):
+  uv run python src/isometric_nyc/synthetic_data/create_omni_dataset.py \
+    --desaturation 0.5 --noise 1.0 --gamma-shift 1.0
+
+  # With custom CSV specifying per-image settings:
+  uv run python src/isometric_nyc/synthetic_data/create_omni_dataset.py --csv custom_settings.csv
+
+CSV format (columns):
+  name          - File name (without extension) in generations/renders
+  n_variants    - Number of variants to create for this image
+  prompt        - Optional exact prompt to use (overrides default prompt entirely)
+  prompt_suffix - Optional suffix to append to the standard prompt (ignored if prompt is set)
+  noise         - Optional noise level (0.0 to 1.0)
+  desaturation  - Optional desaturation level (0.0 to 1.0)
+  gamma_shift   - Optional gamma shift level (0.0 to 1.0)
 """
 
 import argparse
 import csv
 import random
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Tuple
 
+import numpy as np
 from PIL import Image, ImageDraw
+
+from isometric_nyc.e2e_generation.image_preprocessing import (
+  apply_desaturation,
+  apply_gamma_shift,
+  apply_noise,
+)
+
+
+@dataclass
+class ImageSettings:
+  """Per-image settings from CSV or defaults."""
+
+  name: str
+  n_variants: int
+  prompt: str = ""  # If set, overrides the default prompt entirely
+  prompt_suffix: str = ""  # If set, appended to default prompt (ignored if prompt is set)
+  noise: float = 0.0
+  desaturation: float = 0.0
+  gamma_shift: float = 0.0
+
 
 # Image dimensions
 TARGET_SIZE = (1024, 1024)
@@ -230,12 +280,28 @@ def create_omni_image(
   img_render: Image.Image,
   gen_type: str,
   rng: random.Random,
+  noise: float = 0.0,
+  desaturation: float = 0.0,
+  gamma_shift: float = 0.0,
 ) -> Image.Image:
   """
   Create an omni training image.
 
   Takes the generation image and replaces specified regions with render pixels,
+  applies transformations (noise, desaturation, gamma_shift) to render regions,
   then draws red outlines around the render regions.
+
+  Args:
+    img_gen: Generated image
+    img_render: Rendered image
+    gen_type: Type of generation layout
+    rng: Random number generator
+    noise: Noise intensity to apply to render regions (0.0 to 1.0)
+    desaturation: Desaturation intensity for render regions (0.0 to 1.0)
+    gamma_shift: Gamma shift intensity for render regions (0.0 to 1.0)
+
+  Returns:
+    Final omni image with transformations and outlines
   """
   width, height = TARGET_SIZE
 
@@ -248,16 +314,31 @@ def create_omni_image(
   # Get render regions
   regions = get_render_regions(gen_type, width, height, rng)
 
+  # Apply transformations to render image if any are specified
+  # Order: desaturation -> noise (grain) -> gamma_shift (crush)
+  # The "Perfect Corruption" recipe:
+  # 1. Desaturate to kill the satellite green and prevent color overfitting
+  # 2. Add grain to mimic texture loss (gritty paper look)
+  # 3. Gamma crush to separate highlights from shadows and destroy flatness
+  transformed_render = img_render
+  if noise > 0 or desaturation > 0 or gamma_shift > 0:
+    if desaturation > 0:
+      transformed_render = apply_desaturation(transformed_render, desaturation)
+    if noise > 0:
+      transformed_render = apply_noise(transformed_render, noise)
+    if gamma_shift > 0:
+      transformed_render = apply_gamma_shift(transformed_render, gamma_shift)
+
   # Start with generation image (or empty for full render)
   if gen_type == TYPE_FULL:
-    final_image = img_render.copy()
+    final_image = transformed_render.copy()
     # Ensure we draw the border for full render
     # get_render_regions returns the full box, so draw_multi_region_outline will handle it
   else:
     final_image = img_gen.copy()
-    # Paste render regions
+    # Paste transformed render regions
     for x1, y1, x2, y2 in regions:
-      render_crop = img_render.crop((x1, y1, x2, y2))
+      render_crop = transformed_render.crop((x1, y1, x2, y2))
       final_image.paste(render_crop, (x1, y1))
 
   # Draw outlines
@@ -433,6 +514,219 @@ def assign_generation_types(
   return assignments
 
 
+def assign_generation_types_variable(
+  variant_counts: List[int], rng: random.Random
+) -> List[List[str]]:
+  """
+  Assign generation types when each image has a variable number of variants.
+
+  This is similar to assign_generation_types but handles different variant counts
+  per image rather than a fixed number.
+
+  Constraints per image:
+  1. Max 1 "full"
+  2. Max 1 "middle" category variant
+  3. Max 1 of the same "half" type
+  """
+  num_images = len(variant_counts)
+  total_variants = sum(variant_counts)
+
+  if total_variants == 0:
+    return [[] for _ in range(num_images)]
+
+  # Calculate how many of each category
+  category_counts = {
+    cat: int(total_variants * weight) for cat, weight in DISTRIBUTION.items()
+  }
+
+  # Adjust for rounding errors - add to "infill" which is least constrained
+  diff = total_variants - sum(category_counts.values())
+  if diff > 0:
+    category_counts["infill"] += diff
+
+  # Create pool of generation types
+  type_pool: List[str] = []
+
+  # Full
+  type_pool.extend([TYPE_FULL] * category_counts["full"])
+
+  # Quadrant - distribute evenly among 4 quadrants
+  quadrant_each = category_counts["quadrant"] // 4
+  for qt in QUADRANT_TYPES:
+    type_pool.extend([qt] * quadrant_each)
+  remainder = category_counts["quadrant"] - (quadrant_each * 4)
+  for i in range(remainder):
+    type_pool.append(QUADRANT_TYPES[i % 4])
+
+  # Half - distribute evenly among 4 halves
+  half_each = category_counts["half"] // 4
+  for ht in HALF_TYPES:
+    type_pool.extend([ht] * half_each)
+  remainder = category_counts["half"] - (half_each * 4)
+  for i in range(remainder):
+    type_pool.append(HALF_TYPES[i % 4])
+
+  # Middle - distribute evenly
+  middle_each = category_counts["middle"] // 2
+  for mt in MIDDLE_TYPES:
+    type_pool.extend([mt] * middle_each)
+  remainder = category_counts["middle"] - (middle_each * 2)
+  for i in range(remainder):
+    type_pool.append(MIDDLE_TYPES[i % 2])
+
+  # Strip - distribute evenly
+  strip_each = category_counts["strip"] // 2
+  for st in STRIP_TYPES:
+    type_pool.extend([st] * strip_each)
+  remainder = category_counts["strip"] - (strip_each * 2)
+  for i in range(remainder):
+    type_pool.append(STRIP_TYPES[i % 2])
+
+  # Infill
+  type_pool.extend([TYPE_RECT_INFILL] * category_counts["infill"])
+
+  # Sort pool to prioritize constrained types
+  def get_priority(t: str) -> int:
+    if t == TYPE_FULL:
+      return 0
+    if t in MIDDLE_TYPES:
+      return 1
+    if t in HALF_TYPES:
+      return 2
+    return 3
+
+  type_pool.sort(key=get_priority)
+
+  # Distribute to images (each with its own capacity)
+  assignments: List[List[str]] = [[] for _ in range(num_images)]
+
+  # Shuffle image order for fairer distribution
+  image_indices = list(range(num_images))
+  rng.shuffle(image_indices)
+
+  # For each type in the pool, try to find a valid slot
+  unassigned = []
+
+  for gen_type in type_pool:
+    assigned = False
+    start_idx = rng.randint(0, num_images - 1)
+
+    for i in range(num_images):
+      idx = (start_idx + i) % num_images
+      image_idx = image_indices[idx]
+
+      if len(assignments[image_idx]) < variant_counts[image_idx]:
+        if is_valid_assignment(assignments[image_idx], gen_type):
+          assignments[image_idx].append(gen_type)
+          assigned = True
+          break
+
+    if not assigned:
+      unassigned.append(gen_type)
+
+  # Force assign any remaining (should be rare)
+  for gen_type in unassigned:
+    for i, bucket in enumerate(assignments):
+      if len(bucket) < variant_counts[i]:
+        bucket.append(gen_type)
+        break
+
+  # Shuffle variants within each image
+  for bucket in assignments:
+    rng.shuffle(bucket)
+
+  return assignments
+
+
+def load_csv_settings(csv_path: Path) -> dict[str, ImageSettings]:
+  """
+  Load per-image settings from a CSV file.
+
+  CSV columns:
+    name          - File name (without extension) in generations/renders
+    n_variants    - Number of variants to create for this image
+    prompt        - Optional exact prompt to use (overrides default prompt entirely)
+    prompt_suffix - Optional suffix to append to the standard prompt (ignored if prompt is set)
+    noise         - Optional noise level (0.0 to 1.0)
+    desaturation  - Optional desaturation level (0.0 to 1.0)
+    gamma_shift   - Optional gamma shift level (0.0 to 1.0)
+
+  Returns:
+    Dict mapping image name to ImageSettings.
+  """
+  settings: dict[str, ImageSettings] = {}
+
+  with open(csv_path, newline="") as f:
+    reader = csv.DictReader(f)
+
+    # Validate required columns
+    if reader.fieldnames is None:
+      raise ValueError("CSV file is empty or has no headers")
+
+    required_cols = {"name", "n_variants"}
+    missing = required_cols - set(reader.fieldnames)
+    if missing:
+      raise ValueError(f"CSV missing required columns: {missing}")
+
+    for row_num, row in enumerate(reader, start=2):  # Start at 2 (header is row 1)
+      name = row.get("name", "").strip()
+      if not name:
+        print(f"   ⚠️  Row {row_num}: Skipping empty name")
+        continue
+
+      # Remove file extension if present
+      if name.endswith(".png"):
+        name = name[:-4]
+
+      try:
+        n_variants = int(row.get("n_variants", "5"))
+      except ValueError:
+        print(
+          f"   ⚠️  Row {row_num}: Invalid n_variants '{row.get('n_variants')}', using 5"
+        )
+        n_variants = 5
+
+      # Get prompt (exact override) or prompt_suffix (appended to default)
+      prompt = row.get("prompt", "") or ""
+      prompt = prompt.strip()
+      prompt_suffix = row.get("prompt_suffix", "") or ""
+      prompt_suffix = prompt_suffix.strip()
+
+      # Parse optional float parameters
+      def parse_float_param(param_name: str, default: float = 0.0) -> float:
+        value_str = row.get(param_name, "")
+        # Handle None values from empty CSV cells
+        if value_str is None:
+          value_str = ""
+        value_str = value_str.strip()
+        if not value_str:
+          return default
+        try:
+          value = float(value_str)
+          return max(0.0, min(1.0, value))  # Clamp to [0, 1]
+        except ValueError:
+          print(
+            f"   ⚠️  Row {row_num}: Invalid {param_name} '{value_str}', using {default}"
+          )
+          return default
+
+      noise = parse_float_param("noise")
+      desaturation = parse_float_param("desaturation")
+      gamma_shift = parse_float_param("gamma_shift")
+
+      settings[name] = ImageSettings(
+        name=name,
+        n_variants=n_variants,
+        prompt=prompt,
+        prompt_suffix=prompt_suffix,
+        noise=noise,
+        desaturation=desaturation,
+        gamma_shift=gamma_shift,
+      )
+
+  return settings
+
+
 def main() -> None:
   parser = argparse.ArgumentParser(
     description="Create omni generation dataset combining all strategies"
@@ -456,6 +750,12 @@ def main() -> None:
     help="Number of variants to create per image (default: 5)",
   )
   parser.add_argument(
+    "--csv",
+    type=Path,
+    default=None,
+    help="CSV file with per-image settings (columns: name, n_variants, prompt, prompt_suffix, noise, desaturation, gamma_shift)",
+  )
+  parser.add_argument(
     "--seed",
     type=int,
     default=42,
@@ -465,6 +765,24 @@ def main() -> None:
     "--dry-run",
     action="store_true",
     help="Print what would be done without creating files",
+  )
+  parser.add_argument(
+    "--noise",
+    type=float,
+    default=0.0,
+    help="Add noise to rendered regions (0.0 to 1.0, default: 0.0)",
+  )
+  parser.add_argument(
+    "--desaturation",
+    type=float,
+    default=0.0,
+    help="Desaturate rendered regions (0.0 to 1.0, default: 0.0)",
+  )
+  parser.add_argument(
+    "--gamma-shift",
+    type=float,
+    default=0.0,
+    help="Darken rendered regions via gamma shift (0.0 to 1.0, default: 0.0)",
   )
   args = parser.parse_args()
 
@@ -483,19 +801,62 @@ def main() -> None:
     print(f"❌ Dataset directory not found: {dataset_dir}")
     sys.exit(1)
 
+  # Load CSV settings if provided
+  csv_settings: dict[str, ImageSettings] = {}
+  if args.csv:
+    if not args.csv.exists():
+      print(f"❌ CSV file not found: {args.csv}")
+      sys.exit(1)
+    print(f"📋 Loading settings from: {args.csv}")
+    csv_settings = load_csv_settings(args.csv)
+    print(f"   Loaded settings for {len(csv_settings)} images")
+
   # Get image pairs
-  pairs = get_image_pairs(dataset_dir)
-  if not pairs:
+  all_pairs = get_image_pairs(dataset_dir)
+  if not all_pairs:
     print("❌ No valid image pairs found in dataset")
     sys.exit(1)
+
+  # Filter pairs to only those in CSV (if CSV provided)
+  if csv_settings:
+    pairs = [(num, gen, ren) for num, gen, ren in all_pairs if num in csv_settings]
+    if not pairs:
+      print("❌ No matching images found between CSV and dataset")
+      print(f"   CSV names: {list(csv_settings.keys())[:5]}...")
+      print(f"   Dataset names: {[p[0] for p in all_pairs[:5]]}...")
+      sys.exit(1)
+    print(f"   Matched {len(pairs)}/{len(all_pairs)} images from dataset")
+  else:
+    pairs = all_pairs
+
+  # Build per-image settings (from CSV or defaults)
+  image_settings_list: List[ImageSettings] = []
+  total_variants = 0
+  for image_num, _, _ in pairs:
+    if image_num in csv_settings:
+      settings = csv_settings[image_num]
+    else:
+      settings = ImageSettings(
+        name=image_num,
+        n_variants=args.variants,
+        noise=args.noise,
+        desaturation=args.desaturation,
+        gamma_shift=args.gamma_shift,
+      )
+    image_settings_list.append(settings)
+    total_variants += settings.n_variants
 
   print("=" * 60)
   print("🖼️  CREATING OMNI GENERATION DATASET")
   print(f"   Dataset: {dataset_dir}")
   print(f"   Output: {output_dir}")
   print(f"   Images: {len(pairs)}")
-  print(f"   Variants per image: {args.variants}")
-  print(f"   Total examples: ~{len(pairs) * args.variants}")
+  if csv_settings:
+    print(f"   Settings from CSV: {args.csv.name}")
+    print(f"   Total examples: {total_variants}")
+  else:
+    print(f"   Variants per image: {args.variants}")
+    print(f"   Total examples: ~{len(pairs) * args.variants}")
   print("=" * 60)
 
   # Show distribution
@@ -503,10 +864,13 @@ def main() -> None:
   for cat, weight in DISTRIBUTION.items():
     print(f"   {cat}: {weight * 100:.0f}%")
 
+  # Build list of variant counts for type assignment
+  variant_counts = [s.n_variants for s in image_settings_list]
+
   if args.dry_run:
     print("\n🔍 DRY RUN - No files will be created\n")
 
-    type_assignments = assign_generation_types(len(pairs), args.variants, rng)
+    type_assignments = assign_generation_types_variable(variant_counts, rng)
 
     # Count types
     type_counts: dict[str, int] = {}
@@ -521,8 +885,15 @@ def main() -> None:
       print(f"   {gen_type}: {count} ({pct:.1f}%)")
 
     print("\nSample assignments:")
-    for i, (image_num, _, _) in enumerate(pairs[:3]):
-      print(f"   {image_num}:")
+    for i, (image_num, _, _) in enumerate(pairs[:5]):
+      settings = image_settings_list[i]
+      if settings.prompt:
+        prompt_str = " (custom prompt)"
+      elif settings.prompt_suffix:
+        prompt_str = f" (suffix: '{settings.prompt_suffix}')"
+      else:
+        prompt_str = ""
+      print(f"   {image_num} ({settings.n_variants} variants){prompt_str}:")
       for j, gen_type in enumerate(type_assignments[i]):
         suffix = VARIANT_SUFFIXES[j]
         print(f"      {image_num}_{suffix}.png -> {gen_type}")
@@ -532,8 +903,8 @@ def main() -> None:
   # Create output directory
   output_dir.mkdir(parents=True, exist_ok=True)
 
-  # Assign generation types
-  type_assignments = assign_generation_types(len(pairs), args.variants, rng)
+  # Assign generation types with variable counts per image
+  type_assignments = assign_generation_types_variable(variant_counts, rng)
 
   # Track CSV rows
   csv_rows: List[dict] = []
@@ -548,6 +919,17 @@ def main() -> None:
       img_render = Image.open(render_path).convert("RGB")
 
       gen_types = type_assignments[i]
+      settings = image_settings_list[i]
+
+      # Build the prompt
+      # If prompt is set in CSV, use it exactly (overrides default)
+      # Otherwise, use default PROMPT with optional suffix
+      if settings.prompt:
+        full_prompt = settings.prompt
+      elif settings.prompt_suffix:
+        full_prompt = f"{PROMPT} {settings.prompt_suffix}"
+      else:
+        full_prompt = PROMPT
 
       for j, gen_type in enumerate(gen_types):
         suffix = VARIANT_SUFFIXES[j]
@@ -555,7 +937,15 @@ def main() -> None:
         output_path = output_dir / output_filename
 
         # Create omni image
-        omni_img = create_omni_image(img_gen, img_render, gen_type, rng)
+        omni_img = create_omni_image(
+          img_gen,
+          img_render,
+          gen_type,
+          rng,
+          noise=settings.noise,
+          desaturation=settings.desaturation,
+          gamma_shift=settings.gamma_shift,
+        )
 
         # Save
         omni_img.save(output_path)
@@ -568,17 +958,24 @@ def main() -> None:
           {
             "omni": f"omni/{output_filename}",
             "generation": f"generations/{image_num}.png",
-            "prompt": PROMPT,
+            "prompt": full_prompt,
           }
         )
 
-      print(f"✅ {image_num}: Created {len(gen_types)} variants")
+      # Show prompt info in log
+      if settings.prompt:
+        prompt_info = " (custom prompt)"
+      elif settings.prompt_suffix:
+        prompt_info = f" (suffix: '{settings.prompt_suffix}')"
+      else:
+        prompt_info = ""
+      print(f"✅ {image_num}: Created {len(gen_types)} variants{prompt_info}")
 
     except Exception as e:
       print(f"❌ Error processing {image_num}: {e}")
 
   # Write CSV file
-  csv_path = dataset_dir / "omni_v04.csv"
+  csv_path = dataset_dir / "omni.csv"
   with open(csv_path, "w", newline="") as f:
     writer = csv.DictWriter(f, fieldnames=["omni", "generation", "prompt"])
     writer.writeheader()

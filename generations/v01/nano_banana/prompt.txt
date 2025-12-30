@@ -1,26 +1,57 @@
-**Task:** Fill in the outlined section (marked with red border) in Image A with isometric pixel art in the style of the reference images.
+PIXEL ART STYLE TRANSFER TASK
 
-**Input Images:**
-- Image A (template with red border indicating infill area)
-- Image B (style reference 1)
+**Images provided (with visual labels burned in):**
+- Image A: Labeled "TRANSFORM THIS AREA ➜" - Template with 3D render inside red border
+- Image B: Labeled "TARGET STYLE ⭐" - Pixel art reference showing the style to match
 
-**Instructions:**
+**YOUR TASK:**
+Fill in the red-bordered area in Image A with NEW pixel art that:
+1. Shows the SAME CONTENT as the 3D render (buildings, roads, trees in same positions)
+2. Uses the ARTISTIC STYLE from Image B (pixel art aesthetic, colors, simplification)
 
-1. Look at the red border in Image A - this marks the area to be filled with generated pixels.
-2. Study the style of Image B carefully - these show the exact visual style to match.
-3. Fill the bordered area with pixel art that:
-   - Matches the isometric pixel art style of the reference images exactly
-   - Seamlessly blends with any surrounding context in Image A
-   - Follows the structure/shapes hinted at by the render pixels inside the border
-   - Removes the red border completely in the output
+**CRITICAL RULES:**
+❌ DO NOT copy Image A as your output
+❌ DO NOT copy Image B as your output
+❌ DO NOT return any input image unchanged
+✅ You MUST CREATE something NEW by transforming the render
 
+**How to complete this task:**
 
-**Output:**
-- Generate the **complete** image with the bordered area filled in - ensure you preserve the context of the surrounding area.
-- The output should be 1024x1024 pixels
-- Remove all traces of the red border
-- All sections must flow seamlessly into the surrounding area. There should be no hard edges, visible seams, or gaps.
-- The infilled region MUST PERFECTLY BLEND INTO THE SURROUNDING AREA.
+STEP 1: Study Image B (TARGET STYLE ⭐)
+- Memorize the pixel art technique: color choices, shading style, detail level
+- Notice how buildings are simplified, how roads are drawn, how trees look
+- This is your STYLE GUIDE - you will draw in this exact same style
+
+STEP 2: Study Image A (TRANSFORM THIS AREA ➜)
+- Look at the 3D render inside the red border
+- Note what objects are there and where they're positioned
+- This tells you WHAT to draw and WHERE - but NOT how to draw it
+
+STEP 3: Create the output
+- Draw the objects from the 3D render (the WHAT and WHERE)
+- But draw them using the pixel art style from Image B (the HOW)
+- Example: If the render shows a building, draw a pixelated building like ones in Image B
+- Example: If the render shows a road, draw a pixelated road like roads in Image B
+
+**Style requirements (copy from Image B):**
+- Use Image B's color palette
+- Use Image B's shading technique
+- Use Image B's level of detail
+- Use Image B's pixel grid aesthetic
+- Use Image B's geometric simplification
+
+**DO NOT include the labels in your output!**
+The yellow "TRANSFORM THIS AREA" and cyan "TARGET STYLE" labels are just for your understanding.
+Your output should have NO TEXT LABELS.
+
+**OUTPUT REQUIREMENTS:**
+- Full 1024x1024 pixel image
+- Red-bordered area filled with NEWLY CREATED pixel art
+- Pixel art matches Image B's style but shows Image A's content
+- Remove red border and any text labels from output
+- Areas outside red border preserved unchanged
+
+Think of this like: "Redraw the 3D render as pixel art in the style of Image B"
 
 **Additional Instructions:**
-Ensure the trees are simple blobs, and use a limited color palette
+Ensure the style is consistent, and the final image is continuous

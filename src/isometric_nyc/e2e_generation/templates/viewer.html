@@ -102,6 +102,15 @@
               />
               🗽 NYC</label
             >
+            <label
+              ><input
+                type="checkbox"
+                id="showLabels"
+                checked
+                onchange="toggleLabels()"
+              />
+              🏷️ Labels</label
+            >
           </div>
           <div class="toggle-group model-group">
             <label class="model-label"
@@ -228,6 +237,56 @@
             🚩 Flag
           </button>
           <button
+            id="starBtn"
+            class="action-btn star-btn"
+            onclick="starSelected()"
+            disabled
+            title="Star quadrant for dataset curation (select exactly 1)"
+          >
+            ⭐ Star
+          </button>
+          <button
+            id="prevStarredBtn"
+            class="action-btn nav-starred-btn"
+            onclick="goToPrevStarred()"
+            title="Go to previous starred quadrant ([)"
+          >
+            ◀
+          </button>
+          <button
+            id="viewStarredBtn"
+            class="action-btn view-starred-btn"
+            onclick="showStarredDialog()"
+            title="View all starred entries"
+          >
+            📋 Starred
+          </button>
+          <button
+            id="nextStarredBtn"
+            class="action-btn nav-starred-btn"
+            onclick="goToNextStarred()"
+            title="Go to next starred quadrant (])"
+          >
+            ▶
+          </button>
+          <button
+            id="referenceBtn"
+            class="action-btn reference-btn"
+            onclick="referenceSelected()"
+            disabled
+            title="Mark/unmark reference tile (top-left of 2x2) [B]"
+          >
+            🍌 Reference
+          </button>
+          <button
+            id="clearReferencesBtn"
+            class="action-btn clear-references-btn"
+            onclick="clearAllReferences()"
+            title="Clear all reference tiles"
+          >
+            🗑️ Clear Refs
+          </button>
+          <button
             id="renderBtn"
             class="action-btn render-btn"
             onclick="renderSelected()"
@@ -251,6 +310,15 @@
             title="Generate with additional prompt text"
           >
             + Prompt
+          </button>
+          <button
+            id="generateWithNegativePromptBtn"
+            class="action-btn generate-prompt-btn"
+            onclick="showNegativePromptDialog()"
+            disabled
+            title="Generate with negative prompt"
+          >
+            - Neg Prompt
           </button>
           <button
             id="generateRectBtn"
@@ -369,14 +437,18 @@
         {% for dy in range(ny) %} {% for dx in range(nx) %} {% set qx = x + dx
         %} {% set qy = y + dy %} {% set has_gen = tiles.get((dx, dy), False) %}
         {% set is_flagged = flagged_tiles.get((dx, dy), False) %} {% set
+        is_starred = starred_tiles.get((dx, dy), False) %} {% set
         is_water = water_tiles.get((dx, dy), False) %} {% set
-        is_explicit_not_water = explicit_not_water_tiles.get((dx, dy), False) %}
+        is_explicit_not_water = explicit_not_water_tiles.get((dx, dy), False) %} {% set
+        is_reference = reference_tiles.get((dx, dy), False) %}
         <div
-          class="tile {% if not has_gen %}placeholder{% endif %}{% if is_flagged %} flagged{% endif %}{% if is_water %} water{% endif %}{% if is_explicit_not_water %} explicit-not-water{% endif %}"
+          class="tile {% if not has_gen %}placeholder{% endif %}{% if is_flagged %} flagged{% endif %}{% if is_starred %} starred{% endif %}{% if is_water %} water{% endif %}{% if is_explicit_not_water %} explicit-not-water{% endif %}{% if is_reference %} is-reference{% endif %}"
           data-coords="{{ qx }},{{ qy }}"
           data-flagged="{{ 'true' if is_flagged else 'false' }}"
+          data-starred="{{ 'true' if is_starred else 'false' }}"
           data-water="{{ 'true' if is_water else 'false' }}"
           data-explicit-not-water="{{ 'true' if is_explicit_not_water else 'false' }}"
+          data-is-reference="{{ 'true' if is_reference else 'false' }}"
         >
           <span class="coords">({{ qx }}, {{ qy }})</span>
           {% if has_gen %}
@@ -384,10 +456,14 @@
             src="/tile/{{ qx }}/{{ qy }}?render={{ '1' if show_render else '0' }}"
             alt="Tile {{ qx }},{{ qy }}"
           />
+          {% endif %} {% if is_starred %}
+          <span class="starred-indicator" title="Starred for dataset">⭐</span>
           {% endif %} {% if is_water %}
           <span class="water-indicator" title="Water tile">💧</span>
           {% endif %} {% if is_explicit_not_water %}
           <span class="explicit-not-water-indicator" title="Explicitly NOT water (protected)">🚫</span>
+          {% endif %} {% if is_reference %}
+          <span class="reference-indicator" title="Reference tile (top-left of 2x2)">🍌</span>
           {% endif %}
         </div>
         {% endfor %} {% endfor %}
@@ -397,10 +473,12 @@
     <!-- Prompt Dialog -->
     <div id="promptDialog" class="dialog-overlay" style="display: none">
       <div class="dialog-content">
-        <h3>Generate with Prompt</h3>
+        <h3>Generate with Custom Prompt</h3>
         <p class="dialog-description">
-          Add additional instructions for the generation:
+          Provide a custom prompt to completely override the default generation prompt.
+          <br><span class="dialog-hint">This prompt will be saved and applied to all future generations.</span>
         </p>
+        <div id="savedPromptDisplay" class="saved-prompt-display" style="display: none"></div>
         <textarea
           id="promptInput"
           class="prompt-input"
@@ -408,12 +486,74 @@
           rows="3"
         ></textarea>
         <div class="dialog-buttons">
-          <button class="dialog-cancel-btn" onclick="hidePromptDialog()">
-            Cancel
+          <button id="clearPromptBtn" class="dialog-clear-btn" onclick="clearSavedPrompt(); hidePromptDialog();" style="display: none">
+            Clear Saved
           </button>
-          <button class="dialog-submit-btn" onclick="submitPromptGeneration()">
-            Generate
+          <div class="dialog-buttons-right">
+            <button class="dialog-cancel-btn" onclick="hidePromptDialog()">
+              Cancel
+            </button>
+            <button class="dialog-submit-btn" onclick="submitPromptGeneration()">
+              Generate
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Negative Prompt Dialog -->
+    <div id="negativePromptDialog" class="dialog-overlay" style="display: none">
+      <div class="dialog-content">
+        <h3>Generate with Negative Prompt</h3>
+        <p class="dialog-description">
+          Provide a negative prompt to specify what you don't want in the generation.
+          <br><span class="dialog-hint">This negative prompt will be saved and applied to all future generations.</span>
+        </p>
+        <div id="savedNegativePromptDisplay" class="saved-prompt-display" style="display: none"></div>
+        <textarea
+          id="negativePromptInput"
+          class="prompt-input"
+          placeholder="e.g., 'no buildings' or 'no water'"
+          rows="3"
+        ></textarea>
+        <div class="dialog-buttons">
+          <button id="clearNegativePromptBtn" class="dialog-clear-btn" onclick="clearSavedNegativePrompt(); hideNegativePromptDialog();" style="display: none">
+            Clear Saved
           </button>
+          <div class="dialog-buttons-right">
+            <button class="dialog-cancel-btn" onclick="hideNegativePromptDialog()">
+              Cancel
+            </button>
+            <button class="dialog-submit-btn" onclick="submitNegativePromptGeneration()">
+              Generate
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Starred Entries Dialog -->
+    <div id="starredDialog" class="dialog-overlay" style="display: none">
+      <div class="dialog-content starred-dialog-content">
+        <h3>⭐ Starred Entries</h3>
+        <p class="dialog-description">
+          Click an entry to navigate to that location.
+        </p>
+        <div id="starredListContainer" class="starred-list-container">
+          <div id="starredList" class="starred-list">
+            <!-- Populated by JavaScript -->
+          </div>
+        </div>
+        <div id="starredEmptyState" class="starred-empty-state" style="display: none">
+          No starred entries yet. Select a quadrant and click ⭐ Star to add one.
+        </div>
+        <div class="dialog-buttons">
+          <div class="starred-count" id="starredCountDisplay">0 starred</div>
+          <div class="dialog-buttons-right">
+            <button class="dialog-cancel-btn" onclick="hideStarredDialog()">
+              Close
+            </button>
+          </div>
         </div>
       </div>
     </div>

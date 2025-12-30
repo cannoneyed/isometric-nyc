@@ -136,7 +136,7 @@ def call_local_api_b64(
       image: PIL Image of the input template
       model_config: Optional model configuration (ModelConfig from model_config.py).
         If not provided, uses defaults.
-      additional_prompt: Optional additional text to append to the base prompt
+      additional_prompt: Optional custom prompt text to override the base prompt
       use_jpeg: If True, compress image as JPEG (much smaller). Default True.
       jpeg_quality: JPEG quality 1-100 (default 90, good balance of size/quality)
 
@@ -159,18 +159,16 @@ def call_local_api_b64(
     endpoint = "http://localhost:8888/edit-b64"
     num_inference_steps = 15
 
-  # Build prompt - base prompt plus any additional text
-  base_prompt = (
-    "Fill in the outlined section with the missing pixels corresponding to "
-    "the <isometric nyc pixel art> style, removing the border and exactly "
-    "following the shape/style/structure of the surrounding image (if present)."
-  )
-
+  # Build prompt - custom prompt overrides default
   if additional_prompt:
-    prompt = f"{base_prompt} {additional_prompt}"
-    print(f"   📝 Using additional prompt: {additional_prompt}")
+    prompt = additional_prompt
+    print(f"   📝 Using custom prompt: {additional_prompt}")
   else:
-    prompt = base_prompt
+    prompt = (
+      "Fill in the outlined section with the missing pixels corresponding to "
+      "the <isometric nyc pixel art> style, removing the border and exactly "
+      "following the shape/style/structure of the surrounding image (if present)."
+    )
 
   # Convert PIL image to base64 (use JPEG for compression if enabled)
   img_buffer = BytesIO()
@@ -265,7 +263,7 @@ def call_local_api(
       image: PIL Image of the input template
       model_config: Optional model configuration (ModelConfig from model_config.py).
         If not provided, uses defaults.
-      additional_prompt: Optional additional text to append to the base prompt
+      additional_prompt: Optional custom prompt text to override the base prompt
       use_jpeg: If True, compress image as JPEG (much smaller). Default True.
       jpeg_quality: JPEG quality 1-100 (default 90, good balance of size/quality)
 
@@ -287,18 +285,16 @@ def call_local_api(
     endpoint = "http://localhost:8888/edit"
     num_inference_steps = 15
 
-  # Build prompt - base prompt plus any additional text
-  base_prompt = (
-    "Fill in the outlined section with the missing pixels corresponding to "
-    "the <isometric nyc pixel art> style, removing the border and exactly "
-    "following the shape/style/structure of the surrounding image (if present)."
-  )
-
+  # Build prompt - custom prompt overrides default
   if additional_prompt:
-    prompt = f"{base_prompt} {additional_prompt}"
-    print(f"   📝 Using additional prompt: {additional_prompt}")
+    prompt = additional_prompt
+    print(f"   📝 Using custom prompt: {additional_prompt}")
   else:
-    prompt = base_prompt
+    prompt = (
+      "Fill in the outlined section with the missing pixels corresponding to "
+      "the <isometric nyc pixel art> style, removing the border and exactly "
+      "following the shape/style/structure of the surrounding image (if present)."
+    )
 
   # Convert PIL image to bytes (use JPEG for compression if enabled)
   img_buffer = BytesIO()
@@ -374,7 +370,7 @@ def call_oxen_api(
       image_url: Public URL of the input template image
       model_config: Optional model configuration (ModelConfig from model_config.py).
         If not provided, uses defaults.
-      additional_prompt: Optional additional text to append to the base prompt
+      additional_prompt: Optional custom prompt text to override the base prompt
 
   Returns:
       URL of the generated image
@@ -405,18 +401,16 @@ def call_oxen_api(
     "Content-Type": "application/json",
   }
 
-  # Build prompt - base prompt plus any additional text
-  base_prompt = (
-    "Fill in the outlined section with the missing pixels corresponding to "
-    "the <isometric nyc pixel art> style, removing the border and exactly "
-    "following the shape/style/structure of the surrounding image (if present)."
-  )
-
+  # Build prompt - custom prompt overrides default
   if additional_prompt:
-    prompt = f"{base_prompt} {additional_prompt}"
-    print(f"   📝 Using additional prompt: {additional_prompt}")
+    prompt = additional_prompt
+    print(f"   📝 Using custom prompt: {additional_prompt}")
   else:
-    prompt = base_prompt
+    prompt = (
+      "Fill in the outlined section with the missing pixels corresponding to "
+      "the <isometric nyc pixel art> style, removing the border and exactly "
+      "following the shape/style/structure of the surrounding image (if present)."
+    )
 
   payload = {
     "model": model_id,
@@ -635,7 +629,7 @@ def run_generation_for_quadrants(
         context. These quadrants provide surrounding pixel art context for the
         generation. If a context quadrant has a generation, that will be used;
         otherwise the render will be used.
-      prompt: Optional additional prompt text for generation
+      prompt: Optional custom prompt text for generation (overrides the default prompt)
 
   Returns:
       Dict with:
@@ -739,7 +733,11 @@ def run_generation_for_quadrants(
   # Build the template
   update_status("rendering", "Building template image...")
   builder = TemplateBuilder(
-    region, has_generation_in_db, get_render_from_db_with_render, get_generation_from_db
+    region,
+    has_generation_in_db,
+    get_render_from_db_with_render,
+    get_generation_from_db,
+    model_config=model_config,
   )
 
   print("📋 Building template...")

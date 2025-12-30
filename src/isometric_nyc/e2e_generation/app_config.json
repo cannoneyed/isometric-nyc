@@ -4,7 +4,7 @@
       "name": "Local 1",
       "model_id": "local_01",
       "endpoint": "http://localhost:8888/edit-b64",
-      "num_inference_steps": 20,
+      "num_inference_steps": 14,
       "model_type": "local",
       "use_base64": true
     },
@@ -12,7 +12,7 @@
       "name": "Local 2",
       "model_id": "local_02",
       "endpoint": "http://localhost:8889/edit-b64",
-      "num_inference_steps": 20,
+      "num_inference_steps": 14,
       "model_type": "local",
       "use_base64": true
     },
@@ -49,12 +49,47 @@
       "model_type": "oxen"
     },
     {
+      "name": "Omni ONLY TERRAIN",
+      "model_id": "cannoneyed-individual-orange-goldfish",
+      "api_key_env": "OXEN_OMNI_ONLY_TERRAIN_API_KEY",
+      "endpoint": "https://hub.oxen.ai/api/images/edit",
+      "num_inference_steps": 28,
+      "model_type": "oxen",
+      "desaturation": 0.2,
+      "gamma_shift": 0.9
+    },
+    {
+      "name": "Omni (incremental 01)",
+      "model_id": "cannoneyed-cruel-teal-bonobo",
+      "api_key_env": "OXEN_OMNI_INCREMENTAL_01_API_KEY",
+      "endpoint": "https://hub.oxen.ai/api/images/edit",
+      "num_inference_steps": 28,
+      "model_type": "oxen"
+    },
+    {
+      "name": "Omni noised terrain",
+      "model_id": "cannoneyed-grieving-chocolate-aphid",
+      "api_key_env": "OXEN_OMNI_NOISED_TERRAIN_API_KEY",
+      "endpoint": "https://hub.oxen.ai/api/images/edit",
+      "num_inference_steps": 28,
+      "model_type": "oxen",
+      "noise": 0.7,
+      "desaturation": 0.6,
+      "gamma_shift": 0.8
+    },
+    {
       "name": "Omni (Original)",
       "model_id": "cannoneyed-gentle-gold-antlion",
       "api_key_env": "OXEN_OMNI_v04_API_KEY",
       "endpoint": "https://hub.oxen.ai/api/images/edit",
       "num_inference_steps": 28,
       "model_type": "oxen"
+    },
+    {
+      "name": "Nano Banana (Gemini)",
+      "model_id": "nano_banana",
+      "api_key_env": "GEMINI_API_KEY",
+      "model_type": "nano_banana"
     }
   ],
   "default_model_id": "local_01"

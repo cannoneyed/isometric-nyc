@@ -871,10 +871,38 @@ body.generating .tile.queued.selectable {
 .generate-prompt-btn {
   background: #9b59b6;
   color: #fff;
+  position: relative;
 }
 
 .generate-prompt-btn:hover:not(:disabled) {
   background: #8e44ad;
+}
+
+/* Prompt saved indicator */
+.generate-prompt-btn.has-saved-prompt {
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.4);
+}
+
+.generate-prompt-btn.has-saved-prompt:hover:not(:disabled) {
+  background: linear-gradient(135deg, #16a34a, #15803d);
+}
+
+.prompt-indicator {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 8px;
+  vertical-align: middle;
+  animation: pulse-indicator 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-indicator {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 /* Prompt Dialog */
@@ -938,7 +966,8 @@ body.generating .tile.queued.selectable {
 
 .dialog-buttons {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
   gap: 12px;
   margin-top: 20px;
 }
@@ -972,6 +1001,46 @@ body.generating .tile.queued.selectable {
 
 .dialog-submit-btn:hover {
   background: linear-gradient(135deg, #a569c0, #9b59b6);
+}
+
+/* Dialog hint text */
+.dialog-hint {
+  font-size: 12px;
+  color: #888;
+  font-style: italic;
+}
+
+/* Saved prompt display in dialog */
+.saved-prompt-display {
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid rgba(34, 197, 94, 0.4);
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: #86efac;
+  word-break: break-word;
+}
+
+.dialog-buttons-right {
+  display: flex;
+  gap: 12px;
+}
+
+/* Clear saved prompt button */
+.dialog-clear-btn {
+  background: #dc2626;
+  color: #fff;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.2s;
+}
+
+.dialog-clear-btn:hover {
+  background: #b91c1c;
 }
 
 /* Queue Overlays - show pending generations as grouped rectangles */
@@ -1231,4 +1300,206 @@ body.generating .tile.queued.selectable {
 
 .nyc-outline-overlay path {
   transition: stroke-opacity 0.2s ease;
+}
+
+/* Starred tile styles */
+.tile.starred {
+  position: relative;
+}
+
+.tile.starred::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 3px solid #fbbf24;
+  pointer-events: none;
+  z-index: 15;
+  box-shadow: inset 0 0 8px rgba(251, 191, 36, 0.3);
+}
+
+.starred-indicator {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 16px;
+  z-index: 20;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.reference-indicator {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  font-size: 16px;
+  z-index: 20;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+  background: rgba(255, 193, 7, 0.9);
+  color: #000;
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.tile.is-reference {
+  box-shadow: 0 0 0 3px rgba(255, 193, 7, 0.8) inset;
+}
+
+/* Star button styles */
+.star-btn {
+  background: #fbbf24;
+  color: #1a1a2e;
+  font-weight: bold;
+}
+
+.star-btn:hover:not(:disabled) {
+  background: #f59e0b;
+}
+
+/* View starred button */
+.view-starred-btn {
+  background: #6366f1;
+  color: white;
+}
+
+.view-starred-btn:hover {
+  background: #4f46e5;
+}
+
+/* Navigate starred buttons */
+.nav-starred-btn {
+  background: #4b5563;
+  color: white;
+  padding: 4px 6px;
+  min-width: 24px;
+}
+
+.nav-starred-btn:hover {
+  background: #6366f1;
+}
+
+.nav-starred-btn:disabled {
+  background: #333 !important;
+  color: #555 !important;
+  cursor: not-allowed;
+}
+
+/* Starred Dialog Styles */
+.starred-dialog-content {
+  min-width: 450px;
+  max-width: 550px;
+}
+
+.starred-list-container {
+  max-height: 400px;
+  overflow-y: auto;
+  margin: 16px 0;
+}
+
+.starred-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.starred-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #0f0f1a;
+  border: 1px solid #333;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.starred-entry:hover {
+  background: #1a1a2e;
+  border-color: #fbbf24;
+  box-shadow: 0 0 8px rgba(251, 191, 36, 0.2);
+}
+
+.starred-entry-coords {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.starred-entry-coords .star-icon {
+  font-size: 18px;
+}
+
+.starred-entry-coords .coords-text {
+  font-family: "SF Mono", "Monaco", monospace;
+  font-size: 14px;
+  color: #fbbf24;
+  font-weight: 500;
+}
+
+.starred-entry-status {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: #666;
+}
+
+.starred-entry-status .has-gen {
+  color: #22c55e;
+}
+
+.starred-entry-status .has-render {
+  color: #3b82f6;
+}
+
+.starred-entry-actions {
+  display: flex;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.starred-entry:hover .starred-entry-actions {
+  opacity: 1;
+}
+
+.starred-unstar-btn {
+  padding: 4px 8px;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.starred-unstar-btn:hover {
+  background: #b91c1c;
+}
+
+.starred-empty-state {
+  padding: 32px;
+  text-align: center;
+  color: #666;
+  font-size: 14px;
+  background: #0f0f1a;
+  border-radius: 6px;
+  margin: 16px 0;
+}
+
+.starred-count {
+  font-size: 13px;
+  color: #888;
+}
+
+/* Hide labels mode - hides starred/flagged outlines and icons */
+.grid-container.hide-labels .tile.starred::after,
+.grid-container.hide-labels .tile.flagged::before,
+.grid-container.hide-labels .tile.flagged::after,
+.grid-container.hide-labels .starred-indicator {
+  display: none;
 }

@@ -35,6 +35,11 @@ from pathlib import Path
 
 from PIL import Image
 
+from isometric_nyc.e2e_generation.shared import (
+  ensure_quadrant_exists,
+  get_generation_config,
+)
+
 
 def get_quadrant_data(
   db_path: Path, x: int, y: int, use_render: bool = False
@@ -68,6 +73,24 @@ def get_quadrant_data(
 def png_bytes_to_image(png_bytes: bytes) -> Image.Image:
   """Convert PNG bytes to a PIL Image."""
   return Image.open(io.BytesIO(png_bytes))
+
+
+def is_pure_black(img: Image.Image) -> bool:
+  """
+  Check if an image is pure black (all pixels are black).
+
+  Args:
+      img: PIL Image to check.
+
+  Returns:
+      True if all pixels are black (R=0, G=0, B=0), False otherwise.
+  """
+  # Convert to RGB to ignore alpha channel for the check
+  rgb_img = img.convert("RGB")
+  # Get all pixels as a flat list
+  pixels = list(rgb_img.getdata())
+  # Check if all pixels are black
+  return all(p == (0, 0, 0) for p in pixels)
 
 
 def image_to_png_bytes(img: Image.Image) -> bytes:
@@ -211,8 +234,10 @@ def export_tile(
   )
 
   quadrants: dict[tuple[int, int], Image.Image] = {}
-  missing_quadrants = []
+  missing_quadrants: list[tuple[int, int]] = []
+  quadrant_size: tuple[int, int] | None = None
 
+  # First pass: collect existing quadrants and determine size
   for dy in range(height_count):
     for dx in range(width_count):
       qx, qy = tl_x + dx, tl_y + dy
@@ -221,12 +246,23 @@ def export_tile(
       if data is None:
         missing_quadrants.append((qx, qy))
       else:
-        quadrants[(dx, dy)] = png_bytes_to_image(data)
+        img = png_bytes_to_image(data)
+        quadrants[(dx, dy)] = img
+        if quadrant_size is None:
+          quadrant_size = img.size
         print(f"   ✓ Quadrant ({qx}, {qy})")
 
+  # Handle missing quadrants by filling with pure black
   if missing_quadrants:
-    print(f"❌ Error: Missing {data_type} for quadrants: {missing_quadrants}")
-    return False
+    if quadrant_size is None:
+      print("❌ Error: No existing quadrants found to determine size")
+      return False
+
+    for qx, qy in missing_quadrants:
+      dx, dy = qx - tl_x, qy - tl_y
+      black_img = Image.new("RGBA", quadrant_size, (0, 0, 0, 255))
+      quadrants[(dx, dy)] = black_img
+      print(f"   ⬛ Quadrant ({qx}, {qy}) - missing, using pure black")
 
   tile_image = stitch_quadrants_to_tile(quadrants, width_count, height_count)
   tile_image.save(output_path, "PNG")
@@ -281,14 +317,23 @@ def import_tile(
   conn = sqlite3.connect(db_path)
 
   try:
+    # Load generation config for creating new quadrants
+    config = get_generation_config(conn)
+
     success_count = 0
+    skipped_black_count = 0
     for (dx, dy), quad_img in quadrant_images.items():
       qx, qy = tl_x + dx, tl_y + dy
 
-      info = get_quadrant_info(conn, qx, qy)
-      if not info:
-        print(f"   ⚠️  Quadrant ({qx}, {qy}) not found in database - skipping")
+      # Skip pure black quadrants (they represent missing data during export)
+      if is_pure_black(quad_img):
+        print(f"   ⬛ Quadrant ({qx}, {qy}) is pure black - skipping import")
+        skipped_black_count += 1
         continue
+
+      # Ensure quadrant exists (create if needed)
+      ensure_quadrant_exists(conn, config, qx, qy)
+      info = get_quadrant_info(conn, qx, qy)
 
       has_data = info["has_render"] if use_render else info["has_generation"]
       if has_data and not overwrite:
@@ -308,8 +353,11 @@ def import_tile(
       else:
         print(f"   ❌ Failed to save quadrant ({qx}, {qy})")
 
-    print(f"\n✅ Imported {success_count}/{total_quadrants} quadrants")
-    return success_count > 0
+    summary = f"\n✅ Imported {success_count}/{total_quadrants} quadrants"
+    if skipped_black_count > 0:
+      summary += f" ({skipped_black_count} pure black skipped)"
+    print(summary)
+    return success_count > 0 or skipped_black_count > 0
 
   finally:
     conn.close()
