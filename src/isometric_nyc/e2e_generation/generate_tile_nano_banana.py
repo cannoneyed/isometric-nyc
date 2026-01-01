@@ -540,6 +540,7 @@ def call_gemini_nano_banana(
   config: dict | None = None,
   port: int | None = None,
   prompt: str | None = None,
+  negative_prompt: str | None = None,
   debug_dir: Path | None = None,
 ) -> Image.Image:
   """
@@ -554,6 +555,7 @@ def call_gemini_nano_banana(
     config: Optional generation config for few-shot examples
     port: Optional web server port for few-shot examples
     prompt: Optional custom prompt text (overrides the default prompt)
+    negative_prompt: Optional negative prompt text for generation
     debug_dir: Optional directory to save debug images (template, references, output)
 
   Returns:
@@ -763,6 +765,11 @@ Your output should have NO TEXT LABELS.
 Think of this like: "Redraw the 3D render as pixel art in the style of Image B"
 """.strip()
 
+  # Append negative prompt if provided
+  if negative_prompt:
+    generation_prompt += f"\n\n**NEGATIVE PROMPT (Things to AVOID):**\n{negative_prompt}"
+    print(f"   🚫 Added negative prompt to generation prompt")
+
   contents.append(generation_prompt)
 
   # Save prompt to debug dir
@@ -831,6 +838,7 @@ def run_nano_banana_generation(
   reference_coords: list[tuple[int, int]],
   port: int = DEFAULT_WEB_PORT,
   prompt: str | None = None,
+  negative_prompt: str | None = None,
   save: bool = True,
   status_callback: Callable[[str, str], None] | None = None,
   context_quadrants: list[tuple[int, int]] | None = None,
@@ -855,6 +863,7 @@ def run_nano_banana_generation(
     reference_coords: List of (x, y) TL quadrant coordinates for reference tiles
     port: Web server port for rendering (default: 5173)
     prompt: Optional custom prompt text (overrides the default prompt) for generation
+    negative_prompt: Optional negative prompt text for generation
     save: Whether to save generated quadrants to database (default: True)
     status_callback: Optional callback(status, message) for progress updates
     context_quadrants: Optional list of (x, y) quadrant coordinates to use as context
@@ -894,6 +903,9 @@ def run_nano_banana_generation(
 
   if prompt:
     print(f"   📝 Additional prompt: {prompt}")
+
+  if negative_prompt:
+    print(f"   🚫 Negative prompt: {negative_prompt}")
 
   def update_status(status: str, message: str = "") -> None:
     if status_callback:
@@ -1045,6 +1057,7 @@ def run_nano_banana_generation(
       config=config,
       port=port,
       prompt=prompt,
+      negative_prompt=negative_prompt,
       debug_dir=debug_dir,
     )
   except Exception as e:

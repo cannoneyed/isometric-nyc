@@ -120,8 +120,10 @@ function saveNegativePrompt(negativePrompt) {
   try {
     if (negativePrompt && negativePrompt.trim()) {
       localStorage.setItem(STORAGE_KEY_NEGATIVE_PROMPT, negativePrompt.trim());
+      console.log("💾 Saved negative prompt:", negativePrompt.trim());
     } else {
       localStorage.removeItem(STORAGE_KEY_NEGATIVE_PROMPT);
+      console.log("🗑️ Cleared negative prompt");
     }
     updateNegativePromptButtonIndicator();
   } catch (e) {
@@ -132,8 +134,11 @@ function saveNegativePrompt(negativePrompt) {
 // Get saved negative_prompt from localStorage
 function getSavedNegativePrompt() {
   try {
-    return localStorage.getItem(STORAGE_KEY_NEGATIVE_PROMPT) || "";
+    const saved = localStorage.getItem(STORAGE_KEY_NEGATIVE_PROMPT) || "";
+    console.log("📖 Retrieved negative prompt:", saved || "(empty)");
+    return saved;
   } catch (e) {
+    console.warn("Could not get negative_prompt from localStorage:", e);
     return "";
   }
 }
@@ -594,11 +599,16 @@ function initLabels() {
 
 // Keyboard navigation
 document.addEventListener("keydown", (e) => {
-  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  // Ignore keyboard shortcuts when typing in input fields
+  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") return;
 
   // Ignore keyboard shortcuts when prompt dialog is open
   const promptDialog = document.getElementById("promptDialog");
   if (promptDialog && promptDialog.style.display !== "none") return;
+
+  // Ignore keyboard shortcuts when negative prompt dialog is open
+  const negativePromptDialog = document.getElementById("negativePromptDialog");
+  if (negativePromptDialog && negativePromptDialog.style.display !== "none") return;
 
   switch (e.key) {
     case "ArrowLeft":
@@ -2222,6 +2232,8 @@ async function generateSelected(prompt = null) {
     if (effectiveNegativePrompt) {
       requestBody.negative_prompt = effectiveNegativePrompt;
     }
+
+    console.log("🚀 Sending request body:", JSON.stringify(requestBody, null, 2));
 
     const response = await fetch("/api/generate", {
       method: "POST",

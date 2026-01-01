@@ -121,6 +121,7 @@ def call_local_api_b64(
   image: "Image.Image",
   model_config: "ModelConfig | None" = None,  # noqa: F821
   additional_prompt: str | None = None,
+  negative_prompt: str | None = None,
   use_jpeg: bool = True,
   jpeg_quality: int = 90,
 ) -> "Image.Image":
@@ -130,6 +131,7 @@ def call_local_api_b64(
   The local API expects JSON with:
     - image_b64: Base64-encoded input image
     - prompt: The generation prompt
+    - negative_prompt: Optional negative prompt
     - steps: Number of inference steps
 
   Args:
@@ -137,6 +139,7 @@ def call_local_api_b64(
       model_config: Optional model configuration (ModelConfig from model_config.py).
         If not provided, uses defaults.
       additional_prompt: Optional custom prompt text to override the base prompt
+      negative_prompt: Optional negative prompt text for generation
       use_jpeg: If True, compress image as JPEG (much smaller). Default True.
       jpeg_quality: JPEG quality 1-100 (default 90, good balance of size/quality)
 
@@ -205,9 +208,28 @@ def call_local_api_b64(
     "steps": num_inference_steps,
   }
 
+  # Add negative prompt if provided
+  if negative_prompt:
+    payload["negative_prompt"] = negative_prompt
+    print(f"   🚫 Using negative prompt: {negative_prompt}")
+  else:
+    payload["negative_prompt"] = None
+    print(f"   🚫 No negative prompt provided (sending None)")
+
   print(f"   🏠 Calling local API (base64) at {endpoint}...")
   print(f"   📊 Steps: {num_inference_steps}")
   print(f"   📦 Image: {len(image_b64):,} bytes ({img_format}, base64)")
+  print(f"   📝 Payload keys: {list(payload.keys())}")
+  print(f"   📝 negative_prompt in payload: {payload.get('negative_prompt')!r}")
+
+  # Log the exact JSON being sent
+  import json as json_module
+  payload_json = json_module.dumps(payload, indent=2)
+  print(f"\n   📤 SENDING TO {endpoint}:")
+  print("   " + "\n   ".join(payload_json.split("\n")[:20]))  # First 20 lines
+  if payload_json.count("\n") > 20:
+    print(f"   ... ({payload_json.count('\n') - 20} more lines)")
+  print()
 
   start_time = time.time()
   response = requests.post(
@@ -248,6 +270,7 @@ def call_local_api(
   image: "Image.Image",
   model_config: "ModelConfig | None" = None,  # noqa: F821
   additional_prompt: str | None = None,
+  negative_prompt: str | None = None,
   use_jpeg: bool = True,
   jpeg_quality: int = 90,
 ) -> "Image.Image":
@@ -257,6 +280,7 @@ def call_local_api(
   The local API expects multipart/form-data with:
     - file: The input image as PNG or JPEG
     - prompt: The generation prompt
+    - negative_prompt: Optional negative prompt
     - steps: Number of inference steps
 
   Args:
@@ -264,6 +288,7 @@ def call_local_api(
       model_config: Optional model configuration (ModelConfig from model_config.py).
         If not provided, uses defaults.
       additional_prompt: Optional custom prompt text to override the base prompt
+      negative_prompt: Optional negative prompt text for generation
       use_jpeg: If True, compress image as JPEG (much smaller). Default True.
       jpeg_quality: JPEG quality 1-100 (default 90, good balance of size/quality)
 
@@ -326,6 +351,11 @@ def call_local_api(
     "steps": str(num_inference_steps),
   }
 
+  # Add negative prompt if provided
+  if negative_prompt:
+    data["negative_prompt"] = negative_prompt
+    print(f"   🚫 Using negative prompt: {negative_prompt}")
+
   print(f"   🏠 Calling local API at {endpoint}...")
   print(f"   📊 Steps: {num_inference_steps}")
   print(f"   📦 Image: {img_buffer.getbuffer().nbytes:,} bytes ({img_format})")
@@ -362,6 +392,7 @@ def call_oxen_api(
   image_url: str,
   model_config: "ModelConfig | None" = None,  # noqa: F821
   additional_prompt: str | None = None,
+  negative_prompt: str | None = None,
 ) -> str:
   """
   Call the Oxen API to generate pixel art.
@@ -371,6 +402,7 @@ def call_oxen_api(
       model_config: Optional model configuration (ModelConfig from model_config.py).
         If not provided, uses defaults.
       additional_prompt: Optional custom prompt text to override the base prompt
+      negative_prompt: Optional negative prompt text for generation
 
   Returns:
       URL of the generated image
@@ -418,6 +450,11 @@ def call_oxen_api(
     "prompt": prompt,
     "num_inference_steps": num_inference_steps,
   }
+
+  # Add negative prompt if provided
+  if negative_prompt:
+    payload["negative_prompt"] = negative_prompt
+    print(f"   🚫 Using negative prompt: {negative_prompt}")
 
   print(f"   🤖 Calling Oxen API with model {model_id}...")
   start_time = time.time()
@@ -606,6 +643,7 @@ def run_generation_for_quadrants(
   model_config: "ModelConfig | None" = None,  # noqa: F821
   context_quadrants: list[tuple[int, int]] | None = None,
   prompt: str | None = None,
+  negative_prompt: str | None = None,
 ) -> dict:
   """
   Run the full generation pipeline for selected quadrants.
@@ -630,6 +668,7 @@ def run_generation_for_quadrants(
         generation. If a context quadrant has a generation, that will be used;
         otherwise the render will be used.
       prompt: Optional custom prompt text for generation (overrides the default prompt)
+      negative_prompt: Optional negative prompt text for generation
 
   Returns:
       Dict with:
@@ -646,6 +685,8 @@ def run_generation_for_quadrants(
     print(f"   📋 Using {len(context_set)} context quadrant(s): {list(context_set)}")
   if prompt:
     print(f"   📝 Additional prompt: {prompt}")
+  if negative_prompt:
+    print(f"   🚫 Negative prompt: {negative_prompt}")
 
   def update_status(status: str, message: str = "") -> None:
     if status_callback:
@@ -766,10 +807,14 @@ def run_generation_for_quadrants(
       update_status("generating", "Calling local model (this may take a minute)...")
       if use_base64:
         print("🏠 Using local inference (base64 mode)...")
-        generated_image = call_local_api_b64(template_image, model_config, prompt)
+        generated_image = call_local_api_b64(
+          template_image, model_config, prompt, negative_prompt
+        )
       else:
         print("🏠 Using local inference (multipart mode)...")
-        generated_image = call_local_api(template_image, model_config, prompt)
+        generated_image = call_local_api(
+          template_image, model_config, prompt, negative_prompt
+        )
       print("   ✓ Local inference complete")
     else:
       # Oxen API - upload to GCS first
@@ -786,7 +831,7 @@ def run_generation_for_quadrants(
 
       update_status("generating", "Calling AI model (this may take a minute)...")
       print("🤖 Calling Oxen API...")
-      generated_url = call_oxen_api(image_url, model_config, prompt)
+      generated_url = call_oxen_api(image_url, model_config, prompt, negative_prompt)
 
       update_status("saving", "Downloading and saving results...")
       print("📥 Downloading generated image...")
