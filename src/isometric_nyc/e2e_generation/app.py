@@ -1898,6 +1898,142 @@ def api_water_fill():
     conn.close()
 
 
+@app.route("/api/water-fill-rectangle", methods=["POST"])
+def api_water_fill_rectangle():
+  """
+  API endpoint to fill a rectangular region of quadrants with the water color.
+
+  Request body:
+    {
+      "tl": [x, y] or {"x": x, "y": y},  // Top-left corner
+      "br": [x, y] or {"x": x, "y": y}   // Bottom-right corner
+    }
+
+  Returns:
+    {
+      "success": true,
+      "message": "Filled N quadrants with water color",
+      "filled_count": N,
+      "color": "#4A6372"
+    }
+  """
+  from PIL import Image
+
+  from isometric_nyc.e2e_generation.shared import (
+    image_to_png_bytes,
+    save_quadrant_generation,
+  )
+
+  # Parse request
+  data = request.get_json()
+  if not data:
+    return jsonify({"success": False, "error": "No JSON body provided"}), 400
+
+  # Parse top-left coordinate
+  tl_raw = data.get("tl")
+  if not tl_raw:
+    return jsonify(
+      {"success": False, "error": "Missing 'tl' (top-left) coordinate"}
+    ), 400
+
+  try:
+    if isinstance(tl_raw, list) and len(tl_raw) == 2:
+      tl_x, tl_y = int(tl_raw[0]), int(tl_raw[1])
+    elif isinstance(tl_raw, dict) and "x" in tl_raw and "y" in tl_raw:
+      tl_x, tl_y = int(tl_raw["x"]), int(tl_raw["y"])
+    else:
+      return jsonify({"success": False, "error": f"Invalid 'tl' format: {tl_raw}"}), 400
+  except (ValueError, TypeError) as e:
+    return jsonify({"success": False, "error": f"Invalid 'tl' coordinate: {e}"}), 400
+
+  # Parse bottom-right coordinate
+  br_raw = data.get("br")
+  if not br_raw:
+    return jsonify(
+      {"success": False, "error": "Missing 'br' (bottom-right) coordinate"}
+    ), 400
+
+  try:
+    if isinstance(br_raw, list) and len(br_raw) == 2:
+      br_x, br_y = int(br_raw[0]), int(br_raw[1])
+    elif isinstance(br_raw, dict) and "x" in br_raw and "y" in br_raw:
+      br_x, br_y = int(br_raw["x"]), int(br_raw["y"])
+    else:
+      return jsonify({"success": False, "error": f"Invalid 'br' format: {br_raw}"}), 400
+  except (ValueError, TypeError) as e:
+    return jsonify({"success": False, "error": f"Invalid 'br' coordinate: {e}"}), 400
+
+  # Validate bounds
+  if tl_x > br_x or tl_y > br_y:
+    return jsonify(
+      {
+        "success": False,
+        "error": "Invalid bounds: top-left must be above and to the left of bottom-right",
+      }
+    ), 400
+
+  width_count = br_x - tl_x + 1
+  height_count = br_y - tl_y + 1
+  total_quadrants = width_count * height_count
+
+  print(f"\n{'=' * 60}")
+  print(
+    f"💧 Water fill rectangle request: ({tl_x},{tl_y}) to ({br_x},{br_y}) "
+    f"({width_count}x{height_count} = {total_quadrants} quadrants)"
+  )
+  print(f"   Fill color: {WATER_REPLACEMENT_COLOR}")
+  print(f"{'=' * 60}")
+
+  # Connect to database
+  db_path = Path(GENERATION_DIR) / "quadrants.db"
+  conn = sqlite3.connect(db_path)
+
+  try:
+    config = get_generation_config(conn)
+
+    # Determine quadrant size from config (quadrant is half the tile size)
+    width = config.get("width_px", 512) // 2
+    height = config.get("height_px", 512) // 2
+
+    # Parse water color
+    water_rgb = hex_to_rgb(WATER_REPLACEMENT_COLOR)
+    fill_color = (*water_rgb, 255)  # Add full alpha for RGBA
+
+    # Create the solid water color image once (reuse for all quadrants)
+    water_img = Image.new("RGBA", (width, height), fill_color)
+    png_bytes = image_to_png_bytes(water_img)
+
+    filled_count = 0
+    for dy in range(height_count):
+      for dx in range(width_count):
+        qx, qy = tl_x + dx, tl_y + dy
+        save_quadrant_generation(conn, config, qx, qy, png_bytes)
+        filled_count += 1
+        print(f"   ✓ Filled quadrant ({qx}, {qy})")
+
+    print(f"✅ Water fill rectangle complete: {filled_count} quadrants")
+    return jsonify(
+      {
+        "success": True,
+        "message": f"Filled {filled_count} quadrant(s) with water color",
+        "filled_count": filled_count,
+        "color": WATER_REPLACEMENT_COLOR,
+        "bounds": {
+          "tl": [tl_x, tl_y],
+          "br": [br_x, br_y],
+          "width": width_count,
+          "height": height_count,
+        },
+      }
+    )
+
+  except Exception as e:
+    traceback.print_exc()
+    return jsonify({"success": False, "error": str(e)}), 500
+  finally:
+    conn.close()
+
+
 @app.route("/api/render", methods=["POST"])
 def api_render():
   """API endpoint to render tiles for selected quadrants."""

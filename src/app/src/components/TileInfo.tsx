@@ -1,48 +1,57 @@
 import type { ViewState } from "../App";
 
 interface TileInfoProps {
-  hoveredTile: { x: number; y: number } | null;
-  viewState: ViewState;
+	hoveredTile: { x: number; y: number } | null;
+	viewState: ViewState;
+	// Origin offset: PMTiles (0,0) corresponds to database (originX, originY)
+	originX: number;
+	originY: number;
 }
 
-export function TileInfo({ hoveredTile, viewState }: TileInfoProps) {
-  const isVisible = hoveredTile !== null;
+export function TileInfo({
+	hoveredTile,
+	viewState,
+	originX,
+	originY,
+}: TileInfoProps) {
+	const isVisible = hoveredTile !== null;
 
-  // Calculate world position from tile coordinates
-  const worldX = hoveredTile ? hoveredTile.x * 512 : 0;
-  const worldY = hoveredTile ? hoveredTile.y * 512 : 0;
+	// Calculate database coordinates from PMTiles tile coordinates
+	// PMTiles (x, y) -> Database (x + originX, y + originY)
+	const dbX = hoveredTile ? hoveredTile.x + originX : 0;
+	const dbY = hoveredTile ? hoveredTile.y + originY : 0;
 
-  return (
-    <div className={`panel tile-info ${isVisible ? "visible" : ""}`}>
-      <div className="panel-header">
-        <span className="panel-title">Tile Info</span>
-      </div>
+	return (
+		<div className={`panel tile-info ${isVisible ? "visible" : ""}`}>
+			<div className="panel-header">
+				<span className="panel-title">Tile Info</span>
+			</div>
 
-      <div className="tile-coords">
-        <div className="coord">
-          <span className="coord-label">X</span>
-          <span className="coord-value">{hoveredTile?.x ?? "—"}</span>
-        </div>
-        <div className="coord">
-          <span className="coord-label">Y</span>
-          <span className="coord-value">{hoveredTile?.y ?? "—"}</span>
-        </div>
-      </div>
+			<div className="tile-coords">
+				<div className="coord">
+					<span className="coord-label">X</span>
+					<span className="coord-value">{hoveredTile ? dbX : "—"}</span>
+				</div>
+				<div className="coord">
+					<span className="coord-label">Y</span>
+					<span className="coord-value">{hoveredTile ? dbY : "—"}</span>
+				</div>
+			</div>
 
-      {hoveredTile && (
-        <div
-          style={{
-            marginTop: 12,
-            fontSize: 10,
-            color: "var(--color-text-muted)",
-          }}
-        >
-          World: ({worldX}, {worldY})
-          <br />
-          View center: ({Math.round(viewState.target[0])},{" "}
-          {Math.round(viewState.target[1])})
-        </div>
-      )}
-    </div>
-  );
+			{hoveredTile && (
+				<div
+					style={{
+						marginTop: 12,
+						fontSize: 10,
+						color: "var(--color-text-muted)",
+					}}
+				>
+					PMTiles: ({hoveredTile.x}, {hoveredTile.y})
+					<br />
+					View center: ({Math.round(viewState.target[0])},{" "}
+					{Math.round(viewState.target[1])})
+				</div>
+			)}
+		</div>
+	);
 }

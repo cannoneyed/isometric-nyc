@@ -1407,6 +1407,9 @@ function updateSelectionStatus(serverStatus = null) {
   if (referenceBtn) referenceBtn.disabled = count !== 1;
   // Generate Rectangle requires exactly 2 selected
   if (generateRectBtn) generateRectBtn.disabled = count !== 2;
+  // Fill Rect Water requires exactly 2 selected
+  const fillRectWaterBtn = document.getElementById("fillRectWaterBtn");
+  if (fillRectWaterBtn) fillRectWaterBtn.disabled = count !== 2;
   // Export Cmd requires exactly 2 selected
   const exportCmdBtn = document.getElementById("exportCmdBtn");
   if (exportCmdBtn) exportCmdBtn.disabled = count !== 2;
@@ -2327,6 +2330,115 @@ async function renderSelected() {
       "Request failed",
       error.message || "Could not connect to server."
     );
+  }
+}
+
+async function fillRectangleWater() {
+  if (selectedQuadrants.size !== 2) {
+    showToast(
+      "error",
+      "Invalid selection",
+      "Please select exactly 2 quadrants to define the rectangle corners."
+    );
+    return;
+  }
+
+  // Get the two selected coordinates
+  const coords = Array.from(selectedQuadrants).map((s) => {
+    const [x, y] = s.split(",").map(Number);
+    return { x, y };
+  });
+
+  // Calculate rectangle bounds (top-left and bottom-right)
+  const minX = Math.min(coords[0].x, coords[1].x);
+  const maxX = Math.max(coords[0].x, coords[1].x);
+  const minY = Math.min(coords[0].y, coords[1].y);
+  const maxY = Math.max(coords[0].y, coords[1].y);
+
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const totalQuadrants = width * height;
+
+  // Build confirmation message (similar to delete)
+  const confirmMessage =
+    `Fill rectangle from (${minX}, ${minY}) to (${maxX}, ${maxY}) with water color?\n\n` +
+    `Size: ${width} × ${height} = ${totalQuadrants} quadrant(s)\n\n` +
+    `⚠️ This will OVERWRITE any existing generations in this area with solid water color (#4A6372).`;
+
+  if (!confirm(confirmMessage)) {
+    return;
+  }
+
+  console.log(
+    `Filling rectangle with water from (${minX},${minY}) to (${maxX},${maxY}): ${totalQuadrants} quadrants`
+  );
+
+  // Clear selection
+  document.querySelectorAll(".tile.selected").forEach((tile) => {
+    tile.classList.remove("selected");
+  });
+  selectedQuadrants.clear();
+  saveSelectedQuadrants();
+  updateSelectionStatus();
+
+  // Show immediate feedback
+  const btn = document.getElementById("fillRectWaterBtn");
+  btn.disabled = true;
+  btn.classList.add("loading");
+  const originalText = btn.innerHTML;
+  btn.innerHTML = 'Filling...<span class="spinner"></span>';
+
+  showToast(
+    "loading",
+    "Filling with water...",
+    `Rectangle (${minX}, ${minY}) to (${maxX}, ${maxY}) - ${totalQuadrants} quadrant(s)`
+  );
+
+  try {
+    const response = await fetch("/api/water-fill-rectangle", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        tl: [minX, minY],
+        br: [maxX, maxY],
+      }),
+    });
+
+    const result = await response.json();
+    clearLoadingToasts();
+
+    // Reset button
+    btn.classList.remove("loading");
+    btn.innerHTML = originalText;
+
+    if (result.success) {
+      showToast(
+        "success",
+        "Water fill complete!",
+        `Filled ${result.filled_count} quadrant(s) with water color`
+      );
+
+      // Refresh tile images for all quadrants in the rectangle
+      for (let dy = 0; dy < height; dy++) {
+        for (let dx = 0; dx < width; dx++) {
+          const qx = minX + dx;
+          const qy = minY + dy;
+          refreshTileImage(qx, qy);
+        }
+      }
+    } else {
+      showToast("error", "Fill failed", result.error || "Unknown error");
+    }
+  } catch (error) {
+    clearLoadingToasts();
+    console.error("Water fill rectangle error:", error);
+    showToast("error", "Request failed", error.message);
+
+    // Reset button
+    btn.classList.remove("loading");
+    btn.innerHTML = originalText;
   }
 }
 

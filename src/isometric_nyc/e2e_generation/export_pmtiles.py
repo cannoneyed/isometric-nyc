@@ -18,6 +18,10 @@ Postprocessing:
   A unified color palette is built by sampling ~100 quadrants from the database
   before export, ensuring consistent colors across all tiles.
 
+Bounds clipping:
+  Use --bounds to specify a GeoJSON bounds file. Tiles at the edge of the bounds
+  will have pixels inside the bounds shown normally and pixels outside blacked out.
+
 Zoom levels:
   PMTiles uses TMS-style zoom where z=0 is the entire world.
   We map our internal zoom levels to PMTiles:
@@ -41,12 +45,16 @@ Examples:
   # Export without postprocessing (raw tiles)
   uv run python src/isometric_nyc/e2e_generation/export_pmtiles.py generations/v01 --no-postprocess
 
+  # Export with bounds clipping (clips tiles to NYC boundary)
+  uv run python src/isometric_nyc/e2e_generation/export_pmtiles.py generations/v01 --bounds v1.json
+
   # Control parallelism
   uv run python src/isometric_nyc/e2e_generation/export_pmtiles.py generations/v01 --workers 4
 """
 
 import argparse
 import io
+import json
 import math
 import multiprocessing
 import os
@@ -59,9 +67,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from PIL import Image
-from pmtiles.tile import Compression, TileType, zxy_to_tileid
+from PIL import Image, ImageDraw
+from pmtiles.reader import Reader as PMTilesReader
+from pmtiles.reader import MmapSource
+from pmtiles.tile import Compression, TileType, tileid_to_zxy, zxy_to_tileid
 from pmtiles.writer import write as pmtiles_write
+from shapely.geometry import Polygon, shape
 
 # Image format options
 FORMAT_PNG = "png"
@@ -193,6 +204,228 @@ def get_all_quadrant_data_in_range(
     return {(row[0], row[1]): row[2] for row in cursor.fetchall()}
   finally:
     conn.close()
+
+
+# =============================================================================
+# Bounds clipping functions
+# =============================================================================
+
+
+def load_bounds_file(bounds_path: Path | str) -> dict[str, Any]:
+  """
+  Load a bounds GeoJSON file.
+
+  Args:
+    bounds_path: Path to the bounds file. If just a filename, looks in the
+                 bounds directory.
+
+  Returns:
+    GeoJSON dictionary with the boundary features.
+  """
+  from isometric_nyc.e2e_generation.bounds import load_bounds
+
+  return load_bounds(bounds_path)
+
+
+def load_generation_config(generation_dir: Path) -> dict[str, Any]:
+  """Load the generation configuration from a generation directory."""
+  config_path = generation_dir / "generation_config.json"
+  if not config_path.exists():
+    raise FileNotFoundError(f"Generation config not found: {config_path}")
+
+  with open(config_path) as f:
+    return json.load(f)
+
+
+def latlng_to_quadrant_coords(
+  config: dict, lat: float, lng: float
+) -> tuple[float, float]:
+  """
+  Convert a lat/lng position to quadrant (x, y) coordinates.
+
+  This is the inverse of calculate_quadrant_lat_lng. Given a geographic position,
+  returns the floating-point quadrant coordinates where that point would fall.
+
+  Args:
+    config: Generation config dictionary
+    lat: Latitude of the point
+    lng: Longitude of the point
+
+  Returns:
+    Tuple of (quadrant_x, quadrant_y) as floats
+  """
+  seed_lat = config["seed"]["lat"]
+  seed_lng = config["seed"]["lng"]
+  width_px = config["width_px"]
+  height_px = config["height_px"]
+  view_height_meters = config["view_height_meters"]
+  azimuth = config["camera_azimuth_degrees"]
+  elevation = config["camera_elevation_degrees"]
+  tile_step = config.get("tile_step", 0.5)
+
+  meters_per_pixel = view_height_meters / height_px
+
+  # Convert lat/lng difference to meters
+  delta_north_meters = (lat - seed_lat) * 111111.0
+  delta_east_meters = (lng - seed_lng) * 111111.0 * math.cos(math.radians(seed_lat))
+
+  # Inverse rotation by azimuth (rotate back to camera-aligned coordinates)
+  azimuth_rad = math.radians(azimuth)
+  cos_a = math.cos(azimuth_rad)
+  sin_a = math.sin(azimuth_rad)
+
+  # Inverse of the rotation in calculate_offset:
+  delta_rot_x = delta_east_meters * cos_a - delta_north_meters * sin_a
+  delta_rot_y = delta_east_meters * sin_a + delta_north_meters * cos_a
+
+  # Convert back to pixel shifts
+  elev_rad = math.radians(elevation)
+  sin_elev = math.sin(elev_rad)
+
+  shift_right_meters = delta_rot_x
+  shift_up_meters = -delta_rot_y * sin_elev
+
+  shift_x_px = shift_right_meters / meters_per_pixel
+  shift_y_px = shift_up_meters / meters_per_pixel
+
+  # Convert pixel shifts to quadrant coordinates
+  quadrant_step_x_px = width_px * tile_step
+  quadrant_step_y_px = height_px * tile_step
+
+  quadrant_x = shift_x_px / quadrant_step_x_px
+  quadrant_y = -shift_y_px / quadrant_step_y_px  # Negative because y increases downward
+
+  return quadrant_x, quadrant_y
+
+
+def extract_polygon_from_geojson(geojson: dict) -> Polygon | None:
+  """
+  Extract the first polygon from a GeoJSON FeatureCollection.
+
+  Args:
+    geojson: GeoJSON dictionary (FeatureCollection or single Feature)
+
+  Returns:
+    Shapely Polygon or None if not found
+  """
+  if geojson.get("type") == "FeatureCollection":
+    features = geojson.get("features", [])
+    if features:
+      geometry = features[0].get("geometry")
+      if geometry:
+        return shape(geometry)
+  elif geojson.get("type") == "Feature":
+    geometry = geojson.get("geometry")
+    if geometry:
+      return shape(geometry)
+  elif geojson.get("type") in ("Polygon", "MultiPolygon"):
+    return shape(geojson)
+
+  return None
+
+
+def convert_bounds_to_quadrant_coords(
+  config: dict, bounds_polygon: Polygon
+) -> list[tuple[float, float]]:
+  """
+  Convert a bounds polygon from lat/lng to quadrant coordinates.
+
+  Args:
+    config: Generation config dictionary
+    bounds_polygon: Shapely Polygon in lat/lng coordinates
+
+  Returns:
+    List of (quadrant_x, quadrant_y) tuples representing the polygon
+  """
+  exterior_coords = list(bounds_polygon.exterior.coords)
+  quadrant_coords = []
+
+  for lng, lat in exterior_coords:
+    qx, qy = latlng_to_quadrant_coords(config, lat, lng)
+    quadrant_coords.append((qx, qy))
+
+  return quadrant_coords
+
+
+def create_bounds_mask_for_tile(
+  src_x: int,
+  src_y: int,
+  bounds_quadrant_coords: list[tuple[float, float]],
+  tile_size: int = TILE_SIZE,
+) -> Image.Image | None:
+  """
+  Create a mask for a tile based on bounds polygon.
+
+  The mask is white (255) where pixels are inside the bounds and black (0) outside.
+
+  Args:
+    src_x: Source quadrant x coordinate
+    src_y: Source quadrant y coordinate
+    bounds_quadrant_coords: Bounds polygon in quadrant coordinates
+    tile_size: Size of the tile in pixels
+
+  Returns:
+    PIL Image mask (mode 'L') or None if tile is completely inside bounds
+  """
+  # Convert bounds polygon to pixel coordinates within this tile
+  # Each tile spans from (src_x, src_y) to (src_x + 1, src_y + 1) in quadrant coords
+  # Pixel (0, 0) is at top-left, which is (src_x, src_y) in quadrant coords
+  # Pixel (tile_size-1, tile_size-1) is at (src_x + 1, src_y + 1)
+
+  pixel_coords = []
+  for qx, qy in bounds_quadrant_coords:
+    # Convert quadrant coords to pixel coords within this tile
+    px = (qx - src_x) * tile_size
+    py = (qy - src_y) * tile_size
+    pixel_coords.append((px, py))
+
+  if not pixel_coords:
+    return None
+
+  # Create bounds polygon in pixel space
+  bounds_poly = Polygon(pixel_coords)
+
+  # Quick check: if the tile is completely inside the bounds, no mask needed
+  tile_corners = [(0, 0), (tile_size, 0), (tile_size, tile_size), (0, tile_size)]
+  tile_poly = Polygon(tile_corners)
+
+  if bounds_poly.contains(tile_poly):
+    return None  # Tile is fully inside bounds, no clipping needed
+
+  # Check if tile is completely outside bounds
+  if not bounds_poly.intersects(tile_poly):
+    # Return all-black mask
+    return Image.new("L", (tile_size, tile_size), 0)
+
+  # Create mask by drawing the bounds polygon
+  mask = Image.new("L", (tile_size, tile_size), 0)
+  draw = ImageDraw.Draw(mask)
+
+  # Draw the polygon (convert to int coords for PIL)
+  int_coords = [(int(round(x)), int(round(y))) for x, y in pixel_coords]
+  if len(int_coords) >= 3:
+    draw.polygon(int_coords, fill=255)
+
+  return mask
+
+
+def apply_bounds_mask(img: Image.Image, mask: Image.Image) -> Image.Image:
+  """
+  Apply a bounds mask to an image, blacking out pixels outside the bounds.
+
+  Args:
+    img: Input image (RGB)
+    mask: Mask image (L mode, 255=inside, 0=outside)
+
+  Returns:
+    Masked image with pixels outside bounds set to black
+  """
+  img = img.convert("RGBA")
+  black = Image.new("RGBA", img.size, (0, 0, 0, 255))
+
+  # Use mask to composite: where mask is 255, use img; where 0, use black
+  result = Image.composite(img, black, mask)
+  return result.convert("RGB")
 
 
 # =============================================================================
@@ -365,14 +598,15 @@ def create_black_tile(
 
 
 def process_base_tile_worker(
-  args: tuple[int, int, int, int, bytes | None, bytes | None, int, bool, str, int],
+  args: tuple,
 ) -> tuple[int, int, bytes, bool]:
   """
   Worker function for parallel base tile processing.
 
   Args:
     args: Tuple of (dst_x, dst_y, src_x, src_y, raw_data, palette_bytes,
-                   pixel_scale, dither, image_format, webp_quality)
+                   pixel_scale, dither, image_format, webp_quality,
+                   bounds_quadrant_coords)
 
   Returns:
     Tuple of (dst_x, dst_y, processed_bytes, has_data)
@@ -388,10 +622,18 @@ def process_base_tile_worker(
     dither,
     image_format,
     webp_quality,
+    bounds_quadrant_coords,
   ) = args
 
   # Reconstruct palette from bytes (PIL Images aren't picklable)
   palette_img = Image.open(io.BytesIO(palette_bytes)) if palette_bytes else None
+
+  # Create bounds mask if bounds are provided
+  bounds_mask = None
+  if bounds_quadrant_coords:
+    bounds_mask = create_bounds_mask_for_tile(
+      src_x, src_y, bounds_quadrant_coords, TILE_SIZE
+    )
 
   if raw_data is None:
     # Create black tile for missing data
@@ -406,6 +648,11 @@ def process_base_tile_worker(
       img = postprocess_image(img, palette_img, pixel_scale, dither)
     else:
       img = img.convert("RGB")
+
+    # Apply bounds mask if present
+    if bounds_mask is not None:
+      img = apply_bounds_mask(img, bounds_mask)
+
     return dst_x, dst_y, image_to_bytes(img, image_format, webp_quality), True
   except Exception as e:
     # Fallback to black tile on error
@@ -475,6 +722,7 @@ def export_base_tiles_parallel(
   image_format: str,
   webp_quality: int,
   num_workers: int,
+  bounds_quadrant_coords: list[tuple[float, float]] | None = None,
 ) -> tuple[dict[tuple[int, int], bytes], dict[str, int]]:
   """
   Process all base tiles in parallel.
@@ -512,6 +760,7 @@ def export_base_tiles_parallel(
           dither,
           image_format,
           webp_quality,
+          bounds_quadrant_coords,
         )
       )
 
@@ -651,6 +900,7 @@ def export_to_pmtiles(
   image_format: str = FORMAT_PNG,
   webp_quality: int = DEFAULT_WEBP_QUALITY,
   num_workers: int = DEFAULT_WORKERS,
+  bounds_quadrant_coords: list[tuple[float, float]] | None = None,
 ) -> dict[str, Any]:
   """
   Export all tiles to a PMTiles archive using parallel processing.
@@ -689,6 +939,7 @@ def export_to_pmtiles(
     image_format,
     webp_quality,
     num_workers,
+    bounds_quadrant_coords,
   )
   process_time = time.time() - process_start
   print(f"   Base tile processing completed in {process_time:.1f}s")
@@ -788,6 +1039,10 @@ def export_to_pmtiles(
       "gridHeight": padded_height,
       "originalWidth": original_width,
       "originalHeight": original_height,
+      # Origin offset: PMTiles (0,0) corresponds to database (originX, originY)
+      # This allows translating between PMTiles coords and generation database coords
+      "originX": tl[0],
+      "originY": tl[1],
       "maxZoom": max_zoom,
       "pmtilesMinZoom": pmtiles_min_z,
       "pmtilesMaxZoom": pmtiles_max_z,
@@ -813,6 +1068,140 @@ def export_to_pmtiles(
   return stats
 
 
+def update_pmtiles_metadata(
+  input_path: Path,
+  output_path: Path,
+  tl: tuple[int, int],
+  orig_width: int,
+  orig_height: int,
+  padded_width: int,
+  padded_height: int,
+  max_zoom: int = MAX_ZOOM_LEVEL,
+) -> dict[str, Any]:
+  """
+  Update PMTiles metadata without re-processing tiles.
+
+  Reads all tiles from an existing PMTiles file and writes them to a new file
+  with updated metadata. This is much faster than a full export when only
+  metadata changes are needed.
+
+  Args:
+    input_path: Path to existing PMTiles file.
+    output_path: Path for output file (can be same as input).
+    tl: Top-left coordinate of the export region.
+    orig_width: Original grid width.
+    orig_height: Original grid height.
+    padded_width: Padded grid width.
+    padded_height: Padded grid height.
+    max_zoom: Maximum zoom level.
+
+  Returns:
+    Stats dict with timing and tile counts.
+  """
+  start_time = time.time()
+
+  # Read existing PMTiles file
+  print(f"\n📖 Reading existing PMTiles: {input_path}")
+  read_start = time.time()
+
+  with open(input_path, "rb") as f:
+    source = MmapSource(f)
+    reader = PMTilesReader(source)
+    header = reader.header()
+    old_metadata = reader.metadata()
+
+    # Collect all tiles
+    tiles: list[tuple[int, bytes]] = []
+    for tileid, tile_data in reader.get_all():
+      tiles.append((tileid, tile_data))
+
+  read_time = time.time() - read_start
+  print(f"   Read {len(tiles)} tiles in {read_time:.1f}s")
+
+  # Determine image format from old metadata or header
+  image_format = old_metadata.get("format", FORMAT_PNG)
+
+  # Calculate PMTiles zoom map
+  pmtiles_zoom_map: dict[int, int] = {}
+  for our_level in range(max_zoom + 1):
+    scale = 2**our_level
+    level_width = padded_width // scale
+    level_height = padded_height // scale
+    max_dim = max(level_width, level_height)
+    pmtiles_zoom_map[our_level] = min_zoom_for_grid(max_dim)
+
+  pmtiles_min_z = min(pmtiles_zoom_map.values())
+  pmtiles_max_z = max(pmtiles_zoom_map.values())
+
+  # Build updated metadata
+  new_metadata = {
+    "name": old_metadata.get("name", "Isometric NYC"),
+    "description": old_metadata.get(
+      "description", "Pixel art isometric view of New York City"
+    ),
+    "version": old_metadata.get("version", "1.0.0"),
+    "type": "raster",
+    "format": image_format,
+    "tileSize": old_metadata.get("tileSize", TILE_SIZE),
+    "gridWidth": padded_width,
+    "gridHeight": padded_height,
+    "originalWidth": orig_width,
+    "originalHeight": orig_height,
+    # Origin offset: PMTiles (0,0) corresponds to database (originX, originY)
+    "originX": tl[0],
+    "originY": tl[1],
+    "maxZoom": max_zoom,
+    "pmtilesMinZoom": pmtiles_min_z,
+    "pmtilesMaxZoom": pmtiles_max_z,
+    "pmtilesZoomMap": pmtiles_zoom_map,
+    "generated": datetime.now(timezone.utc).isoformat(),
+  }
+
+  # Write to output file
+  print(f"\n📝 Writing updated PMTiles: {output_path}")
+  write_start = time.time()
+
+  # If output is same as input, write to a temp file first
+  if output_path == input_path:
+    temp_path = output_path.with_suffix(".pmtiles.tmp")
+  else:
+    temp_path = output_path
+
+  temp_path.parent.mkdir(parents=True, exist_ok=True)
+
+  with pmtiles_write(str(temp_path)) as writer:
+    for tileid, tile_data in tiles:
+      writer.write_tile(tileid, tile_data)
+
+    # Create header
+    tile_type = TileType.WEBP if image_format == FORMAT_WEBP else TileType.PNG
+    new_header = {
+      "tile_type": tile_type,
+      "tile_compression": Compression.NONE,
+      "center_zoom": (pmtiles_min_z + pmtiles_max_z) // 2,
+      "center_lon": 0,
+      "center_lat": 0,
+    }
+
+    writer.finalize(new_header, new_metadata)
+
+  # If we wrote to a temp file, rename it
+  if temp_path != output_path:
+    temp_path.replace(output_path)
+
+  write_time = time.time() - write_start
+  total_time = time.time() - start_time
+
+  print(f"   Wrote {len(tiles)} tiles in {write_time:.1f}s")
+
+  return {
+    "total_tiles": len(tiles),
+    "read_time": read_time,
+    "write_time": write_time,
+    "total_time": total_time,
+  }
+
+
 def main() -> int:
   parser = argparse.ArgumentParser(
     description="Export quadrants from the generation database to a PMTiles archive.",
@@ -828,11 +1217,17 @@ Examples:
   # Export without postprocessing (raw tiles)
   %(prog)s generations/v01 --no-postprocess
 
+  # Export with bounds clipping
+  %(prog)s generations/v01 --bounds v1.json
+
   # Customize postprocessing
   %(prog)s generations/v01 --scale 4 --colors 64 --no-dither
 
   # Control parallelism
   %(prog)s generations/v01 --workers 4
+
+  # Update metadata only (no tile re-processing)
+  %(prog)s generations/v01 --metadata-only
     """,
   )
   parser.add_argument(
@@ -874,6 +1269,25 @@ Examples:
     "--dry-run",
     action="store_true",
     help="Show what would be exported without actually exporting",
+  )
+  parser.add_argument(
+    "--metadata-only",
+    action="store_true",
+    help="Update metadata only without re-processing tiles. "
+    "Reads existing PMTiles file and rewrites with updated metadata "
+    "(e.g., originX/originY coordinates). Much faster than full export.",
+  )
+
+  # Bounds clipping arguments
+  bounds_group = parser.add_argument_group("bounds clipping options")
+  bounds_group.add_argument(
+    "--bounds",
+    type=str,
+    default=None,
+    metavar="FILE",
+    help="GeoJSON bounds file for clipping. Can be a filename in the bounds "
+    "directory (e.g., 'v1.json') or a full path. Tiles at the edge will have "
+    "pixels outside the bounds blacked out.",
   )
 
   # Parallel processing arguments
@@ -967,6 +1381,33 @@ Examples:
     print(f"❌ Error: Database not found: {db_path}")
     return 1
 
+  # Load generation config (needed for bounds conversion)
+  try:
+    config = load_generation_config(generation_dir)
+  except FileNotFoundError as e:
+    print(f"❌ Error: {e}")
+    return 1
+
+  # Load and process bounds if specified
+  bounds_quadrant_coords: list[tuple[float, float]] | None = None
+  if args.bounds:
+    try:
+      print(f"📍 Loading bounds from: {args.bounds}")
+      bounds_geojson = load_bounds_file(args.bounds)
+      bounds_polygon = extract_polygon_from_geojson(bounds_geojson)
+      if bounds_polygon is None:
+        print("❌ Error: Could not extract polygon from bounds file")
+        return 1
+
+      bounds_quadrant_coords = convert_bounds_to_quadrant_coords(config, bounds_polygon)
+      print(f"   Bounds polygon has {len(bounds_quadrant_coords)} vertices")
+    except FileNotFoundError as e:
+      print(f"❌ Error: Bounds file not found: {e}")
+      return 1
+    except Exception as e:
+      print(f"❌ Error loading bounds: {e}")
+      return 1
+
   # Get database bounds
   bounds = get_quadrant_bounds(db_path)
   if not bounds:
@@ -1017,6 +1458,49 @@ Examples:
   )
   print()
 
+  # Handle metadata-only update
+  if args.metadata_only:
+    if not output_path.exists():
+      print(f"❌ Error: --metadata-only requires existing PMTiles file: {output_path}")
+      print("   Run a full export first, then use --metadata-only to update metadata.")
+      return 1
+
+    print("📋 Metadata-only mode: updating metadata without re-processing tiles")
+    print(f"   Origin offset: ({tl[0]}, {tl[1]})")
+    print()
+
+    stats = update_pmtiles_metadata(
+      input_path=output_path,
+      output_path=output_path,
+      tl=tl,
+      orig_width=orig_width,
+      orig_height=orig_height,
+      padded_width=padded_width,
+      padded_height=padded_height,
+      max_zoom=MAX_ZOOM_LEVEL,
+    )
+
+    # Print summary
+    print()
+    print("=" * 60)
+    print("✅ PMTiles metadata update complete!")
+    print(f"   Output: {output_path}")
+    file_size_mb = output_path.stat().st_size / 1024 / 1024
+    file_size_gb = file_size_mb / 1024
+    if file_size_gb >= 1:
+      print(f"   File size: {file_size_gb:.2f} GB")
+    else:
+      print(f"   File size: {file_size_mb:.2f} MB")
+    print(f"   Total tiles: {stats['total_tiles']}")
+    print(f"   Origin: ({tl[0]}, {tl[1]})")
+    print()
+    print("⏱️  Performance:")
+    print(f"   Read time: {stats['read_time']:.1f}s")
+    print(f"   Write time: {stats['write_time']:.1f}s")
+    print(f"   Total time: {stats['total_time']:.1f}s")
+
+    return 0
+
   # Build or load palette for postprocessing
   palette_img: Image.Image | None = None
   if not args.no_postprocess:
@@ -1052,6 +1536,8 @@ Examples:
   print()
 
   print(f"⚡ Parallel processing: {args.workers} workers")
+  if bounds_quadrant_coords:
+    print("✂️  Bounds clipping: enabled")
   print()
 
   if args.dry_run:
@@ -1061,6 +1547,7 @@ Examples:
     print(f"   To: {output_path}")
     print(f"   Format: {image_format.upper()}")
     print(f"   Postprocessing: {'enabled' if palette_img else 'disabled'}")
+    print(f"   Bounds clipping: {'enabled' if bounds_quadrant_coords else 'disabled'}")
     print(f"   Workers: {args.workers}")
     return 0
 
@@ -1082,6 +1569,7 @@ Examples:
     image_format=image_format,
     webp_quality=args.webp_quality,
     num_workers=args.workers,
+    bounds_quadrant_coords=bounds_quadrant_coords,
   )
 
   # Print summary
@@ -1106,6 +1594,7 @@ Examples:
     f"   Grid size: {orig_width}×{orig_height} (padded to {padded_width}×{padded_height})"
   )
   print(f"   Postprocessing: {'enabled' if palette_img else 'disabled'}")
+  print(f"   Bounds clipping: {'enabled' if bounds_quadrant_coords else 'disabled'}")
   print()
   print("⏱️  Performance:")
   print(f"   Database load: {stats['db_load_time']:.1f}s")
