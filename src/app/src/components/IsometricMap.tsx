@@ -33,6 +33,11 @@ interface WaterShaderSettings {
 	params: ShaderParams;
 }
 
+interface ZoomConstraints {
+	minZoom: number;
+	maxZoom: number;
+}
+
 interface IsometricMapProps {
 	tileConfig: TileConfig;
 	viewState: ViewState;
@@ -41,6 +46,7 @@ interface IsometricMapProps {
 	onTileHover: (tile: { x: number; y: number } | null) => void;
 	scanlines?: ScanlineSettings;
 	waterShader?: WaterShaderSettings;
+	zoomConstraints?: ZoomConstraints;
 }
 
 export function IsometricMap({
@@ -50,6 +56,7 @@ export function IsometricMap({
 	onTileHover,
 	scanlines = { enabled: true, count: 480, opacity: 0.15 },
 	waterShader,
+	zoomConstraints,
 }: IsometricMapProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const viewerRef = useRef<OpenSeadragon.Viewer | null>(null);
@@ -325,6 +332,7 @@ export function IsometricMap({
 				viewer.viewport.panTo(new OpenSeadragon.Point(centerX, centerY), true);
 			});
 		}
+
 
 		// Track viewport changes
 		viewer.addHandler("viewport-change", () => {

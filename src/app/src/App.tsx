@@ -55,6 +55,11 @@ export interface ViewState {
 
 const VIEW_STATE_STORAGE_KEY = "isometric-nyc-view-state";
 
+// Zoom constraints (log2 scale: 0 = 1:1 pixels, positive = zoom in, negative = zoom out)
+// Example: -2 = 0.25x (zoomed out), 0 = 1x, 2 = 4x (zoomed in)
+const MIN_ZOOM = -6;  // Most zoomed out (shows large area)
+const MAX_ZOOM = 4;   // Most zoomed in (shows fine detail)
+
 // Check if we're in development mode (show debug UI)
 const isDev = import.meta.env.DEV;
 
@@ -113,7 +118,9 @@ function loadSavedViewState(tileConfig?: TileConfig): ViewState | null {
 					}
 				}
 
-				return { target, zoom: parsed.zoom };
+				// Clamp zoom to valid range
+				const clampedZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, parsed.zoom));
+				return { target, zoom: clampedZoom };
 			}
 		}
 	} catch (e) {
@@ -253,7 +260,7 @@ function App() {
 
 			setViewState({
 				target: [centerX, centerY, 0],
-				zoom: -2,
+				zoom: -2,  // Default starting zoom
 			});
 		}
 	}, [tileConfig, viewState]);
@@ -282,8 +289,19 @@ function App() {
 
 	const handleViewStateChange = useCallback(
 		(params: { viewState: ViewState }) => {
-			setViewState(params.viewState);
-			saveViewState(params.viewState);
+			const zoom = params.viewState.zoom;
+			const needsClamp = zoom < MIN_ZOOM || zoom > MAX_ZOOM;
+			const clampedZoom = needsClamp ? Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom)) : zoom;
+			
+			// Only log occasionally to avoid spam
+			console.log("Zoom level:", zoom.toFixed(2), needsClamp ? `(clamped to ${clampedZoom.toFixed(2)})` : "");
+			
+			const newViewState = needsClamp 
+				? { ...params.viewState, zoom: clampedZoom }
+				: params.viewState;
+			
+			setViewState(newViewState);
+			saveViewState(newViewState);
 		},
 		[],
 	);
@@ -334,6 +352,7 @@ function App() {
 				onTileHover={handleTileHover}
 				scanlines={scanlines}
 				waterShader={waterShader}
+				zoomConstraints={{ minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM }}
 			/>
 
 			<header className="header">
