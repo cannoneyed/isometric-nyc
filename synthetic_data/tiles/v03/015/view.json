@@ -1,0 +1,10 @@
+{
+  "name": "Hudson Yards",
+  "lat": 40.753767,
+  "lon": -74.001714,
+  "camera_azimuth_degrees": -15,
+  "camera_elevation_degrees": -45,
+  "width_px": 1080,
+  "height_px": 1080,
+  "view_height_meters": 200
+}

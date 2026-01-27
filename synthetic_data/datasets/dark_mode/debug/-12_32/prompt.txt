@@ -1,0 +1,29 @@
+DARK MODE / NIGHTTIME GENERATION TASK
+
+Transform this isometric pixel art image from daytime to nighttime. The goal is to create a realistic nighttime version that:
+
+1. LIGHTING:
+   - Reduce overall brightness significantly (nighttime ambient light)
+   - Add warm yellow/orange lights in building windows (randomly lit, not all windows)
+   - Add subtle blue-ish moonlight tint to exposed surfaces
+   - Street lights should cast warm pools of light on streets/sidewalks
+   - Neon signs and shop fronts should glow with vibrant colors
+   - THERE SHOULD BE NO REFLECTION OF CITY LIGHTS OR TEXTURES IN THE WATER - THE WATER SHOULD SIMPLY BE DARKENED
+
+2. COLORS:
+   - Shift all colors toward cooler/darker tones
+   - Shadows should be deep blue/purple, not just black
+   - Water should reflect city lights with subtle shimmer
+   - Sky areas (if visible) should be dark blue/black
+
+3. ATMOSPHERE:
+   - Maintain all the structural details of buildings and streets
+   - Keep the isometric pixel art style intact
+   - The image should feel cozy and urban-nightlife-like
+
+4. PRESERVE:
+   - Exact same perspective and composition
+   - All building shapes, roads, and structural elements
+   - The pixel art aesthetic and style
+
+Output a nighttime version of the exact same scene.

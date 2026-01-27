@@ -1,0 +1,104 @@
+{
+  "camera_azimuth_degrees": -15,
+  "camera_elevation_degrees": -45,
+  "width_px": 1080,
+  "height_px": 1080,
+  "view_height_meters": 200,
+  "locations": [
+    {
+      "name": "1 Water Street",
+      "lat": 40.702258,
+      "lon": -74.01205
+    },
+    {
+      "name": "Pier 17",
+      "lat": 40.705906,
+      "lon": -74.002555
+    },
+    {
+      "name": "Google NYC",
+      "lat": 40.74081,
+      "lon": -74.002411
+    },
+    {
+      "name": "Upper East Side",
+      "lat": 40.7735649,
+      "lon": -73.9565551
+    },
+    {
+      "name": "Empire State Building",
+      "lat": 40.748002,
+      "lon": -73.985332
+    },
+    {
+      "name": "Madison Square Park",
+      "lat": 40.742,
+      "lon": -73.988
+    },
+    {
+      "name": "Lincoln Center",
+      "lat": 40.7724641,
+      "lon": -73.9834889
+    },
+    {
+      "name": "Columbus Circle",
+      "lat": 40.7679342,
+      "lon": -73.9814493
+    },
+    {
+      "name": "Madison Avenue",
+      "lat": 40.740958,
+      "lon": -73.988226
+    },
+    {
+      "name": "Brooklyn Bridge",
+      "lat": 40.708054,
+      "lon": -74.000308
+    },
+    {
+      "name": "Brooklyn Heights",
+      "lat": 40.693398,
+      "lon": -73.991709
+    },
+    {
+      "name": "Williamsburg",
+      "lat": 40.717471,
+      "lon": -73.958416
+    },
+    {
+      "name": "DUMBO",
+      "lat": 40.703948,
+      "lon": -73.989602
+    },
+    {
+      "name": "Pier 5",
+      "lat": 40.693648,
+      "lon": -73.999926
+    },
+    {
+      "name": "Astoria",
+      "lat": 40.762572,
+      "lon": -73.926724
+    },
+    {
+      "name": "Hudson Yards",
+      "lat": 40.753767,
+      "lon": -74.001714
+    },
+    {
+      "name": "Hunters Point",
+      "lat": 40.746954,
+      "lon": -73.956583
+    },
+    {
+      "name": "Roosevelt Island",
+      "lat": 40.760994,
+      "lon": -73.950571
+    },
+    {
+      "name": "Yankee Stadium",
+      "lat": 40.828502,
+      "lon": -73.926619
+    }
+  ]
+}

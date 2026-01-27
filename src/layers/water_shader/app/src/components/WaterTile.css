@@ -1,0 +1,15 @@
+.water-tile {
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid rgba(74, 99, 114, 0.4);
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+.water-tile-canvas {
+  display: block;
+  width: 512px;
+  height: 512px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}

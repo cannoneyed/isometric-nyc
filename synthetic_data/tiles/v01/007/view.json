@@ -1,0 +1,11 @@
+{
+  "name": "Brooklyn Bridge",
+  "lat": 40.7061,
+  "lon": -73.9969,
+  "camera_azimuth_degrees": -15,
+  "camera_elevation_degrees": -45,
+  "width_px": 1080,
+  "height_px": 1080,
+  "view_height_meters": 300,
+  "special_instructions": "This is an overhead isometric view of the Brooklyn Bridge. Please follow the contours of the bridge **exactly** (especially the locations of the bridge's towers and cables). Stick EXACTLY to the location of the bridge in the render."
+}

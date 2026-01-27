@@ -1,0 +1,70 @@
+[project]
+name = "isometric-nyc"
+version = "0.1.0"
+description = "Generate isometric pixel art views of New York City using AI"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [
+    { name = "Andy Coenen", email = "andrew.coenen@gmail.com" }
+]
+keywords = ["isometric", "pixel-art", "nyc", "ai", "generative-art"]
+dependencies = [
+    "contextily>=1.7.0",
+    "diffusers>=0.36.0",
+    "fastapi>=0.128.0",
+    "flask>=3.1.2",
+    "google-cloud-storage>=2.18.0",
+    "google-genai>=1.52.0",
+    "googlemaps>=4.10.0",
+    "marimo>=0.18.0",
+    "matplotlib>=3.10.7",
+    "modal>=1.3.1",
+    "numpy>=2.3.5",
+    "opencv-python>=4.11.0.86",
+    "oxenai>=0.42.5",
+    "pillow>=12.0.0",
+    "playwright>=1.49.0",
+    "pmtiles>=3.5.0",
+    "psycopg2-binary>=2.9.11",
+    "pydantic>=2.12.4",
+    "pyproj>=3.7.2",
+    "python-dotenv>=1.2.1",
+    "pyvips>=3.1.1",
+    "pyvista>=0.46.4",
+    "requests>=2.31.0",
+    "shapely>=2.1.2",
+    "sodapy>=2.2.0",
+    "tabulate>=0.9.0",
+    "torch>=2.10.0",
+    "tqdm>=4.67.1",
+    "unfake>=1.0.7",
+]
+
+[project.scripts]
+export-to-oxen = "isometric_nyc.oxen_sync.export_to_oxen:main"
+import-from-oxen = "isometric_nyc.oxen_sync.import_from_oxen:main"
+
+[tool.ruff]
+line-length = 88
+indent-width = 2
+
+[tool.ruff.format]
+indent-style = "space"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "ruff>=0.14.5",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.marimo.runtime]
+output_max_bytes = 20_000_000

@@ -1,0 +1,697 @@
+/* ============================================
+   ISOMETRIC NYC - GLOBAL STYLES
+   A retro-futuristic pixel art aesthetic
+   ============================================ */
+
+:root {
+  /* Color palette - inspired by night cityscapes */
+  --color-bg-deep: #0a0c14;
+  --color-bg: #12151f;
+  --color-bg-elevated: #1a1e2e;
+  --color-bg-surface: #232838;
+
+  /* Accent colors - neon city vibes */
+  --color-accent-primary: #ff6b35;
+  --color-accent-secondary: #00d4aa;
+  --color-accent-tertiary: #7b68ee;
+  --color-accent-warning: #ffd23f;
+
+  /* Text */
+  --color-text-primary: #e8e6e3;
+  --color-text-secondary: #8b8a88;
+  --color-text-muted: #5a5958;
+
+  /* Borders & lines */
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-accent: rgba(255, 107, 53, 0.3);
+
+  /* Fonts */
+  --font-mono: "Azeret Mono", "SF Mono", "Fira Code", monospace;
+  --font-display: "Crimson Pro", Georgia, serif;
+
+  /* Spacing */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+
+  /* Sizing */
+  --panel-width: 280px;
+  --header-height: 30px;
+  --window-border: 4px;
+
+  /* Effects */
+  --blur-amount: 12px;
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms ease;
+
+  /* Shadows */
+  --shadow-subtle: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-elevated: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --glow-accent: 0 0 20px rgba(255, 107, 53, 0.3);
+}
+
+/* Reset & base */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+  /* Early 2000s desktop wallpaper vibes - deep blue gradient */
+  background: linear-gradient(
+    180deg,
+    #1a3a5c 0%,
+    #0d2137 50%,
+    #0a1929 100%
+  );
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  height: 100%;
+  padding: 4px;
+}
+
+/* Main app container - Windows XP style window */
+.app {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: var(--color-bg-deep);
+  /* XP Luna style window border - rounded with blue accents */
+  border: 3px solid;
+  border-color: #4a90c8 #1a4a7a #1a4a7a #4a90c8;
+  border-radius: 8px 8px 4px 4px;
+  box-shadow:
+    /* Outer glow */
+    0 0 0 1px rgba(0, 80, 160, 0.5),
+    /* Inner highlight */
+    inset 0 0 0 1px rgba(120, 180, 255, 0.2),
+    /* Drop shadow */
+    0 8px 32px rgba(0, 0, 0, 0.6),
+    0 2px 8px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+/* Header - Windows XP Luna Style Title Bar */
+.header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: 0 8px;
+  /* XP Luna blue gradient - vibrant and smooth */
+  background: linear-gradient(
+    180deg,
+    #0a246a 0%,
+    #0f3c8c 8%,
+    #1665c4 20%,
+    #1a72d4 40%,
+    #1665c4 60%,
+    #0f3c8c 85%,
+    #0a246a 100%
+  );
+  /* Subtle rounded top to match window */
+  border-radius: 5px 5px 0 0;
+  /* Soft inner glow for that XP shine */
+  box-shadow: 
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+    0 1px 3px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+  pointer-events: auto;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Windows XP Luna style window buttons */
+.icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  /* XP button gradient - softer, rounder */
+  background: linear-gradient(
+    180deg,
+    #4488cc 0%,
+    #3366aa 40%,
+    #2255aa 60%,
+    #1144aa 100%
+  );
+  border: 1px solid rgba(0, 0, 0, 0.4);
+  border-radius: 3px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 1px 2px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  transition: all 0.1s ease;
+  padding: 0;
+}
+
+.icon-button:hover {
+  background: linear-gradient(
+    180deg,
+    #66aaee 0%,
+    #4488cc 40%,
+    #3377bb 60%,
+    #2266aa 100%
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.icon-button:active {
+  background: linear-gradient(
+    180deg,
+    #2255aa 0%,
+    #3366aa 60%,
+    #4488cc 100%
+  );
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
+  transform: none;
+}
+
+.icon-button svg {
+  width: 12px;
+  height: 12px;
+  color: #ffffff;
+}
+
+.header h1 {
+  font-family: "Trebuchet MS", "Tahoma", "Segoe UI", sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  font-style: normal;
+  letter-spacing: 0.02em;
+  color: #ffffff;
+  text-shadow: 
+    1px 1px 1px rgba(0, 0, 0, 0.6),
+    0 0 8px rgba(100, 160, 255, 0.3);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.header .subtitle {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--color-accent-secondary);
+  opacity: 0.8;
+}
+
+/* XP app icon in title bar */
+.header::before {
+  content: "";
+  width: 18px;
+  height: 18px;
+  background: url('/favicon/favicon-32x32.png') center/contain no-repeat;
+  margin-right: 6px;
+  flex-shrink: 0;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.4));
+}
+
+/* XP Luna button icons */
+.win-btn-icon {
+  font-family: "Trebuchet MS", "Tahoma", sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.4);
+}
+
+.win-minimize .win-btn-icon {
+  font-size: 16px;
+  margin-top: -4px;
+}
+
+.win-maximize .win-btn-icon {
+  font-size: 10px;
+}
+
+.win-close .win-btn-icon {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+/* Header icon buttons with Lucide icons */
+.header-actions .icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  color: white;
+  transition: background-color 0.15s ease;
+}
+
+.header-actions .icon-button:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.header-actions .icon-button.active {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.header-actions .icon-button svg {
+  stroke-width: 2;
+}
+
+/* Panel base styles */
+.panel {
+  position: fixed;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: var(--space-lg);
+  box-shadow: var(--shadow-elevated);
+  backdrop-filter: blur(var(--blur-amount));
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-md);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.panel-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--color-text-secondary);
+}
+
+/* Control Panel */
+.control-panel {
+  bottom: var(--space-lg);
+  left: var(--space-lg);
+  width: var(--panel-width);
+  max-height: calc(100vh - var(--space-lg) * 2 - var(--header-height));
+  display: flex;
+  flex-direction: column;
+  transition: var(--transition-normal);
+}
+
+.control-panel.collapsed {
+  width: auto;
+  min-width: 120px;
+}
+
+.control-panel.collapsed .panel-header {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.collapse-icon {
+  font-size: 8px;
+  color: var(--color-text-muted);
+  transition: var(--transition-fast);
+}
+
+.panel-header:hover .collapse-icon {
+  color: var(--color-accent-primary);
+}
+
+.panel-content {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.control-group {
+  margin-bottom: var(--space-md);
+}
+
+.control-group:last-child {
+  margin-bottom: 0;
+}
+
+.control-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-xs);
+}
+
+.control-value {
+  font-weight: 500;
+  color: var(--color-accent-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sliders */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--color-bg-surface);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+input[type="range"]:hover {
+  background: var(--color-border-accent);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  background: var(--color-accent-primary);
+  border-radius: 50%;
+  border: 2px solid var(--color-bg-elevated);
+  box-shadow: var(--glow-accent);
+  cursor: grab;
+  transition: var(--transition-fast);
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+input[type="range"]::-webkit-slider-thumb:active {
+  cursor: grabbing;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  background: var(--color-accent-primary);
+  border-radius: 50%;
+  border: 2px solid var(--color-bg-elevated);
+  box-shadow: var(--glow-accent);
+  cursor: grab;
+}
+
+/* Stats display */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-sm);
+}
+
+.stat-item {
+  background: var(--color-bg);
+  border-radius: 8px;
+  padding: var(--space-sm) var(--space-md);
+}
+
+.stat-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-text-muted);
+  margin-bottom: 2px;
+}
+
+.stat-value {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-value.accent {
+  color: var(--color-accent-secondary);
+}
+
+/* Tile Info Panel */
+.tile-info {
+  bottom: var(--space-lg);
+  right: var(--space-lg);
+  min-width: 200px;
+  transition: var(--transition-normal);
+  opacity: 0;
+  transform: translateY(10px);
+  pointer-events: none;
+}
+
+.tile-info.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.tile-coords {
+  display: flex;
+  gap: var(--space-lg);
+  margin-top: var(--space-sm);
+}
+
+.coord {
+  display: flex;
+  flex-direction: column;
+}
+
+.coord-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-text-muted);
+}
+
+.coord-value {
+  font-size: 24px;
+  font-weight: 500;
+  color: var(--color-accent-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Map canvas container */
+.map-container {
+  position: absolute;
+  inset: 0;
+}
+
+/* OpenSeadragon Navigator (minimap) styling */
+.navigator {
+  background-color: rgba(10, 20, 35, 0.95) !important;
+  border: 2px solid rgba(80, 140, 200, 0.6) !important;
+  border-radius: 4px !important;
+  box-shadow: 
+    0 2px 8px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+  /* Position below header (header is 30px + window border 4px + some padding) */
+  top: calc(var(--header-height) + var(--window-border) + 8px) !important;
+  right: 8px !important;
+  margin: 0 !important;
+}
+
+/* Hide minimap when toggled off */
+.navigator.hidden {
+  display: none !important;
+}
+
+/* Navigator viewport indicator (the rectangle showing current view) */
+.navigator .displayregion {
+  border: 2px solid rgba(255, 180, 100, 0.9) !important;
+  background: rgba(255, 150, 80, 0.2) !important;
+  box-shadow: 0 0 8px rgba(255, 150, 80, 0.5) !important;
+}
+
+
+/* OpenSeadragon canvas - crisp pixel art rendering */
+.map-container canvas {
+  image-rendering: -moz-crisp-edges;
+  image-rendering: -webkit-crisp-edges;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* Prevent subpixel rendering artifacts during transforms */
+.map-container .openseadragon-canvas {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* Keyboard shortcut hints */
+.shortcuts {
+  margin-top: var(--space-md);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--color-border);
+}
+
+.shortcut {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: 10px;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-xs);
+}
+
+.shortcut:last-child {
+  margin-bottom: 0;
+}
+
+.key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+/* Animations */
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: var(--glow-accent);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(255, 107, 53, 0.5);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.panel {
+  animation: fade-in 0.4s ease-out;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-bg-surface);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Toggle switch */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  cursor: pointer;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  transition: var(--transition-fast);
+}
+
+.toggle-slider::before {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  left: 2px;
+  bottom: 2px;
+  background: var(--color-text-muted);
+  border-radius: 50%;
+  transition: var(--transition-fast);
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: rgba(255, 107, 53, 0.2);
+  border-color: var(--color-accent-primary);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(16px);
+  background: var(--color-accent-primary);
+  box-shadow: 0 0 8px rgba(255, 107, 53, 0.5);
+}
+
+.toggle-switch input:focus-visible + .toggle-slider {
+  outline: 2px solid var(--color-accent-primary);
+  outline-offset: 2px;
+}
+
+/* Scanline overlay canvas */
+.scanline-overlay {
+  image-rendering: pixelated;
+  mix-blend-mode: multiply;
+}
+
+/* Focus states */
+:focus-visible {
+  outline: 2px solid var(--color-accent-primary);
+  outline-offset: 2px;
+}
+
+/* Selection */
+::selection {
+  background: rgba(255, 107, 53, 0.3);
+  color: var(--color-text-primary);
+}

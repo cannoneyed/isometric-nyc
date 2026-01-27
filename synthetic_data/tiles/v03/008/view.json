@@ -1,0 +1,10 @@
+{
+  "name": "Madison Avenue",
+  "lat": 40.740958,
+  "lon": -73.988226,
+  "camera_azimuth_degrees": -15,
+  "camera_elevation_degrees": -45,
+  "width_px": 1080,
+  "height_px": 1080,
+  "view_height_meters": 200
+}

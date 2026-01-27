@@ -1,0 +1,10 @@
+{
+  "name": "Pier 17",
+  "lat": 40.705906,
+  "lon": -74.002555,
+  "camera_azimuth_degrees": -15,
+  "camera_elevation_degrees": -45,
+  "width_px": 1080,
+  "height_px": 1080,
+  "view_height_meters": 200
+}

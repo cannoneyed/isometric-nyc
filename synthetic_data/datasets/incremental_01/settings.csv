@@ -1,0 +1,116 @@
+name,n_variants,prompt_suffix
+tile_x-49_y12,2,
+tile_x-48_y69,2,WATER
+tile_x-44_y87,4,BEACH OCEAN WATER
+tile_x-42_y64,2,
+tile_x-41_y48,4,WATER
+tile_x-39_y19,4,WATER
+tile_x-39_y83,4,WATER BEACH
+tile_x-38_y13,4,WATER
+tile_x-38_y44,4,WATER
+tile_x-38_y60,2,
+tile_x-38_y81,4,WATER FIELD
+tile_x-38_y89,4,WATER OCEAN BEACH
+tile_x-35_y9,2,
+tile_x-34_y85,4,WATER
+tile_x-33_y11,2,
+tile_x-33_y34,4,WATER
+tile_x-33_y37,4,WATER
+tile_x-31_y84,4,WATER
+tile_x-30_y43,4,WATER
+tile_x-27_y2,2,
+tile_x-27_y41,4,WATER
+tile_x-27_y86,4,WATER
+tile_x-25_y31,2,
+tile_x-24_y0,2,
+tile_x-24_y84,2,
+tile_x-21_y12,4,WATER
+tile_x-21_y18,2,
+tile_x-15_y10,2,
+tile_x-14_y87,2,
+tile_x-13_y22,4,WATER
+tile_x-13_y83,2,
+tile_x-12_y13,2,
+tile_x-12_y28,2,
+tile_x-9_y-19,2,
+tile_x-9_y-3,2,
+tile_x-9_y10,2,
+tile_x-8_y6,2,
+tile_x-7_y-5,2,
+tile_x-6_y4,2,
+tile_x-6_y29,4,PARK
+tile_x-6_y35,2,
+tile_x-6_y92,4,WATER
+tile_x-4_y-19,4,WATER
+tile_x-2_y-29,2,
+tile_x-2_y89,4,WATER BEACH
+tile_x-1_y33,2,
+tile_x2_y-26,2,
+tile_x2_y-5,2,
+tile_x2_y36,2,
+tile_x2_y82,2,
+tile_x4_y-35,2,
+tile_x5_y-5,2,
+tile_x7_y-28,4,WATER
+tile_x8_y-30,2,
+tile_x13_y85,4,FIELD
+tile_x14_y-9,2,
+tile_x14_y90,4,FIELD FOREST WATER BEACH
+tile_x16_y-45,2,
+tile_x16_y89,2,
+tile_x17_y92,4,FIELD FOREST WATER BEACH
+tile_x18_y-39,2,
+tile_x18_y-35,4,WATER
+tile_x18_y-23,2,
+tile_x19_y-19,2,
+tile_x20_y-41,2,
+tile_x20_y-21,2,
+tile_x20_y-14,2,
+tile_x20_y83,4,FIELD WATER BEACH
+tile_x23_y-39,4,WATER
+tile_x23_y90,4,FIELD
+tile_x25_y-41,4,WATER
+tile_x27_y-53,2,
+tile_x27_y27,2,
+tile_x29_y-58,2,
+tile_x29_y17,2,
+tile_x30_y-51,2,
+tile_x33_y-9,2,WATER
+tile_x34_y-57,2,
+tile_x34_y-13,4,WATER
+tile_x34_y20,2,
+tile_x36_y-5,2,
+tile_x36_y9,2,
+tile_x36_y18,2,
+tile_x37_y4,2,
+tile_x37_y13,2,
+tile_x38_y-15,2,WATER
+tile_x39_y-7,2,
+tile_x41_y9,2,
+tile_x47_y-65,4,
+tile_x50_y-78,2,
+tile_x50_y-52,4,
+tile_x52_y-81,2,
+tile_x54_y-77,6,FOREST
+tile_x57_y-83,6,FOREST
+tile_x57_y-81,6,FOREST
+tile_x57_y-79,6,FOREST
+tile_x60_y-52,2,
+tile_x61_y-80,6,FOREST
+tile_x63_y-81,6,FOREST
+tile_x65_y-56,4,WATER
+tile_x81_y85,6,WATERSHED MARSH
+tile_x89_y80,4,AIRPORT
+tile_x90_y78,4,AIRPORT
+tile_x93_y70,4,AIRPORT
+tile_x94_y86,4,WATER
+tile_x96_y69,4,AIRPORT
+tile_x102_y77,6,AIRPORT
+tile_x105_y70,4,PARK
+tile_x107_y70,4,FOREST MARSH
+tile_x107_y74,4,FOREST
+tile_x108_y-35,4,PARK
+tile_x110_y-41,2,
+tile_x110_y77,4,WATERSHED MARSH
+tile_x111_y-38,2,
+tile_x117_y-41,6,FOREST

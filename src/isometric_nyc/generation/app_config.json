@@ -1,0 +1,27 @@
+{
+  "models": [
+    {
+      "name": "modal",
+      "model_id": "modal",
+      "endpoint_env": "MODAL_INFERENCE_URL",
+      "num_inference_steps": 14,
+      "model_type": "url",
+      "prompt": "Fill in the outlined section with the missing pixels corresponding to the <isometric nyc pixel art> style, removing the border and exactly following the shape/style/structure of the surrounding image (if present)."
+    },
+    {
+      "name": "oxen",
+      "model_id": "cannoneyed-quiet-green-lamprey",
+      "api_key_env": "OXEN_MODEL_API_KEY",
+      "endpoint": "https://hub.oxen.ai/api/images/edit",
+      "num_inference_steps": 14,
+      "model_type": "oxen"
+    },
+    {
+      "name": "Nano Banana (Gemini)",
+      "model_id": "nano_banana",
+      "api_key_env": "GEMINI_API_KEY",
+      "model_type": "nano_banana"
+    }
+  ],
+  "default_model_id": "modal"
+}

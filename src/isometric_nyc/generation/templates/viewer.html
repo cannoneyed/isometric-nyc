@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Generated Tiles Viewer</title>
+    <link rel="stylesheet" href="/static/viewer.css" />
+    <style>
+      /* Dynamic grid sizing based on template variables */
+      .grid {
+        grid-template-columns: repeat({{ nx }}, {{ size_px }}px);
+        grid-auto-rows: {{ size_px }}px;
+      }
+      .tile.placeholder {
+        min-width: {{ size_px }}px;
+        min-height: {{ size_px }}px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Config data for JS -->
+    <script
+      id="app-config"
+      type="application/json"
+      data-config='{"x": {{ x }}, "y": {{ y }}, "nx": {{ nx }}, "ny": {{ ny }}, "size_px": {{ size_px }}, "tile_type": "{{ tile_type }}", "models": {{ models_config | safe }}, "default_model_id": "{{ default_model_id }}"}'
+    ></script>
+
+    <!-- Toast notification container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Fixed toolbar -->
+    <div class="toolbar">
+      <div class="toolbar-row toolbar-row-nav">
+        <div class="controls">
+          <label>X: <input type="number" id="x" value="{{ x }}" /></label>
+          <label>Y: <input type="number" id="y" value="{{ y }}" /></label>
+          <label
+            >NX: <input type="number" id="nx" value="{{ nx }}" min="1" max="20"
+          /></label>
+          <label
+            >NY: <input type="number" id="ny" value="{{ ny }}" min="1" max="20"
+          /></label>
+          <label
+            >Size:
+            <input type="number" id="sizePx" value="{{ size_px }}" step="32"
+          /></label>
+          <button onclick="goTo()">Go</button>
+          <div class="toggle-group">
+            <label
+              ><input
+                type="checkbox"
+                id="showLines"
+                {%
+                if
+                show_lines
+                %}checked{%
+                endif
+                %}
+                onchange="toggleLines()"
+              />
+              Lines</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                id="showCoords"
+                {%
+                if
+                show_coords
+                %}checked{%
+                endif
+                %}
+                onchange="toggleCoords()"
+              />
+              Coords</label
+            >
+            <label class="tile-type-label"
+              >View:
+              <select id="tileTypeSelect" class="tile-type-select" onchange="changeTileType()">
+                <option value="generation" {% if tile_type == 'generation' %}selected{% endif %}>Generation</option>
+                <option value="render" {% if tile_type == 'render' %}selected{% endif %}>Render</option>
+                <option value="water_mask" {% if tile_type == 'water_mask' %}selected{% endif %}>Water Mask</option>
+                <option value="dark_mode" {% if tile_type == 'dark_mode' %}selected{% endif %}>Dark Mode</option>
+              </select>
+            </label>
+            <label
+              ><input
+                type="checkbox"
+                id="showWater"
+                onchange="toggleWaterHighlight()"
+              />
+              💧 Water</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                id="showNycOutline"
+                onchange="toggleNycOutline()"
+              />
+              🗽 NYC</label
+            >
+            <label
+              ><input
+                type="checkbox"
+                id="showLabels"
+                checked
+                onchange="toggleLabels()"
+              />
+              🏷️ Labels</label
+            >
+          </div>
+          <div class="toggle-group model-group">
+            <label class="model-label"
+              >Model:
+              <select id="modelSelect" class="model-select">
+                <!-- Populated by JavaScript -->
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="toolbar-info">
+          <span>({{ x }}, {{ y }}) → ({{ x + nx - 1 }}, {{ y + ny - 1 }})</span>
+          <span id="selectedQuadrantsDisplay" class="selected-quadrants"></span>
+          <span class="generation-dir-info">{{ generation_dir }}</span>
+        </div>
+      </div>
+      <div class="toolbar-row toolbar-row-tools">
+        <div class="tools-group">
+          <span class="tools-label">Tools:</span>
+          <button
+            id="selectTool"
+            class="tool-btn"
+            onclick="toggleSelectTool()"
+            title="Select quadrants (S)"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"></path>
+              <path d="M13 13l6 6"></path>
+            </svg>
+            Select
+          </button>
+          <button
+            id="fixWaterTool"
+            class="tool-btn"
+            onclick="toggleFixWaterTool()"
+            title="Fix water color (W)"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+            </svg>
+            Fix Water
+          </button>
+          <button
+            id="waterFillTool"
+            class="tool-btn"
+            onclick="toggleWaterFillTool()"
+            title="Fill quadrant with water (F)"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+              <path d="M12 8v8"></path>
+              <path d="M8 12h8"></path>
+            </svg>
+            Water Fill
+          </button>
+          <button
+            id="waterSelectTool"
+            class="tool-btn"
+            onclick="toggleWaterSelectTool()"
+            title="Mark quadrants as water tiles (T)"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
+              <path d="M12 12v4"></path>
+              <circle cx="12" cy="18" r="1"></circle>
+            </svg>
+            Water Select
+          </button>
+        </div>
+        <div class="toolbar-divider"></div>
+        <div class="actions-group">
+          <button
+            id="deselectAllBtn"
+            class="action-btn deselect-btn"
+            onclick="deselectAll()"
+            disabled
+          >
+            Deselect
+          </button>
+          <button
+            id="deleteBtn"
+            class="action-btn delete-btn"
+            onclick="deleteSelected()"
+            disabled
+            title="Delete data (generation or render based on current view)"
+          >
+            Delete
+          </button>
+          <button
+            id="flagBtn"
+            class="action-btn flag-btn"
+            onclick="flagSelected()"
+            disabled
+            title="Flag selected quadrants for review"
+          >
+            🚩 Flag
+          </button>
+          <button
+            id="starBtn"
+            class="action-btn star-btn"
+            onclick="starSelected()"
+            disabled
+            title="Star quadrant for dataset curation (select exactly 1)"
+          >
+            ⭐ Star
+          </button>
+          <button
+            id="prevStarredBtn"
+            class="action-btn nav-starred-btn"
+            onclick="goToPrevStarred()"
+            title="Go to previous starred quadrant ([)"
+          >
+            ◀
+          </button>
+          <button
+            id="viewStarredBtn"
+            class="action-btn view-starred-btn"
+            onclick="showStarredDialog()"
+            title="View all starred entries"
+          >
+            📋 Starred
+          </button>
+          <button
+            id="nextStarredBtn"
+            class="action-btn nav-starred-btn"
+            onclick="goToNextStarred()"
+            title="Go to next starred quadrant (])"
+          >
+            ▶
+          </button>
+          <button
+            id="referenceBtn"
+            class="action-btn reference-btn"
+            onclick="referenceSelected()"
+            disabled
+            title="Mark/unmark reference tile (top-left of 2x2) [B]"
+          >
+            🍌 Reference
+          </button>
+          <button
+            id="clearReferencesBtn"
+            class="action-btn clear-references-btn"
+            onclick="clearAllReferences()"
+            title="Clear all reference tiles"
+          >
+            🗑️ Clear Refs
+          </button>
+          <button
+            id="renderBtn"
+            class="action-btn render-btn"
+            onclick="renderSelected()"
+            disabled
+          >
+            Render
+          </button>
+          <button
+            id="generateBtn"
+            class="action-btn generate-btn"
+            onclick="generateSelected()"
+            disabled
+          >
+            Generate
+          </button>
+          <button
+            id="generateWithPromptBtn"
+            class="action-btn generate-prompt-btn"
+            onclick="showPromptDialog()"
+            disabled
+            title="Generate with additional prompt text"
+          >
+            + Prompt
+          </button>
+          <button
+            id="generateWithNegativePromptBtn"
+            class="action-btn generate-prompt-btn"
+            onclick="showNegativePromptDialog()"
+            disabled
+            title="Generate with negative prompt"
+          >
+            - Neg Prompt
+          </button>
+          <button
+            id="generateRectBtn"
+            class="action-btn generate-rect-btn"
+            onclick="generateRectangle()"
+            disabled
+            title="Select exactly 2 quadrants to define rectangle corners"
+          >
+            Gen Rect
+          </button>
+          <button
+            id="fillRectWaterBtn"
+            class="action-btn fill-rect-water-btn"
+            onclick="fillRectangleWater()"
+            disabled
+            title="Fill rectangle with water color (select 2 quadrants)"
+          >
+            💧 Fill Rect
+          </button>
+          <button
+            id="exportCmdBtn"
+            class="action-btn export-cmd-btn"
+            onclick="copyExportCommand()"
+            disabled
+            title="Copy export command to clipboard (select 2 quadrants)"
+          >
+            Export Cmd
+          </button>
+          <button
+            id="exportBtn"
+            class="action-btn export-btn"
+            onclick="exportSelected()"
+            disabled
+            title="Export rectangle as PNG (select 2 quadrants)"
+          >
+            Export
+          </button>
+        </div>
+        <div class="toolbar-divider"></div>
+        <div class="utility-group">
+          <button
+            id="clearQueueBtn"
+            class="utility-btn clear-queue-btn"
+            onclick="clearQueue()"
+            title="Clear all pending items from the generation queue"
+          >
+            Clear Queue
+          </button>
+          <button
+            id="hardRefreshBtn"
+            class="utility-btn hard-refresh-btn"
+            onclick="hardRefresh()"
+            title="Clear image cache and reload page"
+          >
+            ↻ Refresh
+          </button>
+        </div>
+      </div>
+      <div class="toolbar-row toolbar-row-status" id="selectionStatus">
+        <span id="selectionCount"></span>
+      </div>
+      <div class="water-fix-status" id="waterFixStatus" style="display: none">
+        <span class="water-fix-label">Target Color:</span>
+        <span class="color-swatch" id="targetColorSwatch"></span>
+        <span class="color-hex" id="targetColorHex"
+          >Click a quadrant to pick color</span
+        >
+        <span class="water-fix-quadrant" id="waterFixQuadrant"></span>
+        <button
+          id="applyWaterFixBtn"
+          class="apply-water-fix-btn"
+          onclick="applyWaterFix()"
+          disabled
+        >
+          Apply Fix
+        </button>
+        <button
+          id="cancelWaterFixBtn"
+          class="cancel-water-fix-btn"
+          onclick="cancelWaterFix()"
+        >
+          Cancel
+        </button>
+      </div>
+      <div class="water-fill-status" id="waterFillStatus" style="display: none">
+        <span class="water-fill-label">Water Fill:</span>
+        <span class="color-swatch water-color-preview"></span>
+        <span class="water-fill-instruction" id="waterFillInstruction"
+          >Click a quadrant to fill with water</span
+        >
+        <button
+          id="cancelWaterFillBtn"
+          class="cancel-water-fix-btn"
+          onclick="cancelWaterFill()"
+        >
+          Cancel
+        </button>
+      </div>
+      <div
+        class="water-select-status"
+        id="waterSelectStatus"
+        style="display: none"
+      >
+        <span class="water-select-label">💧 Water Select:</span>
+        <span class="water-select-instruction" id="waterSelectInstruction"
+          >Click to cycle: unset → water 💧 → protected 🛡️ → unset</span
+        >
+        <button
+          id="cancelWaterSelectBtn"
+          class="cancel-water-fix-btn"
+          onclick="cancelWaterSelect()"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+
+    <div
+      class="grid-container {% if show_lines %}show-lines{% endif %} {% if show_coords %}show-coords{% endif %}"
+      id="gridContainer"
+    >
+      <!-- NYC Outline SVG overlay -->
+      <svg class="nyc-outline-overlay" id="nycOutlineOverlay"></svg>
+      <div class="grid">
+        {% for dy in range(ny) %} {% for dx in range(nx) %} {% set qx = x + dx
+        %} {% set qy = y + dy %} {% set has_gen = tiles.get((dx, dy), False) %}
+        {% set is_flagged = flagged_tiles.get((dx, dy), False) %} {% set
+        is_starred = starred_tiles.get((dx, dy), False) %} {% set
+        is_water = water_tiles.get((dx, dy), False) %} {% set
+        is_explicit_not_water = explicit_not_water_tiles.get((dx, dy), False) %} {% set
+        is_reference = reference_tiles.get((dx, dy), False) %}
+        <div
+          class="tile {% if not has_gen %}placeholder{% endif %}{% if is_flagged %} flagged{% endif %}{% if is_starred %} starred{% endif %}{% if is_water %} water{% endif %}{% if is_explicit_not_water %} explicit-not-water{% endif %}{% if is_reference %} is-reference{% endif %}"
+          data-coords="{{ qx }},{{ qy }}"
+          data-flagged="{{ 'true' if is_flagged else 'false' }}"
+          data-starred="{{ 'true' if is_starred else 'false' }}"
+          data-water="{{ 'true' if is_water else 'false' }}"
+          data-explicit-not-water="{{ 'true' if is_explicit_not_water else 'false' }}"
+          data-is-reference="{{ 'true' if is_reference else 'false' }}"
+        >
+          <span class="coords">({{ qx }}, {{ qy }})</span>
+          {% if has_gen %}
+          <img
+            src="/tile/{{ qx }}/{{ qy }}?tile_type={{ tile_type }}"
+            alt="Tile {{ qx }},{{ qy }}"
+          />
+          {% endif %} {% if is_starred %}
+          <span class="starred-indicator" title="Starred for dataset">⭐</span>
+          {% endif %} {% if is_water %}
+          <span class="water-indicator" title="Water tile">💧</span>
+          {% endif %} {% if is_explicit_not_water %}
+          <span class="explicit-not-water-indicator" title="Explicitly NOT water (protected)">🚫</span>
+          {% endif %} {% if is_reference %}
+          <span class="reference-indicator" title="Reference tile (top-left of 2x2)">🍌</span>
+          {% endif %}
+        </div>
+        {% endfor %} {% endfor %}
+      </div>
+    </div>
+
+    <!-- Prompt Dialog -->
+    <div id="promptDialog" class="dialog-overlay" style="display: none">
+      <div class="dialog-content">
+        <h3>Generate with Custom Prompt</h3>
+        <p class="dialog-description">
+          Provide a custom prompt to completely override the default generation prompt.
+          <br><span class="dialog-hint">This prompt will be saved and applied to all future generations.</span>
+        </p>
+        <div id="savedPromptDisplay" class="saved-prompt-display" style="display: none"></div>
+        <textarea
+          id="promptInput"
+          class="prompt-input"
+          placeholder="e.g., 'Add more trees' or 'Make the water darker'"
+          rows="3"
+        ></textarea>
+        <div class="dialog-buttons">
+          <button id="clearPromptBtn" class="dialog-clear-btn" onclick="clearSavedPrompt(); hidePromptDialog();" style="display: none">
+            Clear Saved
+          </button>
+          <div class="dialog-buttons-right">
+            <button class="dialog-cancel-btn" onclick="hidePromptDialog()">
+              Cancel
+            </button>
+            <button class="dialog-submit-btn" onclick="submitPromptGeneration()">
+              Generate
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Negative Prompt Dialog -->
+    <div id="negativePromptDialog" class="dialog-overlay" style="display: none">
+      <div class="dialog-content">
+        <h3>Generate with Negative Prompt</h3>
+        <p class="dialog-description">
+          Provide a negative prompt to specify what you don't want in the generation.
+          <br><span class="dialog-hint">This negative prompt will be saved and applied to all future generations.</span>
+        </p>
+        <div id="savedNegativePromptDisplay" class="saved-prompt-display" style="display: none"></div>
+        <textarea
+          id="negativePromptInput"
+          class="prompt-input"
+          placeholder="e.g., 'no buildings' or 'no water'"
+          rows="3"
+        ></textarea>
+        <div class="dialog-buttons">
+          <button id="clearNegativePromptBtn" class="dialog-clear-btn" onclick="clearSavedNegativePrompt(); hideNegativePromptDialog();" style="display: none">
+            Clear Saved
+          </button>
+          <div class="dialog-buttons-right">
+            <button class="dialog-cancel-btn" onclick="hideNegativePromptDialog()">
+              Cancel
+            </button>
+            <button class="dialog-submit-btn" onclick="submitNegativePromptGeneration()">
+              Generate
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Starred Entries Dialog -->
+    <div id="starredDialog" class="dialog-overlay" style="display: none">
+      <div class="dialog-content starred-dialog-content">
+        <h3>⭐ Starred Entries</h3>
+        <p class="dialog-description">
+          Click an entry to navigate to that location.
+        </p>
+        <div id="starredListContainer" class="starred-list-container">
+          <div id="starredList" class="starred-list">
+            <!-- Populated by JavaScript -->
+          </div>
+        </div>
+        <div id="starredEmptyState" class="starred-empty-state" style="display: none">
+          No starred entries yet. Select a quadrant and click ⭐ Star to add one.
+        </div>
+        <div class="dialog-buttons">
+          <div class="starred-count" id="starredCountDisplay">0 starred</div>
+          <div class="dialog-buttons-right">
+            <button class="dialog-cancel-btn" onclick="hideStarredDialog()">
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="/static/viewer.js"></script>
+  </body>
+</html>

@@ -1,0 +1,11 @@
+# Minimal Cloudflare Worker for R2 caching
+# Just adds Cache-Control headers to R2 responses
+
+name = "isometric-nyc-tiles"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+[[r2_buckets]]
+binding = "R2_BUCKET"
+bucket_name = "isometric-nyc"
+preview_bucket_name = "isometric-nyc"

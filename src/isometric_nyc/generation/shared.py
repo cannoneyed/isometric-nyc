@@ -1,0 +1,951 @@
+"""
+Shared utilities for e2e generation scripts.
+
+Contains common database operations, web server management, and image utilities.
+"""
+
+import io
+import json
+import math
+import sqlite3
+import subprocess
+import time
+import urllib.error
+import urllib.request
+import uuid
+from io import BytesIO
+from pathlib import Path
+from urllib.parse import urlencode
+
+from google.cloud import storage
+from PIL import Image
+from playwright.sync_api import sync_playwright
+
+# Web render server configuration
+WEB_RENDER_DIR = Path(__file__).parent.parent.parent / "web_render"
+DEFAULT_WEB_PORT = 5173
+
+# Shared Chromium args for Playwright rendering
+CHROMIUM_ARGS = [
+  "--enable-webgl",
+  "--use-gl=angle",
+  "--ignore-gpu-blocklist",
+  "--remote-debugging-port=0",
+]
+
+
+# =============================================================================
+# Web Server Management
+# =============================================================================
+
+
+def wait_for_server(port: int, timeout: float = 30.0, interval: float = 0.5) -> bool:
+  """
+  Wait for the server to be ready by making HTTP requests.
+
+  Args:
+    port: Port to check
+    timeout: Maximum time to wait in seconds
+    interval: Time between checks in seconds
+
+  Returns:
+    True if server is ready, False if timeout
+  """
+  url = f"http://localhost:{port}/"
+  start_time = time.time()
+  attempts = 0
+
+  while time.time() - start_time < timeout:
+    attempts += 1
+    try:
+      req = urllib.request.Request(url, method="HEAD")
+      with urllib.request.urlopen(req, timeout=2):
+        return True
+    except (urllib.error.URLError, ConnectionRefusedError, TimeoutError, OSError):
+      time.sleep(interval)
+
+  print(f"   ⚠️  Server not responding after {attempts} attempts ({timeout}s)")
+  return False
+
+
+def start_web_server(web_dir: Path, port: int) -> subprocess.Popen:
+  """
+  Start the Vite dev server and wait for it to be ready.
+
+  Args:
+    web_dir: Directory containing the web app
+    port: Port to run on
+
+  Returns:
+    Popen process handle
+  """
+  print(f"🌐 Starting web server on port {port}...")
+  print(f"   Web dir: {web_dir}")
+
+  if not web_dir.exists():
+    raise RuntimeError(f"Web directory not found: {web_dir}")
+
+  process = subprocess.Popen(
+    ["bun", "run", "dev", "--port", str(port)],
+    cwd=web_dir,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+  )
+
+  # Give the process a moment to start
+  time.sleep(2)
+
+  # Check if process died immediately
+  if process.poll() is not None:
+    stdout = process.stdout.read().decode() if process.stdout else ""
+    stderr = process.stderr.read().decode() if process.stderr else ""
+    raise RuntimeError(
+      f"Web server failed to start.\nstdout: {stdout}\nstderr: {stderr}"
+    )
+
+  # Wait for server to be ready via HTTP
+  print("   ⏳ Waiting for server to be ready...")
+  if wait_for_server(port, timeout=30.0):
+    print(f"   ✅ Server ready on http://localhost:{port}")
+  else:
+    # Check if process died during wait
+    if process.poll() is not None:
+      stdout = process.stdout.read().decode() if process.stdout else ""
+      stderr = process.stderr.read().decode() if process.stderr else ""
+      raise RuntimeError(
+        f"Web server died during startup.\nstdout: {stdout}\nstderr: {stderr}"
+      )
+    print("   ⚠️  Server may not be fully ready, continuing anyway...")
+
+  return process
+
+
+# =============================================================================
+# Playwright Rendering
+# =============================================================================
+
+
+def render_url_to_bytes(
+  url: str,
+  width: int,
+  height: int,
+  wait_for_tiles: bool = True,
+  timeout_ms: int = 60000,
+) -> bytes:
+  """
+  Render a URL to PNG bytes using Playwright.
+
+  This is a shared utility for rendering web pages to images with consistent
+  Chromium configuration across all scripts.
+
+  Args:
+      url: The URL to render
+      width: Viewport width in pixels
+      height: Viewport height in pixels
+      wait_for_tiles: Whether to wait for window.TILES_LOADED === true
+      timeout_ms: Timeout for waiting for tiles in milliseconds
+
+  Returns:
+      PNG image bytes
+  """
+  with sync_playwright() as p:
+    browser = p.chromium.launch(
+      headless=True,
+      args=CHROMIUM_ARGS,
+    )
+
+    context = browser.new_context(
+      viewport={"width": width, "height": height},
+      device_scale_factor=1,
+    )
+    page = context.new_page()
+
+    page.goto(url, wait_until="networkidle")
+
+    if wait_for_tiles:
+      try:
+        page.wait_for_function("window.TILES_LOADED === true", timeout=timeout_ms)
+      except Exception:
+        print("      ⚠️  Timeout waiting for tiles, continuing anyway...")
+
+    screenshot_bytes = page.screenshot(type="png")
+
+    page.close()
+    context.close()
+    browser.close()
+
+  return screenshot_bytes
+
+
+def render_url_to_image(
+  url: str,
+  width: int,
+  height: int,
+  wait_for_tiles: bool = True,
+  timeout_ms: int = 60000,
+) -> Image.Image:
+  """
+  Render a URL to a PIL Image using Playwright.
+
+  This is a convenience wrapper around render_url_to_bytes.
+
+  Args:
+      url: The URL to render
+      width: Viewport width in pixels
+      height: Viewport height in pixels
+      wait_for_tiles: Whether to wait for window.TILES_LOADED === true
+      timeout_ms: Timeout for waiting for tiles in milliseconds
+
+  Returns:
+      PIL Image
+  """
+  screenshot_bytes = render_url_to_bytes(url, width, height, wait_for_tiles, timeout_ms)
+  return Image.open(BytesIO(screenshot_bytes))
+
+
+def build_tile_render_url(
+  port: int,
+  lat: float,
+  lng: float,
+  width_px: int,
+  height_px: int,
+  azimuth: float,
+  elevation: float,
+  view_height: float,
+) -> str:
+  """
+  Build the URL for rendering a tile at the given coordinates.
+
+  Args:
+      port: Web server port
+      lat: Latitude of the tile center
+      lng: Longitude of the tile center
+      width_px: Viewport width
+      height_px: Viewport height
+      azimuth: Camera azimuth in degrees
+      elevation: Camera elevation in degrees
+      view_height: View height in meters
+
+  Returns:
+      URL string for rendering
+  """
+  params = {
+    "export": "true",
+    "lat": lat,
+    "lon": lng,
+    "width": width_px,
+    "height": height_px,
+    "azimuth": azimuth,
+    "elevation": elevation,
+    "view_height": view_height,
+  }
+  query_string = urlencode(params)
+  return f"http://localhost:{port}/?{query_string}"
+
+
+# =============================================================================
+# Database Operations
+# =============================================================================
+
+
+def get_generation_config(conn: sqlite3.Connection) -> dict:
+  """Get the generation config from the metadata table."""
+  cursor = conn.cursor()
+  cursor.execute("SELECT value FROM metadata WHERE key = 'generation_config'")
+  row = cursor.fetchone()
+  if not row:
+    raise ValueError("generation_config not found in metadata")
+  return json.loads(row[0])
+
+
+def get_quadrant(conn: sqlite3.Connection, x: int, y: int) -> dict | None:
+  """
+  Get a quadrant by its (x, y) position.
+
+  Returns the quadrant's anchor coordinates and metadata.
+  """
+  cursor = conn.cursor()
+  cursor.execute(
+    """
+    SELECT lat, lng, tile_row, tile_col, quadrant_index, render, generation
+    FROM quadrants
+    WHERE quadrant_x = ? AND quadrant_y = ?
+    """,
+    (x, y),
+  )
+  row = cursor.fetchone()
+  if not row:
+    return None
+
+  return {
+    "lat": row[0],
+    "lng": row[1],
+    "tile_row": row[2],
+    "tile_col": row[3],
+    "quadrant_index": row[4],
+    "has_render": bool(row[5]),
+    "has_generation": bool(row[6]),
+    "render": row[5],
+    "generation": row[6],
+  }
+
+
+def get_quadrant_render(conn: sqlite3.Connection, x: int, y: int) -> bytes | None:
+  """Get the render bytes for a quadrant at position (x, y)."""
+  cursor = conn.cursor()
+  cursor.execute(
+    "SELECT render FROM quadrants WHERE quadrant_x = ? AND quadrant_y = ?",
+    (x, y),
+  )
+  row = cursor.fetchone()
+  return row[0] if row else None
+
+
+def get_quadrant_generation(conn: sqlite3.Connection, x: int, y: int) -> bytes | None:
+  """Get the generation bytes for a quadrant at position (x, y)."""
+  cursor = conn.cursor()
+  cursor.execute(
+    "SELECT generation FROM quadrants WHERE quadrant_x = ? AND quadrant_y = ?",
+    (x, y),
+  )
+  row = cursor.fetchone()
+  return row[0] if row else None
+
+
+def get_quadrant_dark_mode(conn: sqlite3.Connection, x: int, y: int) -> bytes | None:
+  """Get the dark_mode bytes for a quadrant at position (x, y)."""
+  cursor = conn.cursor()
+  # Check if dark_mode column exists first
+  cursor.execute("PRAGMA table_info(quadrants)")
+  columns = [row[1] for row in cursor.fetchall()]
+  if "dark_mode" not in columns:
+    return None
+
+  cursor.execute(
+    "SELECT dark_mode FROM quadrants WHERE quadrant_x = ? AND quadrant_y = ?",
+    (x, y),
+  )
+  row = cursor.fetchone()
+  return row[0] if row else None
+
+
+def check_all_quadrants_rendered(conn: sqlite3.Connection, x: int, y: int) -> bool:
+  """
+  Check if all 4 quadrants for the tile starting at (x, y) have been rendered.
+
+  The tile covers quadrants: (x, y), (x+1, y), (x, y+1), (x+1, y+1)
+  """
+  positions = [(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)]
+
+  for qx, qy in positions:
+    q = get_quadrant(conn, qx, qy)
+    if q is None or not q["has_render"]:
+      return False
+
+  return True
+
+
+def check_all_quadrants_generated(conn: sqlite3.Connection, x: int, y: int) -> bool:
+  """
+  Check if all 4 quadrants for the tile starting at (x, y) have generations.
+
+  The tile covers quadrants: (x, y), (x+1, y), (x, y+1), (x+1, y+1)
+  """
+  positions = [(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)]
+
+  for qx, qy in positions:
+    q = get_quadrant(conn, qx, qy)
+    if q is None or not q["has_generation"]:
+      return False
+
+  return True
+
+
+def save_quadrant_render(
+  conn: sqlite3.Connection, config: dict, x: int, y: int, png_bytes: bytes
+) -> bool:
+  """
+  Save render bytes for a quadrant at position (x, y).
+
+  Creates the quadrant if it doesn't exist.
+  Returns True if successful.
+  """
+  # Ensure the quadrant exists first
+  ensure_quadrant_exists(conn, config, x, y)
+
+  cursor = conn.cursor()
+  cursor.execute(
+    """
+    UPDATE quadrants
+    SET render = ?
+    WHERE quadrant_x = ? AND quadrant_y = ?
+    """,
+    (png_bytes, x, y),
+  )
+  conn.commit()
+  return cursor.rowcount > 0
+
+
+def save_quadrant_generation(
+  conn: sqlite3.Connection, config: dict, x: int, y: int, png_bytes: bytes
+) -> bool:
+  """
+  Save generation bytes for a quadrant at position (x, y).
+
+  Creates the quadrant if it doesn't exist.
+  Returns True if successful.
+  """
+  # Ensure the quadrant exists first
+  ensure_quadrant_exists(conn, config, x, y)
+
+  cursor = conn.cursor()
+  cursor.execute(
+    """
+    UPDATE quadrants
+    SET generation = ?
+    WHERE quadrant_x = ? AND quadrant_y = ?
+    """,
+    (png_bytes, x, y),
+  )
+  conn.commit()
+  return cursor.rowcount > 0
+
+
+def save_quadrant_water_mask(
+  conn: sqlite3.Connection, config: dict, x: int, y: int, png_bytes: bytes
+) -> bool:
+  """
+  Save water mask bytes for a quadrant at position (x, y).
+
+  Creates the quadrant if it doesn't exist.
+  Sets water_type to WATER_EDGE since this is a manually generated mask.
+  Returns True if successful.
+  """
+  # Ensure the quadrant exists first
+  ensure_quadrant_exists(conn, config, x, y)
+
+  cursor = conn.cursor()
+  cursor.execute(
+    """
+    UPDATE quadrants
+    SET water_mask = ?, water_type = 'WATER_EDGE'
+    WHERE quadrant_x = ? AND quadrant_y = ?
+    """,
+    (png_bytes, x, y),
+  )
+  conn.commit()
+  return cursor.rowcount > 0
+
+
+def save_quadrant_dark_mode(
+  conn: sqlite3.Connection, config: dict, x: int, y: int, png_bytes: bytes
+) -> bool:
+  """
+  Save dark mode (nighttime) bytes for a quadrant at position (x, y).
+
+  Creates the quadrant if it doesn't exist.
+  Returns True if successful.
+  """
+  # Ensure the quadrant exists first
+  ensure_quadrant_exists(conn, config, x, y)
+
+  cursor = conn.cursor()
+  cursor.execute(
+    """
+    UPDATE quadrants
+    SET dark_mode = ?
+    WHERE quadrant_x = ? AND quadrant_y = ?
+    """,
+    (png_bytes, x, y),
+  )
+  conn.commit()
+  return cursor.rowcount > 0
+
+
+def ensure_quadrant_exists(
+  conn: sqlite3.Connection, config: dict, x: int, y: int
+) -> dict:
+  """
+  Ensure a quadrant exists at position (x, y), creating it if necessary.
+
+  Returns the quadrant data.
+  """
+  cursor = conn.cursor()
+
+  # Check if quadrant already exists
+  cursor.execute(
+    """
+    SELECT lat, lng, tile_row, tile_col, quadrant_index, render, generation
+    FROM quadrants
+    WHERE quadrant_x = ? AND quadrant_y = ?
+    """,
+    (x, y),
+  )
+  row = cursor.fetchone()
+
+  if row:
+    return {
+      "lat": row[0],
+      "lng": row[1],
+      "tile_row": row[2],
+      "tile_col": row[3],
+      "quadrant_index": row[4],
+      "has_render": row[5] is not None,
+      "has_generation": row[6] is not None,
+    }
+
+  # Quadrant doesn't exist - create it
+  lat, lng = calculate_quadrant_lat_lng(config, x, y)
+
+  # Calculate tile_row, tile_col, and quadrant_index
+  # For a quadrant at (x, y), it could belong to multiple tiles due to overlap
+  # We'll use the tile where this quadrant is the TL (index 0)
+  tile_col = x
+  tile_row = y
+  quadrant_index = 0  # TL of its "primary" tile
+
+  cursor.execute(
+    """
+    INSERT INTO quadrants (quadrant_x, quadrant_y, lat, lng, tile_row, tile_col, quadrant_index)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    """,
+    (x, y, lat, lng, tile_row, tile_col, quadrant_index),
+  )
+  conn.commit()
+
+  print(f"   📝 Created quadrant ({x}, {y}) at {lat:.6f}, {lng:.6f}")
+
+  return {
+    "lat": lat,
+    "lng": lng,
+    "tile_row": tile_row,
+    "tile_col": tile_col,
+    "quadrant_index": quadrant_index,
+    "has_render": False,
+    "has_generation": False,
+  }
+
+
+# =============================================================================
+# Coordinate Calculations
+# =============================================================================
+
+
+def calculate_offset(
+  lat_center: float,
+  lon_center: float,
+  shift_x_px: float,
+  shift_y_px: float,
+  view_height_meters: float,
+  viewport_height_px: int,
+  azimuth_deg: float,
+  elevation_deg: float,
+) -> tuple[float, float]:
+  """
+  Calculate the new lat/lon center after shifting the view by shift_x_px and shift_y_px.
+  """
+  meters_per_pixel = view_height_meters / viewport_height_px
+
+  shift_right_meters = shift_x_px * meters_per_pixel
+  shift_up_meters = shift_y_px * meters_per_pixel
+
+  elev_rad = math.radians(elevation_deg)
+  sin_elev = math.sin(elev_rad)
+
+  if abs(sin_elev) < 1e-6:
+    raise ValueError(f"Elevation {elevation_deg} is too close to 0/180.")
+
+  delta_rot_x = shift_right_meters
+  delta_rot_y = -shift_up_meters / sin_elev
+
+  azimuth_rad = math.radians(azimuth_deg)
+  cos_a = math.cos(azimuth_rad)
+  sin_a = math.sin(azimuth_rad)
+
+  delta_east_meters = delta_rot_x * cos_a + delta_rot_y * sin_a
+  delta_north_meters = -delta_rot_x * sin_a + delta_rot_y * cos_a
+
+  delta_lat = delta_north_meters / 111111.0
+  delta_lon = delta_east_meters / (111111.0 * math.cos(math.radians(lat_center)))
+
+  return lat_center + delta_lat, lon_center + delta_lon
+
+
+def calculate_quadrant_lat_lng(
+  config: dict, quadrant_x: int, quadrant_y: int
+) -> tuple[float, float]:
+  """
+  Calculate the lat/lng anchor for a quadrant at position (quadrant_x, quadrant_y).
+
+  The anchor is the bottom-right corner of the quadrant.
+  For the TL quadrant (0, 0) of the seed tile, the anchor equals the seed lat/lng.
+  """
+  seed_lat = config["seed"]["lat"]
+  seed_lng = config["seed"]["lng"]
+  width_px = config["width_px"]
+  height_px = config["height_px"]
+  view_height_meters = config["view_height_meters"]
+  azimuth = config["camera_azimuth_degrees"]
+  elevation = config["camera_elevation_degrees"]
+  tile_step = config.get("tile_step", 0.5)
+
+  # Each quadrant step is half a tile (with tile_step=0.5, one tile step = one quadrant)
+  # But quadrant positions are in quadrant units, not tile units
+  # quadrant_x = tile_col + dx, quadrant_y = tile_row + dy
+  # So shift in pixels = quadrant position * (tile_size * tile_step)
+  quadrant_step_x_px = width_px * tile_step
+  quadrant_step_y_px = height_px * tile_step
+
+  shift_x_px = quadrant_x * quadrant_step_x_px
+  shift_y_px = -quadrant_y * quadrant_step_y_px  # Negative because y increases downward
+
+  return calculate_offset(
+    seed_lat,
+    seed_lng,
+    shift_x_px,
+    shift_y_px,
+    view_height_meters,
+    height_px,
+    azimuth,
+    elevation,
+  )
+
+
+def latlng_to_quadrant_coords(
+  config: dict, lat: float, lng: float
+) -> tuple[float, float]:
+  """
+  Convert a lat/lng position to quadrant (x, y) coordinates.
+
+  This is the inverse of calculate_quadrant_lat_lng. Given a geographic position,
+  returns the floating-point quadrant coordinates where that point would fall.
+
+  Args:
+    config: Generation config dictionary
+    lat: Latitude of the point
+    lng: Longitude of the point
+
+  Returns:
+    Tuple of (quadrant_x, quadrant_y) as floats
+  """
+  seed_lat = config["seed"]["lat"]
+  seed_lng = config["seed"]["lng"]
+  width_px = config["width_px"]
+  height_px = config["height_px"]
+  view_height_meters = config["view_height_meters"]
+  azimuth = config["camera_azimuth_degrees"]
+  elevation = config["camera_elevation_degrees"]
+  tile_step = config.get("tile_step", 0.5)
+
+  meters_per_pixel = view_height_meters / height_px
+
+  # Convert lat/lng difference to meters
+  delta_north_meters = (lat - seed_lat) * 111111.0
+  delta_east_meters = (lng - seed_lng) * 111111.0 * math.cos(math.radians(seed_lat))
+
+  # Inverse rotation by azimuth (rotate back to camera-aligned coordinates)
+  azimuth_rad = math.radians(azimuth)
+  cos_a = math.cos(azimuth_rad)
+  sin_a = math.sin(azimuth_rad)
+
+  # Inverse of the rotation in calculate_offset:
+  # delta_east = delta_rot_x * cos_a + delta_rot_y * sin_a
+  # delta_north = -delta_rot_x * sin_a + delta_rot_y * cos_a
+  # Solving for delta_rot_x, delta_rot_y:
+  delta_rot_x = delta_east_meters * cos_a - delta_north_meters * sin_a
+  delta_rot_y = delta_east_meters * sin_a + delta_north_meters * cos_a
+
+  # Convert back to pixel shifts
+  elev_rad = math.radians(elevation)
+  sin_elev = math.sin(elev_rad)
+
+  shift_right_meters = delta_rot_x
+  shift_up_meters = -delta_rot_y * sin_elev
+
+  shift_x_px = shift_right_meters / meters_per_pixel
+  shift_y_px = shift_up_meters / meters_per_pixel
+
+  # Convert pixel shifts to quadrant coordinates
+  quadrant_step_x_px = width_px * tile_step
+  quadrant_step_y_px = height_px * tile_step
+
+  quadrant_x = shift_x_px / quadrant_step_x_px
+  quadrant_y = -shift_y_px / quadrant_step_y_px  # Negative because y increases downward
+
+  return quadrant_x, quadrant_y
+
+
+# =============================================================================
+# Image Utilities
+# =============================================================================
+
+
+def image_to_png_bytes(img: Image.Image) -> bytes:
+  """Convert a PIL Image to PNG bytes."""
+  buffer = io.BytesIO()
+  img.save(buffer, format="PNG")
+  return buffer.getvalue()
+
+
+def png_bytes_to_image(png_bytes: bytes) -> Image.Image:
+  """Convert PNG bytes to a PIL Image."""
+  return Image.open(io.BytesIO(png_bytes))
+
+
+def split_tile_into_quadrants(
+  tile_image: Image.Image,
+) -> dict[tuple[int, int], Image.Image]:
+  """
+  Split a tile image into 4 quadrant images.
+
+  Returns a dict mapping (dx, dy) offset to the quadrant image:
+    (0, 0) = top-left
+    (1, 0) = top-right
+    (0, 1) = bottom-left
+    (1, 1) = bottom-right
+  """
+  width, height = tile_image.size
+  half_w = width // 2
+  half_h = height // 2
+
+  quadrants = {
+    (0, 0): tile_image.crop((0, 0, half_w, half_h)),
+    (1, 0): tile_image.crop((half_w, 0, width, half_h)),
+    (0, 1): tile_image.crop((0, half_h, half_w, height)),
+    (1, 1): tile_image.crop((half_w, half_h, width, height)),
+  }
+
+  return quadrants
+
+
+def stitch_quadrants_to_tile(
+  quadrants: dict[tuple[int, int], Image.Image],
+) -> Image.Image:
+  """
+  Stitch 4 quadrant images into a single tile image.
+
+  Args:
+    quadrants: Dict mapping (dx, dy) offset to the quadrant image:
+      (0, 0) = top-left
+      (1, 0) = top-right
+      (0, 1) = bottom-left
+      (1, 1) = bottom-right
+
+  Returns:
+    Combined tile image
+  """
+  # Get dimensions from one of the quadrants
+  sample_quad = next(iter(quadrants.values()))
+  quad_w, quad_h = sample_quad.size
+
+  # Create combined image
+  tile = Image.new("RGBA", (quad_w * 2, quad_h * 2))
+
+  # Place quadrants
+  placements = {
+    (0, 0): (0, 0),  # TL at top-left
+    (1, 0): (quad_w, 0),  # TR at top-right
+    (0, 1): (0, quad_h),  # BL at bottom-left
+    (1, 1): (quad_w, quad_h),  # BR at bottom-right
+  }
+
+  for offset, pos in placements.items():
+    if offset in quadrants:
+      tile.paste(quadrants[offset], pos)
+
+  return tile
+
+
+def get_neighboring_generated_quadrants(
+  conn: sqlite3.Connection, x: int, y: int
+) -> dict[str, bytes | None]:
+  """
+  Get generated quadrant images from neighboring tiles.
+
+  For a tile at (x, y), the neighbors are:
+  - left: quadrants at (x-1, y) and (x-1, y+1)
+  - above: quadrants at (x, y-1) and (x+1, y-1)
+  - above-left: quadrant at (x-1, y-1)
+
+  Returns dict with keys: 'left_top', 'left_bottom', 'above_left', 'above_right', 'corner'
+  Values are PNG bytes or None if not available.
+  """
+  neighbors = {
+    "left_top": get_quadrant_generation(conn, x - 1, y),
+    "left_bottom": get_quadrant_generation(conn, x - 1, y + 1),
+    "above_left": get_quadrant_generation(conn, x, y - 1),
+    "above_right": get_quadrant_generation(conn, x + 1, y - 1),
+    "corner": get_quadrant_generation(conn, x - 1, y - 1),
+  }
+  return neighbors
+
+
+def has_any_neighbor_generations(conn: sqlite3.Connection, x: int, y: int) -> bool:
+  """Check if there are any generated neighbor quadrants for a tile at (x, y)."""
+  neighbors = get_neighboring_generated_quadrants(conn, x, y)
+  return any(v is not None for v in neighbors.values())
+
+
+def upload_to_gcs(
+  local_path: Path, bucket_name: str, blob_name: str | None = None
+) -> str:
+  """
+  Upload a file to Google Cloud Storage and return its public URL.
+
+  Args:
+    local_path: Path to the local file to upload
+    bucket_name: Name of the GCS bucket
+    blob_name: Name for the blob in GCS (defaults to unique name based on filename)
+
+  Returns:
+    Public URL of the uploaded file
+  """
+  client = storage.Client()
+  bucket = client.bucket(bucket_name)
+
+  if blob_name is None:
+    unique_id = uuid.uuid4().hex[:8]
+    blob_name = f"infills/{local_path.stem}_{unique_id}{local_path.suffix}"
+
+  blob = bucket.blob(blob_name)
+
+  print(f"   📤 Uploading {local_path.name} to gs://{bucket_name}/{blob_name}...")
+  blob.upload_from_filename(str(local_path))
+  blob.make_public()
+
+  return blob.public_url
+
+
+# =============================================================================
+# Quadrant Helpers for Template Building
+# =============================================================================
+
+
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+  from isometric_nyc.generation.model_config import ModelConfig
+
+
+class QuadrantHelpers:
+  """
+  Helper class for quadrant operations during template building.
+
+  Encapsulates the helper functions used by both generate_omni and
+  generate_tile_nano_banana for validation and template construction.
+
+  Args:
+    conn: Database connection
+    config: Generation config dict
+    context_quadrants: Set of context quadrant coordinates
+    model_config: Optional model configuration
+    port: Web server port for rendering
+    status_callback: Optional callback(status, message) for progress updates
+    render_quadrant_fn: Function to render a quadrant on demand
+  """
+
+  def __init__(
+    self,
+    conn: sqlite3.Connection,
+    config: dict,
+    context_quadrants: set[tuple[int, int]] | None = None,
+    model_config: "ModelConfig | None" = None,
+    port: int = DEFAULT_WEB_PORT,
+    status_callback: Callable[[str, str], None] | None = None,
+    render_quadrant_fn: Callable[
+      [sqlite3.Connection, dict, int, int, int], bytes | None
+    ]
+    | None = None,
+  ):
+    self.conn = conn
+    self.config = config
+    self.context_set = context_quadrants or set()
+    self.model_config = model_config
+    self.port = port
+    self.status_callback = status_callback
+    self.render_quadrant_fn = render_quadrant_fn
+
+    # Determine if this is a dark mode model
+    self.is_dark_mode = model_config is not None and model_config.is_dark_mode
+
+  def _update_status(self, status: str, message: str = "") -> None:
+    """Update status via callback if available."""
+    if self.status_callback:
+      self.status_callback(status, message)
+
+  def has_generation(self, qx: int, qy: int) -> bool:
+    """
+    Check if a quadrant has the appropriate generation data.
+
+    For dark mode models: checks dark_mode column
+    For regular models: checks generation column, with render fallback for context
+    """
+    if self.is_dark_mode:
+      # Dark mode: only check dark_mode column
+      dark_mode = get_quadrant_dark_mode(self.conn, qx, qy)
+      return dark_mode is not None
+
+    # Regular: check generation column
+    gen = get_quadrant_generation(self.conn, qx, qy)
+    if gen is not None:
+      return True
+
+    # For context quadrants, treat as "generated" if they have a render
+    if (qx, qy) in self.context_set:
+      render = get_quadrant_render(self.conn, qx, qy)
+      return render is not None
+
+    return False
+
+  def get_render_with_fallback(self, qx: int, qy: int) -> Image.Image | None:
+    """
+    Get render for a quadrant, rendering on-demand if needed.
+    """
+    render_bytes = get_quadrant_render(self.conn, qx, qy)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+
+    # Need to render on demand
+    if self.render_quadrant_fn is None:
+      return None
+
+    self._update_status("rendering", f"Rendering quadrant ({qx}, {qy})...")
+    print(f"   📦 Rendering quadrant ({qx}, {qy})...")
+    render_bytes = self.render_quadrant_fn(self.conn, self.config, qx, qy, self.port)
+    if render_bytes:
+      return png_bytes_to_image(render_bytes)
+    return None
+
+  def get_generation(self, qx: int, qy: int) -> Image.Image | None:
+    """
+    Get generation for a quadrant, with render fallback for context quadrants.
+    """
+    gen_bytes = get_quadrant_generation(self.conn, qx, qy)
+    if gen_bytes:
+      return png_bytes_to_image(gen_bytes)
+
+    # For context quadrants, fall back to render
+    if (qx, qy) in self.context_set:
+      render_bytes = get_quadrant_render(self.conn, qx, qy)
+      if render_bytes:
+        print(f"   📋 Using render as context for ({qx}, {qy})")
+        return png_bytes_to_image(render_bytes)
+
+    return None
+
+  def get_input_for_template(self, qx: int, qy: int) -> Image.Image | None:
+    """
+    Get the input image for template construction.
+
+    For dark mode: use generation (pixel art) as input
+    For regular generation: use render (3D) as input
+    """
+    if self.is_dark_mode:
+      # Dark mode transforms pixel art - use generation as input
+      gen_bytes = get_quadrant_generation(self.conn, qx, qy)
+      if gen_bytes:
+        return png_bytes_to_image(gen_bytes)
+      return None
+    else:
+      # Regular generation uses 3D render as input
+      return self.get_render_with_fallback(qx, qy)

@@ -1,0 +1,105 @@
+{
+  "version": "1",
+  "metadata": {
+    "marimo_version": "0.18.0"
+  },
+  "cells": [
+    {
+      "id": "Hbol",
+      "code_hash": "61b1373e504c1b079a58c7f1bfce3e2f",
+      "outputs": [
+        {
+          "type": "error",
+          "ename": "interruption",
+          "evalue": "This cell was interrupted and needs to be re-run",
+          "traceback": []
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "MJUe",
+      "code_hash": "760a4460acc373e8a636e69723536886",
+      "outputs": [
+        {
+          "type": "error",
+          "ename": "interruption",
+          "evalue": "This cell was interrupted and needs to be re-run",
+          "traceback": []
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "vblA",
+      "code_hash": "06911439335d82bb8247234680815870",
+      "outputs": [
+        {
+          "type": "error",
+          "ename": "interruption",
+          "evalue": "This cell was interrupted and needs to be re-run",
+          "traceback": []
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "bkHC",
+      "code_hash": "514b37460a34c473190adbcd6c343139",
+      "outputs": [
+        {
+          "type": "error",
+          "ename": "interruption",
+          "evalue": "This cell was interrupted and needs to be re-run",
+          "traceback": []
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "lEQa",
+      "code_hash": "c97739a20ff2b5659866dc2d0e2de0ab",
+      "outputs": [
+        {
+          "type": "error",
+          "ename": "interruption",
+          "evalue": "This cell was interrupted and needs to be re-run",
+          "traceback": []
+        }
+      ],
+      "console": []
+    },
+    {
+      "id": "PKri",
+      "code_hash": "2bf328ea0563da5f8a1669e956266907",
+      "outputs": [],
+      "console": []
+    },
+    {
+      "id": "SFPL",
+      "code_hash": "c789bfe311c1813e0974b6b475a8941d",
+      "outputs": [
+        {
+          "type": "data",
+          "data": {
+            "text/plain": ""
+          }
+        }
+      ],
+      "console": [
+        {
+          "type": "stream",
+          "name": "stdout",
+          "text": "\ud83d\udd25 {\n  \"description\": \"The generated image successfully meets all criteria. It seamlessly integrates with the surrounding context, perfectly matching the isometric pixel art style, lighting, and color palette. All generated buildings are complete and coherent. Most importantly, the generated structures are an accurate and detailed representation of the 3D building data provided in the reference image, capturing the shapes, relative positions, and key features of the buildings.\",\n  \"status\": \"GOOD\",\n  \"issues\": [],\n  \"issues_description\": null\n}\n",
+          "mimetype": "text/plain"
+        }
+      ]
+    },
+    {
+      "id": "kToD",
+      "code_hash": null,
+      "outputs": [],
+      "console": []
+    }
+  ]
+}

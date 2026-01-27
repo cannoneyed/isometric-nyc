@@ -1,0 +1,10 @@
+{
+  "name": "Pier 5",
+  "lat": 40.693648,
+  "lon": -73.999926,
+  "camera_azimuth_degrees": -15,
+  "camera_elevation_degrees": -45,
+  "width_px": 1080,
+  "height_px": 1080,
+  "view_height_meters": 200
+}

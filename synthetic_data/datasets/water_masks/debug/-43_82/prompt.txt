@@ -1,0 +1,7 @@
+WATER MASK GENERATION TASK
+
+Generate a grayscale shader water + waves mask based on this isometric pixel art image. Render all landmasses as solid black (#000000) and all water areas as white (#FFFFFF). Apply a soft Gaussian blur specifically INTO the water from the shoreline boundary to create a smooth gradient transition between the land and water for use as a distance field. Remove all internal details, buildings, and textures, leaving only the blurred silhouette of the coast.
+
+ALL LAND MUST BE BLACK - the soft gaussian blur should start at the edge of the landmass/non-water areas and GO INTO THE WATER - it should be ~25px wide for the largest waves (e.g. hard edges/cliffs) and the blur should be ~5px wide for the smallest waves (e.g. docks, soft features).
+
+There should be no blur on the edges of bridges, buildings, or other feature ABOVE the water. Protected areas (e.g. harbors, lagoons) should be excluded from the blur.

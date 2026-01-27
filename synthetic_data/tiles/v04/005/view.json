@@ -1,0 +1,10 @@
+{
+  "name": "Grand Central Terminal",
+  "lat": 40.7527,
+  "lon": -73.9772,
+  "camera_azimuth_degrees": -15,
+  "camera_elevation_degrees": -45,
+  "width_px": 1080,
+  "height_px": 1080,
+  "view_height_meters": 200
+}
