@@ -12,9 +12,13 @@ Growing up, I played a lot of video games, and my favorites were world building 
 
 So here’s the idea: Make a giant isometric pixel-art map of New York City. And I’m going to use it as an excuse to push hard on the limits of the latest and greatest generative models and coding agents.
 
-## The Codebase (warning!)
+## The Codebase (⚠️ Warning! ⚠️)
 
 This codebase was built entirely via collaboration with coding agents such as [`gemini-cli`](https://geminicli.com/), [`Claude Code`](https://code.claude.com/docs/en/overview), and [`Cursor`](https://cursor.com/). As such, the code probably sucks. Honestly, I've looked at less than 1% of it, and I didn't write any of it by hand. YMMV, but because this was partly an exercise in pushing "vibe-engineering" to its limits I bought fully into the "hands-off" approach and the results speak for themselves.
+
+After the initial reception to [isometric.nyc](https://isometric.nyc), I decided to open source the repo, which means cleanign up and organizing a lot of cruft and temporary, long-forgotten tools. Some of this cruft is still around, and will likely never get around to getting cleaned up.
+
+I also used a lot of services to help bring this project to life, some of which are cheap, but aren't cheap to run at scale. I've tried to set things up so that they'll more or less just work, but it might be a bit rough until things mature more. That said, if you're ok with hacking around on this and finding all those rough edges, go ahead and get started.
 
 ## Getting Started
 
